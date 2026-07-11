@@ -1,0 +1,24 @@
+[package]
+name = "bilibili-music-player"
+version = "1.0.0"
+description = "A lightweight music player for Bilibili downloaded MP3 files"
+authors = ["Bilibili Music Lover"]
+edition = "2021"
+
+[build-dependencies]
+tauri-build = { version = "2", features = [] }
+
+[dependencies]
+tauri = { version = "2", features = ["protocol-asset", "devtools"] }
+tauri-plugin-dialog = "2"
+tauri-plugin-global-shortcut = "2"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+lofty = "0.21"
+walkdir = "2"
+tokio = { version = "1", features = ["full"] }
+regex = "1"
+
+[features]
+default = ["custom-protocol"]
+custom-protocol = ["tauri/custom-protocol"]
