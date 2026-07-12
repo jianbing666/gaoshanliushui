@@ -1,5 +1,6 @@
 /** @type {import('tailwindcss').Config} */
 export default {
+  darkMode: 'class', // 启用 class 策略，通过 dark: 类名控制深色模式
   content: [
     "./index.html",
     "./src/**/*.{vue,js,ts,jsx,tsx}",

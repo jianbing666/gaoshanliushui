@@ -18,3 +18,6 @@ export interface Song {
 
 /// 循环模式
 export type LoopMode = 'list' | 'single' | 'none'
+
+/// 主题模式
+export type ThemeMode = 'light' | 'dark' | 'system'

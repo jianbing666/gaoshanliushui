@@ -17,12 +17,12 @@ const emit = defineEmits<{
 
 <template>
   <div
-    class="flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors hover:bg-white/10"
-    :class="{ 'bg-white/10': player.currentIndex === index }"
+    class="flex items-center gap-3 px-3 py-2 rounded-lg cursor-pointer transition-colors hover:bg-gray-100/50 dark:hover:bg-white/10"
+    :class="{ 'bg-gray-100/50 dark:bg-white/10': player.currentIndex === index }"
     @click="emit('play', index)"
   >
     <!-- 序号或播放指示 -->
-    <span class="w-6 text-center text-sm text-gray-400 shrink-0">
+    <span class="w-6 text-center text-sm text-gray-500 dark:text-gray-400 shrink-0">
       <template v-if="player.currentIndex === index && player.isPlaying">
         <span class="flex items-center justify-center gap-0.5">
           <span class="w-0.5 h-3 bg-blue-400 animate-pulse"></span>
@@ -36,14 +36,14 @@ const emit = defineEmits<{
     </span>
 
     <!-- 封面缩略图 -->
-    <div class="w-10 h-10 rounded-md bg-gray-700 shrink-0 overflow-hidden">
+    <div class="w-10 h-10 rounded-md bg-gray-200 dark:bg-gray-700 shrink-0 overflow-hidden">
       <img
         v-if="song.cover_path"
         :src="player.getCoverUrl(song.cover_path)"
         :alt="song.title"
         class="w-full h-full object-cover"
       />
-      <div v-else class="w-full h-full flex items-center justify-center text-gray-500 text-xs">
+      <div v-else class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500 text-xs">
         ♪
       </div>
     </div>
@@ -52,14 +52,14 @@ const emit = defineEmits<{
     <div class="flex-1 min-w-0">
       <p
         class="text-sm truncate"
-        :class="player.currentIndex === index ? 'text-blue-400' : 'text-white'"
+        :class="player.currentIndex === index ? 'text-blue-500 dark:text-blue-400' : 'text-gray-900 dark:text-white'"
       >
         {{ song.title }}
       </p>
-      <p class="text-xs text-gray-400 truncate">{{ song.artist || '未知艺术家' }}</p>
+      <p class="text-xs text-gray-600 dark:text-gray-400 truncate">{{ song.artist || '未知艺术家' }}</p>
     </div>
 
     <!-- 时长 -->
-    <span class="text-xs text-gray-500 shrink-0">{{ formatTime(song.duration) }}</span>
+    <span class="text-xs text-gray-500 dark:text-gray-500 shrink-0">{{ formatTime(song.duration) }}</span>
   </div>
 </template>
