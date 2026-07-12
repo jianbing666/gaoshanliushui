@@ -225,19 +225,21 @@ export const usePlayerStore = defineStore('player', () => {
     const songs = activePlaylistSongs.value
     if (index >= 0 && index < songs.length) {
       const song = songs[index]
-      // 在全量 playlist 中找到对应的索引
       const globalIndex = playlist.value.findIndex((s) => s.id === song.id)
       if (globalIndex !== -1) {
-        playOnNext.value = true
+        isSwitchingSong.value = true
+        pendingPlay.value = true
         currentIndex.value = globalIndex
-        isPlaying.value = true
       }
     }
   }
 
   // ========== 播放状态 ==========
   const isPlaying = ref(false)
-  const playOnNext = ref(false)
+  // 切歌锁：防止旧音频 pause 事件污染 isPlaying
+  const isSwitchingSong = ref(false)
+  // 切歌后需要自动播放
+  const pendingPlay = ref(false)
   const currentTime = ref(0)
   const duration = ref(0)
   const volume = ref((saved.volume as number) ?? 0.8)
@@ -635,8 +637,9 @@ export const usePlayerStore = defineStore('player', () => {
   function next() {
     if (playlist.value.length === 0) return
 
-    // 记录当前是否在播放，切歌后保持播放状态
-    playOnNext.value = isPlaying.value
+    // 设置切歌锁和自动播放标记（只要触发切歌就默认需要自动播放）
+    isSwitchingSong.value = true
+    pendingPlay.value = true
 
     if (loopMode.value === 'single') {
       currentTime.value = 0
@@ -649,9 +652,7 @@ export const usePlayerStore = defineStore('player', () => {
     }
 
     if (loopMode.value === 'shuffle') {
-      // 记录当前歌曲到历史
       shuffleHistory.value.push(currentIndex.value)
-      // 限制历史长度
       if (shuffleHistory.value.length > 100) {
         shuffleHistory.value.shift()
       }
@@ -669,8 +670,9 @@ export const usePlayerStore = defineStore('player', () => {
   function prev() {
     if (playlist.value.length === 0) return
 
-    // 记录当前是否在播放，切歌后保持播放状态
-    playOnNext.value = isPlaying.value
+    // 设置切歌锁和自动播放标记
+    isSwitchingSong.value = true
+    pendingPlay.value = true
 
     if (loopMode.value === 'single') {
       currentTime.value = 0
@@ -683,12 +685,10 @@ export const usePlayerStore = defineStore('player', () => {
     }
 
     if (loopMode.value === 'shuffle') {
-      // 从历史记录中取上一首
       if (shuffleHistory.value.length > 0) {
         const prevIndex = shuffleHistory.value.pop()!
         currentIndex.value = prevIndex
       } else {
-        // 没有历史，随机一首
         currentIndex.value = getRandomIndex()
       }
       return
@@ -703,13 +703,12 @@ export const usePlayerStore = defineStore('player', () => {
 
   function playByIndex(index: number) {
     if (index >= 0 && index < playlist.value.length) {
-      // 如果是随机模式，手动选歌也要加入历史
       if (loopMode.value === 'shuffle' && currentIndex.value >= 0) {
         shuffleHistory.value.push(currentIndex.value)
       }
-      playOnNext.value = true
+      isSwitchingSong.value = true
+      pendingPlay.value = true
       currentIndex.value = index
-      isPlaying.value = true
     }
   }
 
@@ -818,7 +817,8 @@ export const usePlayerStore = defineStore('player', () => {
     playlist,
     currentIndex,
     isPlaying,
-    playOnNext,
+    isSwitchingSong,
+    pendingPlay,
     currentTime,
     duration,
     volume,

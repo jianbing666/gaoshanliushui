@@ -1,3 +1,7 @@
+<script lang="ts">
+export default { inheritAttrs: false }
+</script>
+
 <script setup lang="ts">
 import { usePlayerStore } from '@/stores/playerStore'
 import { audioPlayer } from '@/utils/audioPlayer'
@@ -18,6 +22,8 @@ import MusicIcon from '@/components/icons/MusicIcon.vue'
 
 const player = usePlayerStore()
 const volumeIconRef = ref<HTMLElement | null>(null)
+// autoplay 被拦截时的轻提示
+const showAutoplayTip = ref(false)
 
 // 使用音量滑块 composable
 const {
@@ -69,36 +75,44 @@ function toggleMute() {
   player.toggleMute()
 }
 
-// 监听当前歌曲变化，加载新音频
+// 监听当前歌曲变化：仅加载音频，播放由 canplay 回调处理
 watch(
   () => player.currentSong,
   async (song) => {
     if (song) {
+      // 切歌时立即重置进度，避免显示上一首歌的残留时间
+      player.currentTime = 0
+
       try {
-        const needPlay = player.playOnNext || player.isPlaying
         await audioPlayer.load(song.file_path)
+        // load 完成（canplay 已触发），设置音量和 Media Session
         audioPlayer.setVolume(player.volume)
         audioPlayer.setMediaSession(
           song.title,
           song.artist,
           song.cover_path ? player.getCoverUrl(song.cover_path) : undefined
         )
-        if (needPlay) {
-          await audioPlayer.play()
-        }
       } catch (e) {
-        console.error('加载歌曲失败:', e)
+        console.error('[ControlBar] 加载歌曲失败:', e)
+        player.isSwitchingSong = false
+        player.pendingPlay = false
       }
     }
   }
 )
 
-// 监听播放状态变化
+// 监听播放状态变化（用户手动点击播放/暂停按钮）
 watch(
   () => player.isPlaying,
   (playing) => {
     if (playing) {
-      audioPlayer.play()
+      // 如果有 pendingPlay（autoplay 被拦截后用户点击播放），重新尝试播放
+      if (player.pendingPlay && player.currentSong) {
+        player.pendingPlay = false
+        audioPlayer.play()
+      } else {
+        audioPlayer.play()
+      }
     } else {
       audioPlayer.pause()
     }
@@ -114,6 +128,14 @@ watch(
 )
 
 onMounted(async () => {
+  // 绑定 store 状态访问器，让 canplay 回调能读写 pendingPlay / isSwitchingSong / isPlaying
+  audioPlayer.bindStoreAccessors({
+    getPendingPlay: () => player.pendingPlay,
+    setPendingPlay: (v: boolean) => { player.pendingPlay = v },
+    setIsSwitchingSong: (v: boolean) => { player.isSwitchingSong = v },
+    setIsPlaying: (v: boolean) => { player.isPlaying = v },
+  })
+
   // 绑定音频播放器事件
   audioPlayer.onTimeUpdate((time) => {
     player.currentTime = time
@@ -124,16 +146,28 @@ onMounted(async () => {
   })
 
   audioPlayer.onEnded(() => {
-    // 播放结束，自动下一首（playOnNext 已在 next() 中设置）
+    // 播放结束，自动下一首
     player.next()
   })
 
   audioPlayer.onPlay(() => {
-    player.isPlaying = true
+    // 非切歌状态下由 play 事件更新 isPlaying
+    if (!player.isSwitchingSong) {
+      player.isPlaying = true
+    }
   })
 
   audioPlayer.onPause(() => {
+    // 切歌锁：正在切歌时，旧音频的 pause 事件不应修改 isPlaying
+    if (player.isSwitchingSong) {
+      return
+    }
     player.isPlaying = false
+  })
+
+  audioPlayer.onAutoplayBlocked(() => {
+    showAutoplayTip.value = true
+    setTimeout(() => { showAutoplayTip.value = false }, 3000)
   })
 
   // 设置媒体键处理
@@ -170,7 +204,8 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <footer class="h-24 bg-white/80 dark:bg-gray-800/50 backdrop-blur-xl border-t border-gray-200/50 dark:border-gray-700/50 flex items-center px-6 gap-6 shrink-0">
+  <div v-bind="$attrs">
+    <footer class="h-24 bg-white/80 dark:bg-gray-800/50 backdrop-blur-xl border-t border-gray-200/50 dark:border-gray-700/50 flex items-center px-6 gap-6 shrink-0">
     <!-- 左：当前歌曲信息 -->
     <div class="flex items-center gap-4 w-36 shrink-0">
       <div class="w-14 h-14 rounded-lg bg-gray-200 dark:bg-gray-700 shrink-0 overflow-hidden">
@@ -284,6 +319,23 @@ onUnmounted(() => {
     </div>
   </footer>
 
+  <!-- autoplay 被拦截时的轻提示 -->
+  <Transition
+    enter-active-class="transition duration-200 ease-out"
+    enter-from-class="opacity-0 translate-y-2"
+    enter-to-class="opacity-100 translate-y-0"
+    leave-active-class="transition duration-150 ease-in"
+    leave-from-class="opacity-100 translate-y-0"
+    leave-to-class="opacity-0 translate-y-2"
+  >
+    <div
+      v-if="showAutoplayTip"
+      class="fixed bottom-28 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-gray-900/90 dark:bg-white/90 text-white dark:text-gray-900 text-sm rounded-lg shadow-lg pointer-events-none"
+    >
+      点击播放按钮继续播放
+    </div>
+  </Transition>
+
   <!-- 悬浮音量控制条 -->
   <VolumeSlider
     :visible="showVolumeSlider"
@@ -292,4 +344,5 @@ onUnmounted(() => {
     @mouse-enter="handleMouseEnterSlider"
     @mouse-leave="handleMouseLeaveSlider"
   />
+  </div>
 </template>

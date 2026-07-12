@@ -3,6 +3,11 @@ import { convertFileSrc } from '@tauri-apps/api/core'
 /**
  * 音频播放器封装类
  * 使用 Tauri convertFileSrc 将本地路径转为 asset:// 协议 URL
+ *
+ * 核心设计：播放触发点在 canplay 回调中，而非 watch(currentSong) 中。
+ * - load() 只负责加载音频，等待 canplay 后 resolve
+ * - canplay 回调中判断 pendingPlay，如果为 true 则调用 play()
+ * - play() 的 reject 被 .catch() 捕获，处理 autoplay 拦截
  */
 export class AudioPlayer {
   private audio: HTMLAudioElement
@@ -11,6 +16,13 @@ export class AudioPlayer {
   private _onDurationChange: ((duration: number) => void) | null = null
   private _onPlay: (() => void) | null = null
   private _onPause: (() => void) | null = null
+  private _onAutoplayBlocked: (() => void) | null = null
+
+  // pendingPlay 的外部访问器：由 ControlBar 设置，canplay 回调中读取
+  private _getPendingPlay: (() => boolean) | null = null
+  private _setPendingPlay: ((v: boolean) => void) | null = null
+  private _setIsSwitchingSong: ((v: boolean) => void) | null = null
+  private _setIsPlaying: ((v: boolean) => void) | null = null
 
   constructor() {
     this.audio = new Audio()
@@ -52,29 +64,67 @@ export class AudioPlayer {
     })
   }
 
-  /** 加载本地音频文件（通过 Tauri convertFileSrc 转换路径） */
+  /**
+   * 绑定 store 状态的访问器，让 canplay 回调能读写 pendingPlay / isSwitchingSong / isPlaying
+   */
+  bindStoreAccessors(accessors: {
+    getPendingPlay: () => boolean
+    setPendingPlay: (v: boolean) => void
+    setIsSwitchingSong: (v: boolean) => void
+    setIsPlaying: (v: boolean) => void
+  }) {
+    this._getPendingPlay = accessors.getPendingPlay
+    this._setPendingPlay = accessors.setPendingPlay
+    this._setIsSwitchingSong = accessors.setIsSwitchingSong
+    this._setIsPlaying = accessors.setIsPlaying
+  }
+
+  /** 加载本地音频文件（通过 Tauri convertFileSrc 转换路径），等待 canplay 后 resolve */
   async load(filePath: string): Promise<void> {
     return new Promise((resolve, reject) => {
       const url = convertFileSrc(filePath)
-      
-      const handleLoaded = () => {
+
+      const handleCanPlay = () => {
         cleanup()
+        // canplay 时重置 currentTime 为 0，避免进度残留
+        this.audio.currentTime = 0
+
+        // canplay 回调中：如果 pendingPlay 为 true，触发播放
+        if (this._getPendingPlay?.()) {
+          this.audio.play()
+            .then(() => {
+              // 播放成功：清除 pendingPlay，更新状态
+              this._setPendingPlay?.(false)
+              this._setIsSwitchingSong?.(false)
+              this._setIsPlaying?.(true)
+            })
+            .catch((err: Error) => {
+              // autoplay 被拦截（NotAllowedError）：保留 pendingPlay，等用户点击
+              console.warn(`[AudioPlayer] play() rejected: ${err.message}`)
+              this._setIsSwitchingSong?.(false)
+              this._onAutoplayBlocked?.()
+            })
+        } else {
+          // 不需要自动播放，仅加载
+          this._setIsSwitchingSong?.(false)
+        }
+
         resolve()
       }
-      
+
       const handleError = () => {
         cleanup()
         reject(new Error('音频加载失败'))
       }
-      
+
       const cleanup = () => {
-        this.audio.removeEventListener('loadedmetadata', handleLoaded)
+        this.audio.removeEventListener('canplay', handleCanPlay)
         this.audio.removeEventListener('error', handleError)
       }
-      
-      this.audio.addEventListener('loadedmetadata', handleLoaded)
+
+      this.audio.addEventListener('canplay', handleCanPlay)
       this.audio.addEventListener('error', handleError)
-      
+
       this.audio.src = url
       this.audio.load()
     })
@@ -85,7 +135,7 @@ export class AudioPlayer {
     try {
       await this.audio.play()
     } catch (e) {
-      console.error('播放失败:', e)
+      console.error('[AudioPlayer] 播放失败:', e)
     }
   }
 
@@ -143,6 +193,10 @@ export class AudioPlayer {
     this._onPause = callback
   }
 
+  onAutoplayBlocked(callback: () => void) {
+    this._onAutoplayBlocked = callback
+  }
+
   /** 设置 Media Session 元数据（支持系统媒体键） */
   setMediaSession(title: string, artist: string, coverUrl?: string) {
     if (!('mediaSession' in navigator)) return
@@ -166,6 +220,7 @@ export class AudioPlayer {
     this._onDurationChange = null
     this._onPlay = null
     this._onPause = null
+    this._onAutoplayBlocked = null
   }
 }
 
