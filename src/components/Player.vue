@@ -1,6 +1,5 @@
 <script setup lang="ts">
 import { usePlayerStore } from '@/stores/playerStore'
-import { formatTime } from '@/utils/formatTime'
 
 const player = usePlayerStore()
 </script>

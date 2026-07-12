@@ -7,33 +7,30 @@ import { ref, onMounted, onUnmounted } from 'vue'
 export function useVolumeSlider() {
   const showVolumeSlider = ref(false)
   const volumeSliderPosition = ref({ x: 0, y: 0 })
+  const isMouseOverSlider = ref(false)
   let hideTimeout: number | null = null
-  let isMouseOverSlider = ref(false)
 
   /**
    * 显示音量滑块
    * 计算位置并显示悬浮控制条
    */
   function showVolumeControl(element: HTMLElement) {
-    // 清除隐藏定时器
     if (hideTimeout !== null) {
       clearTimeout(hideTimeout)
       hideTimeout = null
     }
 
-    // 计算元素相对于视口的位置
     const rect = element.getBoundingClientRect()
     volumeSliderPosition.value = {
-      x: rect.left + rect.width / 2, // 水平居中
-      y: rect.top - 10, // 向上偏移 10px
+      x: rect.left + rect.width / 2,
+      y: rect.top - 8,
     }
 
     showVolumeSlider.value = true
   }
 
   /**
-   * 隐藏音量滑块（带延迟）
-   * 使用 300ms 延迟防止鼠标移动过程中闪烁
+   * 隐藏音量滑块（带延迟，防止鼠标移动过程中闪烁）
    */
   function hideVolumeControl() {
     if (hideTimeout !== null) {
@@ -41,12 +38,11 @@ export function useVolumeSlider() {
     }
 
     hideTimeout = window.setTimeout(() => {
-      // 只有当鼠标不在滑块上时才隐藏
       if (!isMouseOverSlider.value) {
         showVolumeSlider.value = false
       }
       hideTimeout = null
-    }, 300)
+    }, 200)
   }
 
   /**
@@ -66,7 +62,6 @@ export function useVolumeSlider() {
    */
   function handleMouseEnterSlider() {
     isMouseOverSlider.value = true
-    // 清除隐藏定时器
     if (hideTimeout !== null) {
       clearTimeout(hideTimeout)
       hideTimeout = null
@@ -82,7 +77,7 @@ export function useVolumeSlider() {
   }
 
   /**
-   * 处理窗口缩放时的坐标重算
+   * 处理窗口缩放
    */
   function handleResize() {
     if (showVolumeSlider.value) {

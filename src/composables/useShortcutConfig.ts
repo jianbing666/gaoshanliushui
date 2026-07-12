@@ -1,5 +1,4 @@
-import { ref, onMounted, onUnmounted } from 'vue'
-import { invoke } from '@tauri-apps/api/core'
+import { ref, onMounted } from 'vue'
 
 /**
  * 快捷键配置接口

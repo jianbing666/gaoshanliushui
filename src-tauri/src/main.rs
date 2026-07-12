@@ -7,6 +7,7 @@ mod models;
 use commands::scan_folder;
 use commands::toggle_mini_mode;
 use commands::global_shortcut;
+use commands::scan_images;
 
 fn main() {
     tauri::Builder::default()
@@ -22,6 +23,7 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             scan_folder::scan_music_folder,
             toggle_mini_mode::toggle_mini_mode,
+            scan_images::scan_image_folder,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

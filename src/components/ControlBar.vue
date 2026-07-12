@@ -6,6 +6,14 @@ import { watch, onMounted, onUnmounted, ref } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useVolumeSlider } from '@/composables/useVolumeSlider'
 import VolumeSlider from '@/components/VolumeSlider.vue'
+import RepeatIcon from '@/components/icons/RepeatIcon.vue'
+import RepeatOneIcon from '@/components/icons/RepeatOneIcon.vue'
+import ArrowRightIcon from '@/components/icons/ArrowRightIcon.vue'
+import SkipBackIcon from '@/components/icons/SkipBackIcon.vue'
+import SkipForwardIcon from '@/components/icons/SkipForwardIcon.vue'
+import PlayIcon from '@/components/icons/PlayIcon.vue'
+import PauseIcon from '@/components/icons/PauseIcon.vue'
+import MusicIcon from '@/components/icons/MusicIcon.vue'
 
 const player = usePlayerStore()
 const volumeIconRef = ref<HTMLElement | null>(null)
@@ -52,7 +60,7 @@ function handleVolumeIconLeave() {
 
 // 切换静音
 function toggleMute() {
-  player.volume = player.volume > 0 ? 0 : 0.8
+  player.toggleMute()
 }
 
 // 监听当前歌曲变化，加载新音频
@@ -135,7 +143,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <footer class="h-24 bg-white/80 dark:bg-gray-800/50 backdrop-blur-xl border-t border-gray-200/50 dark:border-gray-700/50 flex items-center px-6 gap-6">
+  <footer class="h-24 bg-white/80 dark:bg-gray-800/50 backdrop-blur-xl border-t border-gray-200/50 dark:border-gray-700/50 flex items-center px-6 gap-6 shrink-0">
     <!-- 左：当前歌曲信息 -->
     <div class="flex items-center gap-4 w-72 shrink-0">
       <div class="w-14 h-14 rounded-lg bg-gray-200 dark:bg-gray-700 shrink-0 overflow-hidden">
@@ -145,7 +153,9 @@ onUnmounted(() => {
           :alt="player.currentSong?.title"
           class="w-full h-full object-cover"
         />
-        <div v-else class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500">♪</div>
+        <div v-else class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500">
+          <MusicIcon :size="20" />
+        </div>
       </div>
       <div class="min-w-0" v-if="player.currentSong">
         <p class="text-gray-900 dark:text-white text-sm font-medium truncate">{{ player.currentSong.title }}</p>
@@ -157,26 +167,29 @@ onUnmounted(() => {
     </div>
 
     <!-- 中：播放控制 -->
-    <div class="flex-1 flex flex-col items-center gap-1">
+    <div class="flex-1 flex flex-col items-center gap-2">
       <!-- 控制按钮 -->
       <div class="flex items-center gap-4">
         <!-- 循环模式 -->
         <button
-          class="text-gray-600 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white text-sm transition-colors px-2 py-1 rounded"
+          class="p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+          :class="{ 'text-blue-500 dark:text-blue-400': player.loopMode !== 'none' }"
           :title="loopModeLabels[player.loopMode]"
           @click="player.toggleLoopMode"
         >
-          {{ loopModeLabels[player.loopMode] }}
+          <RepeatOneIcon v-if="player.loopMode === 'single'" :size="18" />
+          <RepeatIcon v-else-if="player.loopMode === 'list'" :size="18" />
+          <ArrowRightIcon v-else :size="18" />
         </button>
 
         <!-- 上一首 -->
         <button
-          class="text-gray-900 dark:text-white text-xl hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
-          :class="{ 'opacity-30': !player.hasPrev }"
+          class="p-2 rounded-lg text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+          :class="{ 'opacity-30 cursor-not-allowed': !player.hasPrev }"
           :disabled="!player.hasPrev"
           @click="player.prev"
         >
-          ⏮
+          <SkipBackIcon :size="20" />
         </button>
 
         <!-- 播放/暂停 -->
@@ -184,17 +197,18 @@ onUnmounted(() => {
           class="w-12 h-12 bg-gray-900 dark:bg-white rounded-full flex items-center justify-center hover:bg-gray-700 dark:hover:bg-gray-200 transition-colors shadow-lg"
           @click="player.togglePlay"
         >
-          <span class="text-white dark:text-gray-900 text-xl">{{ player.isPlaying ? '⏸' : '▶' }}</span>
+          <PauseIcon v-if="player.isPlaying" :size="20" class="text-white dark:text-gray-900" />
+          <PlayIcon v-else :size="20" class="text-white dark:text-gray-900 ml-0.5" />
         </button>
 
         <!-- 下一首 -->
         <button
-          class="text-gray-900 dark:text-white text-xl hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
-          :class="{ 'opacity-30': !player.hasNext }"
+          class="p-2 rounded-lg text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+          :class="{ 'opacity-30 cursor-not-allowed': !player.hasNext }"
           :disabled="!player.hasNext"
           @click="player.next"
         >
-          ⏭
+          <SkipForwardIcon :size="20" />
         </button>
       </div>
 

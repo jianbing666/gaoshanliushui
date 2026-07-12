@@ -4,9 +4,13 @@
 
 /* 自定义样式 */
 :root {
-  font-family: Inter, Avenir, Helvetica, Arial, sans-serif;
-  font-size: 16px;
-  line-height: 24px;
+  /* 字体变量 - 由 JavaScript 动态设置 */
+  --font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-size: 14px;
+
+  font-family: var(--font-family);
+  font-size: var(--font-size);
+  line-height: 1.6;
   font-weight: 400;
 
   color: #1a1a1a;
@@ -16,6 +20,12 @@
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+/* 应用自定义字体 */
+body {
+  font-family: var(--font-family);
+  font-size: var(--font-size);
 }
 
 /* 深色模式变量 */

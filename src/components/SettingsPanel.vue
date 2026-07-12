@@ -1,25 +1,34 @@
 <script setup lang="ts">
 import { usePlayerStore } from '@/stores/playerStore'
 import { open } from '@tauri-apps/plugin-dialog'
-import type { ThemeMode } from '@/types/song'
+import type { ThemeMode, BackgroundSettings } from '@/types/song'
 import { useShortcutConfig } from '@/composables/useShortcutConfig'
 import { useAutoLaunch } from '@/composables/useAutoLaunch'
 import { ref, onMounted, onUnmounted } from 'vue'
 
 const player = usePlayerStore()
 
-// 主题选项配置
 const themeOptions: { value: ThemeMode; label: string }[] = [
   { value: 'light', label: '浅色' },
   { value: 'dark', label: '深色' },
   { value: 'system', label: '跟随系统' },
 ]
 
-// 使用快捷键配置 composable
+const backgroundModeOptions: { value: BackgroundSettings['mode']; label: string }[] = [
+  { value: 'none', label: '无' },
+  { value: 'image', label: '单图' },
+  { value: 'folder', label: '轮播' },
+]
+
+const fitOptions: { value: BackgroundSettings['fit']; label: string }[] = [
+  { value: 'cover', label: '填充' },
+  { value: 'contain', label: '完整' },
+  { value: 'repeat', label: '平铺' },
+]
+
 const {
   shortcuts,
   editingShortcut,
-  loading: shortcutLoading,
   startEdit,
   cancelEdit,
   updateShortcut,
@@ -28,14 +37,14 @@ const {
   handleKeyDown,
 } = useShortcutConfig()
 
-// 使用开机自启 composable
 const {
   autoLaunch,
   loading: autoLaunchLoading,
   toggleAutoLaunch,
 } = useAutoLaunch()
 
-// 选择数据目录
+const isScanningBgFolder = ref(false)
+
 async function selectFolder() {
   try {
     const selected = await open({
@@ -51,12 +60,10 @@ async function selectFolder() {
   }
 }
 
-// 切换主题
 function handleThemeChange(theme: ThemeMode) {
   player.setTheme(theme)
 }
 
-// 处理快捷键编辑的键盘事件
 function handleShortcutKeyDown(event: KeyboardEvent, shortcutId: string) {
   const newShortcut = handleKeyDown(event)
   if (newShortcut) {
@@ -64,11 +71,62 @@ function handleShortcutKeyDown(event: KeyboardEvent, shortcutId: string) {
   }
 }
 
-// 处理点击外部取消编辑
-function handleClickOutside(event: MouseEvent) {
+function handleClickOutside(_event: MouseEvent) {
   if (editingShortcut.value) {
     cancelEdit()
   }
+}
+
+function handleBackgroundModeChange(mode: BackgroundSettings['mode']) {
+  player.setBackgroundMode(mode)
+}
+
+async function selectBackgroundImage() {
+  try {
+    const selected = await open({
+      multiple: false,
+      title: '选择背景图片',
+      filters: [
+        {
+          name: '图片',
+          extensions: ['jpg', 'jpeg', 'png', 'gif', 'bmp', 'webp'],
+        },
+      ],
+    })
+    if (selected) {
+      player.setBackgroundImage(selected as string)
+    }
+  } catch (error) {
+    console.error('选择背景图片失败:', error)
+  }
+}
+
+async function selectBackgroundFolder() {
+  try {
+    const selected = await open({
+      directory: true,
+      multiple: false,
+      title: '选择背景图片文件夹',
+    })
+    if (selected) {
+      isScanningBgFolder.value = true
+      try {
+        await player.scanBackgroundFolder(selected)
+      } finally {
+        isScanningBgFolder.value = false
+      }
+    }
+  } catch (error) {
+    console.error('选择背景文件夹失败:', error)
+  }
+}
+
+function updateBgSetting<K extends keyof BackgroundSettings>(key: K, value: BackgroundSettings[K]) {
+  player.updateBackgroundSetting(key, value)
+}
+
+function handleMinimizeToTrayToggle() {
+  player.setMinimizeToTray(!player.minimizeToTray)
 }
 
 onMounted(() => {
@@ -81,92 +139,239 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <aside class="w-[300px] bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl border-l border-gray-200/50 dark:border-gray-700/50 rounded-l-2xl shadow-lg flex flex-col h-full">
-    <!-- 设置面板标题 -->
-    <div class="p-4 border-b border-gray-200/50 dark:border-gray-700/50">
-      <h2 class="text-gray-900 dark:text-white text-lg font-semibold">设置</h2>
+  <aside class="w-[320px] bg-white/90 dark:bg-gray-900/90 backdrop-blur-2xl border-l border-gray-200/60 dark:border-gray-700/60 shadow-2xl flex flex-col h-full">
+    <div class="px-5 py-4 border-b border-gray-200/50 dark:border-gray-700/50 flex items-center gap-3">
+      <div>
+        <h2 class="text-gray-900 dark:text-white text-base font-semibold">设置</h2>
+        <p class="text-gray-500 dark:text-gray-400 text-xs">个性化你的播放器</p>
+      </div>
     </div>
 
-    <!-- 设置内容区域 -->
-    <div class="flex-1 overflow-y-auto p-4 space-y-6">
-      <!-- 主题切换模块 -->
+    <div class="flex-1 overflow-y-auto px-5 py-4 space-y-6">
+      <!-- 外观 -->
       <div class="space-y-3">
-        <h3 class="text-gray-700 dark:text-gray-300 text-sm font-medium">主题</h3>
+        <h3 class="text-gray-900 dark:text-white text-sm font-semibold">外观</h3>
 
-        <!-- Segmented Control 样式的主题选择 -->
-        <div class="bg-gray-100/50 dark:bg-gray-800/50 rounded-lg p-1 flex gap-1">
-          <button
-            v-for="option in themeOptions"
-            :key="option.value"
-            class="flex-1 px-3 py-2 rounded-md text-sm transition-all duration-200"
-            :class="
-              player.theme === option.value
-                ? 'bg-blue-600 text-white shadow-md'
-                : 'text-gray-600 dark:text-gray-400 hover:bg-gray-200/50 dark:hover:bg-gray-700/50 hover:scale-105'
-            "
-            @click="handleThemeChange(option.value)"
-          >
-            {{ option.label }}
-          </button>
+        <div class="space-y-4">
+          <div>
+            <p class="text-gray-500 dark:text-gray-400 text-xs mb-2">主题模式</p>
+            <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-1 flex gap-1">
+              <button
+                v-for="option in themeOptions"
+                :key="option.value"
+                class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                :class="
+                  player.theme === option.value
+                    ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                "
+                @click="handleThemeChange(option.value)"
+              >
+                {{ option.label }}
+              </button>
+            </div>
+          </div>
         </div>
       </div>
 
-      <!-- 数据目录选择模块 -->
+      <!-- 背景图片 -->
       <div class="space-y-3">
-        <h3 class="text-gray-700 dark:text-gray-300 text-sm font-medium">数据目录</h3>
+        <h3 class="text-gray-900 dark:text-white text-sm font-semibold">背景图片</h3>
 
-        <!-- 当前目录路径显示 -->
-        <div class="space-y-2">
-          <div class="bg-gray-100/50 dark:bg-gray-800/50 rounded-lg p-3">
-            <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">当前音乐文件夹</p>
-            <input
-              type="text"
-              readonly
-              :value="player.folderPath || '未选择'"
-              class="w-full bg-transparent text-gray-900 dark:text-white text-sm border-none outline-none focus:ring-2 focus:ring-blue-500 rounded px-2 py-1 transition-all"
-            />
+        <div class="space-y-4">
+          <div class="flex items-center gap-1 bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-1">
+            <button
+              v-for="option in backgroundModeOptions"
+              :key="option.value"
+              class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+              :class="
+                player.background.mode === option.value
+                  ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+              "
+              @click="handleBackgroundModeChange(option.value)"
+            >
+              {{ option.label }}
+            </button>
           </div>
 
-          <!-- 选择文件夹按钮 -->
+          <div v-if="player.background.mode === 'image'" class="space-y-2">
+            <button
+              class="w-full px-4 py-2.5 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-all flex items-center justify-center gap-2"
+              @click="selectBackgroundImage"
+            >
+              {{ player.background.imagePath ? '更换图片' : '选择图片' }}
+            </button>
+            <p v-if="player.background.imagePath" class="text-xs text-gray-500 dark:text-gray-400 truncate px-1">
+              {{ player.background.imagePath }}
+            </p>
+          </div>
+
+          <div v-if="player.background.mode === 'folder'" class="space-y-3">
+            <button
+              class="w-full px-4 py-2.5 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-all flex items-center justify-center gap-2"
+              :disabled="isScanningBgFolder"
+              @click="selectBackgroundFolder"
+            >
+              {{ isScanningBgFolder ? '扫描中...' : player.background.folderPath ? '更换文件夹' : '选择文件夹' }}
+            </button>
+            <p v-if="player.background.folderPath" class="text-xs text-gray-500 dark:text-gray-400 truncate px-1">
+              {{ player.background.folderPath }}
+            </p>
+            <p v-if="player.background.imageList?.length" class="text-xs text-gray-500 dark:text-gray-400 px-1">
+              共 {{ player.background.imageList.length }} 张图片
+            </p>
+
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <p class="text-xs text-gray-500 dark:text-gray-400">轮播间隔</p>
+                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ player.background.interval }} 秒</span>
+              </div>
+              <input
+                type="range"
+                class="w-full"
+                :min="5"
+                :max="300"
+                :value="player.background.interval"
+                step="5"
+                @input="(e) => updateBgSetting('interval', parseInt((e.target as HTMLInputElement).value))"
+              />
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button
+                class="flex-1 px-3 py-2 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-md text-xs text-gray-600 dark:text-gray-300 transition-colors"
+                @click="player.prevBackgroundImage()"
+                :disabled="!player.background.imageList?.length"
+              >
+                上一张
+              </button>
+              <button
+                class="flex-1 px-3 py-2 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-md text-xs text-gray-600 dark:text-gray-300 transition-colors"
+                @click="player.nextBackgroundImage()"
+                :disabled="!player.background.imageList?.length"
+              >
+                下一张
+              </button>
+            </div>
+          </div>
+
+          <div v-if="player.background.mode !== 'none'" class="space-y-4 pt-2 border-t border-gray-200/50 dark:border-gray-700/50">
+            <div>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">填充方式</p>
+              <div class="flex gap-1">
+                <button
+                  v-for="opt in fitOptions"
+                  :key="opt.value"
+                  class="flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-all bg-gray-100/60 dark:bg-gray-800/60"
+                  :class="
+                    player.background.fit === opt.value
+                      ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900'
+                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200/60 dark:hover:bg-gray-700/60'
+                  "
+                  @click="updateBgSetting('fit', opt.value)"
+                >
+                  {{ opt.label }}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <p class="text-xs text-gray-500 dark:text-gray-400">遮罩透明度</p>
+                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ Math.round(player.background.overlay * 100) }}%</span>
+              </div>
+              <input
+                type="range"
+                class="w-full"
+                :min="0"
+                :max="100"
+                :value="player.background.overlay * 100"
+                @input="(e) => updateBgSetting('overlay', parseInt((e.target as HTMLInputElement).value) / 100)"
+              />
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <p class="text-xs text-gray-500 dark:text-gray-400">模糊程度</p>
+                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ player.background.blur }}px</span>
+              </div>
+              <input
+                type="range"
+                class="w-full"
+                :min="0"
+                :max="30"
+                :value="player.background.blur"
+                @input="(e) => updateBgSetting('blur', parseInt((e.target as HTMLInputElement).value))"
+              />
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <p class="text-xs text-gray-500 dark:text-gray-400">缩放比例</p>
+                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ player.background.scale }}%</span>
+              </div>
+              <input
+                type="range"
+                class="w-full"
+                :min="50"
+                :max="200"
+                :value="player.background.scale"
+                @input="(e) => updateBgSetting('scale', parseInt((e.target as HTMLInputElement).value))"
+              />
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 音乐库 -->
+      <div class="space-y-3">
+        <h3 class="text-gray-900 dark:text-white text-sm font-semibold">音乐库</h3>
+
+        <div class="space-y-3">
+          <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
+            <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">当前文件夹</p>
+            <p class="text-sm text-gray-900 dark:text-white truncate">
+              {{ player.folderPath || '未选择' }}
+            </p>
+          </div>
           <button
-            class="w-full px-4 py-2.5 bg-blue-600 hover:bg-blue-700 text-white rounded-lg text-sm transition-all duration-200 flex items-center justify-center hover:scale-105 shadow-md"
+            class="w-full px-4 py-2.5 bg-gray-900 dark:bg-white hover:bg-gray-700 dark:hover:bg-gray-200 text-white dark:text-gray-900 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2"
             :disabled="player.isLoading"
             @click="selectFolder"
           >
-            <span v-if="player.isLoading" class="animate-spin">⟳</span>
-            {{ player.isLoading ? '扫描中...' : '选择文件夹' }}
+            {{ player.isLoading ? '扫描中...' : '更改目录' }}
           </button>
+          <p class="text-xs text-gray-500 dark:text-gray-400 text-center">
+            共 {{ player.playlist.length }} 首歌曲
+          </p>
         </div>
       </div>
 
-      <!-- 快捷键配置模块 -->
+      <!-- 快捷键 -->
       <div class="space-y-3">
         <div class="flex items-center justify-between">
-          <h3 class="text-gray-700 dark:text-gray-300 text-sm font-medium">快捷键</h3>
+          <h3 class="text-gray-900 dark:text-white text-sm font-semibold">快捷键</h3>
           <button
-            class="text-xs text-blue-600 dark:text-blue-400 hover:text-blue-700 dark:hover:text-blue-300 transition-colors"
+            class="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
             @click="resetAllToDefault"
           >
-            恢复全部默认
+            恢复默认
           </button>
         </div>
 
-        <!-- 快捷键列表 -->
         <div class="space-y-2">
           <div
             v-for="shortcut in shortcuts"
             :key="shortcut.id"
-            class="bg-gray-100/50 dark:bg-gray-800/50 rounded-lg p-3 space-y-2"
+            class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3 space-y-2"
           >
-            <div class="flex items-center justify-between">
-              <div>
-                <p class="text-gray-900 dark:text-white text-sm font-medium">{{ shortcut.action }}</p>
-                <p class="text-gray-500 dark:text-gray-400 text-xs">{{ shortcut.description }}</p>
-              </div>
+            <div>
+              <p class="text-gray-900 dark:text-white text-sm font-medium">{{ shortcut.action }}</p>
+              <p class="text-gray-500 dark:text-gray-400 text-xs">{{ shortcut.description }}</p>
             </div>
 
             <div class="flex items-center gap-2">
-              <!-- 快捷键显示/编辑 -->
               <div
                 v-if="editingShortcut === shortcut.id"
                 class="flex-1 relative"
@@ -176,15 +381,14 @@ onUnmounted(() => {
                   type="text"
                   readonly
                   value="按下新快捷键..."
-                  class="w-full bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm border-2 border-blue-500 rounded px-3 py-2 focus:outline-none"
+                  class="w-full bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:border-gray-900 dark:focus:border-white"
                   @keydown="handleShortcutKeyDown($event, shortcut.id)"
                   @blur="cancelEdit"
-                  ref="editInput"
                 />
               </div>
               <div v-else class="flex-1 flex items-center gap-2">
                 <div
-                  class="flex-1 bg-white dark:bg-gray-700 rounded px-3 py-2 text-gray-900 dark:text-white text-sm cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors"
+                  class="flex-1 bg-white dark:bg-gray-700 rounded-md px-3 py-2 text-gray-900 dark:text-white text-sm font-mono cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors text-center"
                   @click.stop="startEdit(shortcut.id)"
                 >
                   {{ shortcut.currentShortcut }}
@@ -203,38 +407,56 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- 开机自启模块 -->
+      <!-- 系统 -->
       <div class="space-y-3">
-        <h3 class="text-gray-700 dark:text-gray-300 text-sm font-medium">开机自启</h3>
+        <h3 class="text-gray-900 dark:text-white text-sm font-semibold">系统</h3>
 
-        <div class="bg-gray-100/50 dark:bg-gray-800/50 rounded-lg p-3">
-          <div class="flex items-center justify-between">
-            <div>
-              <p class="text-gray-900 dark:text-white text-sm font-medium">自动启动</p>
-              <p class="text-gray-500 dark:text-gray-400 text-xs">开机时自动启动应用</p>
+        <div class="space-y-2">
+          <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-gray-900 dark:text-white text-sm font-medium">开机自启</p>
+                <p class="text-gray-500 dark:text-gray-400 text-xs">开机时自动启动应用</p>
+              </div>
+              <button
+                class="relative w-10 h-5 rounded-full transition-colors shrink-0"
+                :class="autoLaunch ? 'bg-gray-900 dark:bg-white' : 'bg-gray-300 dark:bg-gray-600'"
+                :disabled="autoLaunchLoading"
+                @click="toggleAutoLaunch"
+              >
+                <div
+                  class="absolute top-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform"
+                  :class="autoLaunch ? 'translate-x-5' : 'translate-x-0.5'"
+                ></div>
+              </button>
             </div>
+          </div>
 
-            <!-- 开关按钮 -->
-            <button
-              class="relative w-12 h-6 rounded-full transition-colors duration-200"
-              :class="autoLaunch ? 'bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
-              :disabled="autoLaunchLoading"
-              @click="toggleAutoLaunch"
-            >
-              <div
-                class="absolute top-1 w-4 h-4 bg-white rounded-full shadow transition-transform duration-200"
-                :class="autoLaunch ? 'translate-x-7' : 'translate-x-1'"
-              ></div>
-            </button>
+          <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-gray-900 dark:text-white text-sm font-medium">关闭到托盘</p>
+                <p class="text-gray-500 dark:text-gray-400 text-xs">点击关闭按钮后最小化到托盘</p>
+              </div>
+              <button
+                class="relative w-10 h-5 rounded-full transition-colors shrink-0"
+                :class="player.minimizeToTray ? 'bg-gray-900 dark:bg-white' : 'bg-gray-300 dark:bg-gray-600'"
+                @click="handleMinimizeToTrayToggle"
+              >
+                <div
+                  class="absolute top-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform"
+                  :class="player.minimizeToTray ? 'translate-x-5' : 'translate-x-0.5'"
+                ></div>
+              </button>
+            </div>
           </div>
         </div>
       </div>
 
-      <!-- 应用信息 -->
-      <div class="mt-6 pt-4 border-t border-gray-200/50 dark:border-gray-700/50">
-        <div class="text-center space-y-2">
-          <p class="text-gray-600 dark:text-gray-400 text-xs">Bilibili Music Player</p>
-          <p class="text-gray-500 dark:text-gray-500 text-xs">基于 Tauri v2 + Vue 3</p>
+      <div class="pt-2 pb-4">
+        <div class="text-center space-y-1">
+          <p class="text-gray-500 dark:text-gray-400 text-xs font-medium">Bilibili Music Player</p>
+          <p class="text-gray-400 dark:text-gray-500 text-xs">基于 Tauri v2 + Vue 3</p>
         </div>
       </div>
     </div>
@@ -242,9 +464,8 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
-/* 自定义动画和过渡效果 */
 button {
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  transition: all 0.15s ease;
 }
 
 input:focus {

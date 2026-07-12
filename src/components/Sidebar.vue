@@ -1,8 +1,19 @@
 <script setup lang="ts">
 import { usePlayerStore } from '@/stores/playerStore'
-import SongItem from './SongItem.vue'
+import DefaultPlaylist from '@/components/DefaultPlaylist.vue'
+import CustomPlaylist from '@/components/CustomPlaylist.vue'
+import SongItem from '@/components/SongItem.vue'
+import PlusIcon from '@/components/icons/PlusIcon.vue'
 
 const player = usePlayerStore()
+
+// 创建新歌单
+function handleCreatePlaylist() {
+  const name = window.prompt('请输入歌单名称：')
+  if (name && name.trim()) {
+    player.createPlaylist(name.trim())
+  }
+}
 </script>
 
 <template>
@@ -10,29 +21,68 @@ const player = usePlayerStore()
     <!-- 标题栏 -->
     <div class="p-4 border-b border-gray-200/50 dark:border-gray-700/50">
       <div class="flex items-center justify-between">
-        <h2 class="text-gray-900 dark:text-white text-lg font-semibold">播放列表</h2>
-        <span class="text-gray-500 dark:text-gray-400 text-xs">{{ player.playlist.length }} 首</span>
+        <h2 class="text-gray-900 dark:text-white text-lg font-semibold">歌单</h2>
+        <!-- 新建歌单按钮 -->
+        <button
+          class="p-1.5 rounded-md hover:bg-gray-200/50 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+          title="新建歌单"
+          @click="handleCreatePlaylist"
+        >
+          <PlusIcon :size="16" />
+        </button>
       </div>
     </div>
 
-    <!-- 歌曲列表 -->
-    <div class="flex-1 overflow-y-auto p-2 space-y-0.5">
-      <template v-if="player.playlist.length > 0">
-        <SongItem
-          v-for="(song, index) in player.playlist"
-          :key="song.id"
-          :song="song"
-          :index="index"
-          @play="player.playByIndex"
-        />
-      </template>
-      <template v-else>
-        <div class="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-400 text-sm">
-          <span class="text-4xl mb-3">🎵</span>
-          <p>请在右侧设置面板</p>
-          <p>选择音乐文件夹</p>
+    <!-- 歌单列表区域 -->
+    <div class="flex-1 overflow-y-auto flex flex-col min-h-0">
+      <!-- 默认歌单区（固定顶部） -->
+      <div class="p-2 space-y-0.5 border-b border-gray-200/50 dark:border-gray-700/50">
+        <DefaultPlaylist />
+      </div>
+
+      <!-- 我的歌单区 -->
+      <div class="p-2 space-y-0.5 flex-1 min-h-0 overflow-y-auto">
+        <div class="px-3 py-1.5 text-xs text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wider">
+          我的歌单
         </div>
-      </template>
+        <template v-if="player.customPlaylists.length > 0">
+          <CustomPlaylist
+            v-for="pl in player.customPlaylists"
+            :key="pl.id"
+            :playlist="pl"
+          />
+        </template>
+        <div v-else class="px-3 py-2 text-xs text-gray-400 dark:text-gray-500">
+          点击右上角 + 创建歌单
+        </div>
+      </div>
+    </div>
+
+    <!-- 歌曲列表区域（仅显示当前选中歌单的歌曲） -->
+    <div class="border-t border-gray-200/50 dark:border-gray-700/50 flex-1 min-h-0 overflow-hidden flex flex-col">
+      <div class="px-4 py-2 border-b border-gray-200/50 dark:border-gray-700/50 flex items-center justify-between">
+        <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">
+          {{ player.playlists.find(p => p.id === player.activePlaylistId)?.name || '歌曲列表' }}
+        </h3>
+        <span class="text-xs text-gray-400 dark:text-gray-500">
+          {{ player.activePlaylistSongs.length }} 首
+        </span>
+      </div>
+      <div class="flex-1 overflow-y-auto p-2 space-y-0.5">
+        <template v-if="player.activePlaylistSongs.length > 0">
+          <SongItem
+            v-for="(song, index) in player.activePlaylistSongs"
+            :key="song.id"
+            :song="song"
+            :index="index"
+            @play="player.playFromActivePlaylist"
+          />
+        </template>
+        <div v-else class="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-400 text-sm">
+          <span class="text-3xl mb-2">♪</span>
+          <p>暂无歌曲</p>
+        </div>
+      </div>
     </div>
   </aside>
 </template>
