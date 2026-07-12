@@ -4,6 +4,13 @@ import type { Song, LoopMode, ThemeMode, Playlist, BackgroundSettings, FontSetti
 import { invoke } from '@tauri-apps/api/core'
 import { convertFileSrc } from '@tauri-apps/api/core'
 
+export interface ContextMenuState {
+  visible: boolean
+  song: Song | null
+  x: number
+  y: number
+}
+
 // LocalStorage 持久化辅助
 const STORAGE_KEY = 'bilibili-music-player-settings'
 const MUSIC_LIBRARY_PATH_KEY = 'musicLibraryPath'
@@ -221,6 +228,7 @@ export const usePlayerStore = defineStore('player', () => {
       // 在全量 playlist 中找到对应的索引
       const globalIndex = playlist.value.findIndex((s) => s.id === song.id)
       if (globalIndex !== -1) {
+        playOnNext.value = true
         currentIndex.value = globalIndex
         isPlaying.value = true
       }
@@ -229,6 +237,7 @@ export const usePlayerStore = defineStore('player', () => {
 
   // ========== 播放状态 ==========
   const isPlaying = ref(false)
+  const playOnNext = ref(false)
   const currentTime = ref(0)
   const duration = ref(0)
   const volume = ref((saved.volume as number) ?? 0.8)
@@ -238,6 +247,7 @@ export const usePlayerStore = defineStore('player', () => {
   // ========== 加载状态 ==========
   const isLoading = ref(false)
   const folderPath = ref((saved.folderPath as string) ?? '')
+  const metadataSource = ref<'auto' | 'filename'>((saved.metadataSource as 'auto' | 'filename') ?? 'auto')
 
   // ========== 主题设置 ==========
   const theme = ref<ThemeMode>((saved.theme as ThemeMode) ?? 'system')
@@ -386,6 +396,61 @@ export const usePlayerStore = defineStore('player', () => {
     minimizeToTray.value = value
   }
 
+  // ========== 全局右键菜单状态（单例模式） ==========
+  const contextMenu = ref<ContextMenuState>({
+    visible: false,
+    song: null,
+    x: 0,
+    y: 0,
+  })
+
+  function openContextMenu(song: Song, x: number, y: number) {
+    contextMenu.value = {
+      visible: true,
+      song,
+      x,
+      y,
+    }
+  }
+
+  function closeContextMenu() {
+    contextMenu.value.visible = false
+  }
+
+  // ========== 创建歌单弹窗 ==========
+  const showCreatePlaylistModal = ref(false)
+
+  function openCreatePlaylistModal() {
+    showCreatePlaylistModal.value = true
+  }
+
+  function closeCreatePlaylistModal() {
+    showCreatePlaylistModal.value = false
+  }
+
+  // ========== 搜索功能 ==========
+  const searchQuery = ref('')
+
+  const filteredCustomPlaylists = computed(() => {
+    const query = searchQuery.value.trim().toLowerCase()
+    if (!query) return customPlaylists.value
+    return customPlaylists.value.filter((pl) =>
+      pl.name.toLowerCase().includes(query)
+    )
+  })
+
+  // 搜索当前歌单中的歌曲
+  const filteredActivePlaylistSongs = computed(() => {
+    const query = searchQuery.value.trim().toLowerCase()
+    const songs = activePlaylistSongs.value
+    if (!query) return songs
+    return songs.filter((song) =>
+      song.title.toLowerCase().includes(query) ||
+      song.artist.toLowerCase().includes(query) ||
+      song.album.toLowerCase().includes(query)
+    )
+  })
+
   // ========== 字体设置 ==========
   const defaultFontSettings: FontSettings = {
     family: 'system',
@@ -464,28 +529,56 @@ export const usePlayerStore = defineStore('player', () => {
   const hasNext = computed(() => {
     if (loopMode.value === 'single') return true
     if (loopMode.value === 'list') return true
+    if (loopMode.value === 'shuffle') return playlist.value.length > 0
     return currentIndex.value < playlist.value.length - 1
   })
   const hasPrev = computed(() => {
     if (loopMode.value === 'single') return true
     if (loopMode.value === 'list') return true
+    if (loopMode.value === 'shuffle') return playlist.value.length > 0
     return currentIndex.value > 0
   })
 
   // ========== 文件夹扫描 ==========
-  async function scanMusicFolder(path: string) {
+  async function scanMusicFolder(path: string, forceRefresh = false) {
     isLoading.value = true
     try {
-      const songs = await invoke<Song[]>('scan_music_folder', { folderPath: path })
+      const metaSrc = metadataSource.value === 'filename' ? 'filename' : 'auto'
+      const songs = await invoke<Song[]>('scan_music_folder', {
+        folderPath: path,
+        metadataSource: metaSrc,
+        forceRefresh,
+      })
+      
+      // 记录当前播放的歌曲 ID，用于扫描后恢复播放位置
+      const currentSongId = currentSong.value?.id
+      
+      // 完全替换播放列表
       playlist.value = songs
       folderPath.value = path
+      
       // 成功扫描后保存路径到 localStorage
       setMusicLibraryPath(path)
+      
       // 同步默认歌单
       syncDefaultPlaylist(songs)
-      if (songs.length > 0 && currentIndex.value === -1) {
+      
+      // 尝试恢复当前播放位置（通过歌曲 ID 匹配）
+      if (currentSongId) {
+        const newIndex = songs.findIndex((s) => s.id === currentSongId)
+        if (newIndex !== -1) {
+          currentIndex.value = newIndex
+        } else if (songs.length > 0) {
+          currentIndex.value = 0
+        } else {
+          currentIndex.value = -1
+        }
+      } else if (songs.length > 0 && currentIndex.value === -1) {
         currentIndex.value = 0
+      } else if (songs.length === 0) {
+        currentIndex.value = -1
       }
+      
       return songs
     } catch (error) {
       console.error('扫描文件夹失败:', error)
@@ -494,6 +587,22 @@ export const usePlayerStore = defineStore('player', () => {
       throw error
     } finally {
       isLoading.value = false
+    }
+  }
+
+  // 设置元数据来源
+  function setMetadataSource(source: 'auto' | 'filename') {
+    metadataSource.value = source
+    // 如果已有音乐库，重新扫描
+    if (folderPath.value) {
+      scanMusicFolder(folderPath.value, true)
+    }
+  }
+
+  // 强制刷新元数据
+  async function refreshMetadata() {
+    if (folderPath.value) {
+      await scanMusicFolder(folderPath.value, true)
     }
   }
 
@@ -510,19 +619,43 @@ export const usePlayerStore = defineStore('player', () => {
     isPlaying.value = !isPlaying.value
   }
 
+  // 随机播放历史记录（用于上一首功能）
+  const shuffleHistory = ref<number[]>([])
+
+  function getRandomIndex(): number {
+    if (playlist.value.length <= 1) return 0
+    let newIndex = Math.floor(Math.random() * playlist.value.length)
+    // 避免连续播放同一首
+    if (newIndex === currentIndex.value && playlist.value.length > 1) {
+      newIndex = (newIndex + 1) % playlist.value.length
+    }
+    return newIndex
+  }
+
   function next() {
     if (playlist.value.length === 0) return
 
+    // 记录当前是否在播放，切歌后保持播放状态
+    playOnNext.value = isPlaying.value
+
     if (loopMode.value === 'single') {
-      // 单曲循环：从头重播当前歌曲
       currentTime.value = 0
-      // 通过临时切换 currentIndex 触发 watch 重新加载
       const idx = currentIndex.value
       currentIndex.value = -1
       nextTick(() => {
         currentIndex.value = idx
-        isPlaying.value = true
       })
+      return
+    }
+
+    if (loopMode.value === 'shuffle') {
+      // 记录当前歌曲到历史
+      shuffleHistory.value.push(currentIndex.value)
+      // 限制历史长度
+      if (shuffleHistory.value.length > 100) {
+        shuffleHistory.value.shift()
+      }
+      currentIndex.value = getRandomIndex()
       return
     }
 
@@ -536,15 +669,28 @@ export const usePlayerStore = defineStore('player', () => {
   function prev() {
     if (playlist.value.length === 0) return
 
+    // 记录当前是否在播放，切歌后保持播放状态
+    playOnNext.value = isPlaying.value
+
     if (loopMode.value === 'single') {
-      // 单曲循环：从头重播当前歌曲
       currentTime.value = 0
       const idx = currentIndex.value
       currentIndex.value = -1
       nextTick(() => {
         currentIndex.value = idx
-        isPlaying.value = true
       })
+      return
+    }
+
+    if (loopMode.value === 'shuffle') {
+      // 从历史记录中取上一首
+      if (shuffleHistory.value.length > 0) {
+        const prevIndex = shuffleHistory.value.pop()!
+        currentIndex.value = prevIndex
+      } else {
+        // 没有历史，随机一首
+        currentIndex.value = getRandomIndex()
+      }
       return
     }
 
@@ -557,6 +703,11 @@ export const usePlayerStore = defineStore('player', () => {
 
   function playByIndex(index: number) {
     if (index >= 0 && index < playlist.value.length) {
+      // 如果是随机模式，手动选歌也要加入历史
+      if (loopMode.value === 'shuffle' && currentIndex.value >= 0) {
+        shuffleHistory.value.push(currentIndex.value)
+      }
+      playOnNext.value = true
       currentIndex.value = index
       isPlaying.value = true
     }
@@ -564,9 +715,13 @@ export const usePlayerStore = defineStore('player', () => {
 
   // ========== 循环模式 ==========
   function toggleLoopMode() {
-    const modes: LoopMode[] = ['list', 'single', 'none']
+    const modes: LoopMode[] = ['list', 'single', 'shuffle', 'none']
     const currentIdx = modes.indexOf(loopMode.value)
     loopMode.value = modes[(currentIdx + 1) % modes.length]
+    // 切换到随机模式时清空历史
+    if (loopMode.value === 'shuffle') {
+      shuffleHistory.value = []
+    }
   }
 
   // ========== 静音控制 ==========
@@ -591,9 +746,9 @@ export const usePlayerStore = defineStore('player', () => {
 
   // ========== 持久化：自动保存设置到 localStorage ==========
   watch(
-    [volume, loopMode, folderPath, theme, background, minimizeToTray, fontSettings],
-    ([vol, mode, path, th, bg, mt, fs]) => {
-      saveSettings({ volume: vol, loopMode: mode, folderPath: path, theme: th, background: bg, minimizeToTray: mt, fontSettings: fs })
+    [volume, loopMode, folderPath, theme, background, minimizeToTray, fontSettings, metadataSource],
+    ([vol, mode, path, th, bg, mt, fs, metaSrc]) => {
+      saveSettings({ volume: vol, loopMode: mode, folderPath: path, theme: th, background: bg, minimizeToTray: mt, fontSettings: fs, metadataSource: metaSrc })
     },
     { deep: true }
   )
@@ -617,7 +772,12 @@ export const usePlayerStore = defineStore('player', () => {
 
     isLoading.value = true
     try {
-      const songs = await invoke<Song[]>('scan_music_folder', { folderPath: savedPath })
+      const metaSrc = metadataSource.value === 'filename' ? 'filename' : 'auto'
+      const songs = await invoke<Song[]>('scan_music_folder', {
+        folderPath: savedPath,
+        metadataSource: metaSrc,
+        forceRefresh: false,
+      })
       playlist.value = songs
       folderPath.value = savedPath
       // 同步默认歌单
@@ -658,18 +818,32 @@ export const usePlayerStore = defineStore('player', () => {
     playlist,
     currentIndex,
     isPlaying,
+    playOnNext,
     currentTime,
     duration,
     volume,
     loopMode,
     isLoading,
     folderPath,
+    metadataSource,
     theme,
     // 背景设置
     background,
     currentBackgroundUrl,
     // 托盘设置
     minimizeToTray,
+    // 全局右键菜单
+    contextMenu,
+    openContextMenu,
+    closeContextMenu,
+    // 创建歌单弹窗
+    showCreatePlaylistModal,
+    openCreatePlaylistModal,
+    closeCreatePlaylistModal,
+    // 搜索
+    searchQuery,
+    filteredCustomPlaylists,
+    filteredActivePlaylistSongs,
     // 歌单状态
     playlists,
     activePlaylistId,
@@ -683,6 +857,8 @@ export const usePlayerStore = defineStore('player', () => {
     // 方法
     scanMusicFolder,
     autoLoadMusicLibrary,
+    setMetadataSource,
+    refreshMetadata,
     play,
     pause,
     togglePlay,

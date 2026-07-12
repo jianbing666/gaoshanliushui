@@ -7,22 +7,26 @@ import PlusIcon from '@/components/icons/PlusIcon.vue'
 
 const player = usePlayerStore()
 
-// 创建新歌单
 function handleCreatePlaylist() {
-  const name = window.prompt('请输入歌单名称：')
-  if (name && name.trim()) {
-    player.createPlaylist(name.trim())
+  player.openCreatePlaylistModal()
+}
+
+function playFilteredSong(index: number) {
+  const song = player.filteredActivePlaylistSongs[index]
+  if (song) {
+    const globalIndex = player.playlist.findIndex((s) => s.id === song.id)
+    if (globalIndex !== -1) {
+      player.playByIndex(globalIndex)
+    }
   }
 }
 </script>
 
 <template>
   <aside class="w-72 bg-white/80 dark:bg-gray-800/50 backdrop-blur-xl border-r border-gray-200/50 dark:border-gray-700/50 flex flex-col h-full">
-    <!-- 标题栏 -->
     <div class="p-4 border-b border-gray-200/50 dark:border-gray-700/50">
       <div class="flex items-center justify-between">
         <h2 class="text-gray-900 dark:text-white text-lg font-semibold">歌单</h2>
-        <!-- 新建歌单按钮 -->
         <button
           class="p-1.5 rounded-md hover:bg-gray-200/50 dark:hover:bg-white/10 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
           title="新建歌单"
@@ -33,14 +37,11 @@ function handleCreatePlaylist() {
       </div>
     </div>
 
-    <!-- 歌单列表区域 -->
     <div class="flex-1 overflow-y-auto flex flex-col min-h-0">
-      <!-- 默认歌单区（固定顶部） -->
       <div class="p-2 space-y-0.5 border-b border-gray-200/50 dark:border-gray-700/50">
         <DefaultPlaylist />
       </div>
 
-      <!-- 我的歌单区 -->
       <div class="p-2 space-y-0.5 flex-1 min-h-0 overflow-y-auto">
         <div class="px-3 py-1.5 text-xs text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wider">
           我的歌单
@@ -58,29 +59,56 @@ function handleCreatePlaylist() {
       </div>
     </div>
 
-    <!-- 歌曲列表区域（仅显示当前选中歌单的歌曲） -->
     <div class="border-t border-gray-200/50 dark:border-gray-700/50 flex-1 min-h-0 overflow-hidden flex flex-col">
-      <div class="px-4 py-2 border-b border-gray-200/50 dark:border-gray-700/50 flex items-center justify-between">
-        <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">
-          {{ player.playlists.find(p => p.id === player.activePlaylistId)?.name || '歌曲列表' }}
-        </h3>
-        <span class="text-xs text-gray-400 dark:text-gray-500">
-          {{ player.activePlaylistSongs.length }} 首
-        </span>
+      <div class="px-3 py-2 border-b border-gray-200/50 dark:border-gray-700/50">
+        <div class="flex items-center justify-between mb-2">
+          <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">
+            {{ player.playlists.find(p => p.id === player.activePlaylistId)?.name || '歌曲列表' }}
+          </h3>
+          <span class="text-xs text-gray-400 dark:text-gray-500">
+            {{ player.activePlaylistSongs.length }} 首
+          </span>
+        </div>
+        <div class="relative">
+          <svg
+            class="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 dark:text-gray-500"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
+            <circle cx="11" cy="11" r="8"></circle>
+            <path d="m21 21-4.3-4.3"></path>
+          </svg>
+          <input
+            v-model="player.searchQuery"
+            type="text"
+            placeholder="搜索歌曲..."
+            class="w-full pl-9 pr-3 py-1.5 bg-gray-100/60 dark:bg-gray-700/40 border border-transparent rounded-lg text-gray-700 dark:text-gray-200 text-sm placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:bg-white dark:focus:bg-gray-700/60 focus:border-gray-200 dark:focus:border-gray-600 transition-all"
+          />
+        </div>
       </div>
       <div class="flex-1 overflow-y-auto p-2 space-y-0.5">
-        <template v-if="player.activePlaylistSongs.length > 0">
+        <template v-if="player.filteredActivePlaylistSongs.length > 0">
           <SongItem
-            v-for="(song, index) in player.activePlaylistSongs"
+            v-for="(song, index) in player.filteredActivePlaylistSongs"
             :key="song.id"
             :song="song"
             :index="index"
-            @play="player.playFromActivePlaylist"
+            @play="playFilteredSong"
           />
         </template>
         <div v-else class="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-400 text-sm">
-          <span class="text-3xl mb-2">♪</span>
-          <p>暂无歌曲</p>
+          <template v-if="player.searchQuery.trim()">
+            <span class="text-2xl mb-2">🔍</span>
+            <p>没有找到匹配的歌曲</p>
+          </template>
+          <template v-else>
+            <span class="text-3xl mb-2">♪</span>
+            <p>暂无歌曲</p>
+          </template>
         </div>
       </div>
     </div>

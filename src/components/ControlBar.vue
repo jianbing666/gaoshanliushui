@@ -8,6 +8,7 @@ import { useVolumeSlider } from '@/composables/useVolumeSlider'
 import VolumeSlider from '@/components/VolumeSlider.vue'
 import RepeatIcon from '@/components/icons/RepeatIcon.vue'
 import RepeatOneIcon from '@/components/icons/RepeatOneIcon.vue'
+import ShuffleIcon from '@/components/icons/ShuffleIcon.vue'
 import ArrowRightIcon from '@/components/icons/ArrowRightIcon.vue'
 import SkipBackIcon from '@/components/icons/SkipBackIcon.vue'
 import SkipForwardIcon from '@/components/icons/SkipForwardIcon.vue'
@@ -30,12 +31,17 @@ const {
 } = useVolumeSlider()
 
 // 全局快捷键监听器引用
-let unlisten: UnlistenFn | null = null
+let unlistenToggle: UnlistenFn | null = null
+let unlistenPrev: UnlistenFn | null = null
+let unlistenNext: UnlistenFn | null = null
+let unlistenVolumeUp: UnlistenFn | null = null
+let unlistenVolumeDown: UnlistenFn | null = null
 
 // 循环模式标签
 const loopModeLabels: Record<string, string> = {
   list: '列表循环',
   single: '单曲循环',
+  shuffle: '随机播放',
   none: '顺序播放',
 }
 
@@ -66,17 +72,22 @@ function toggleMute() {
 // 监听当前歌曲变化，加载新音频
 watch(
   () => player.currentSong,
-  (song) => {
+  async (song) => {
     if (song) {
-      audioPlayer.load(song.file_path)
-      audioPlayer.setVolume(player.volume)
-      audioPlayer.setMediaSession(
-        song.title,
-        song.artist,
-        song.cover_path ? player.getCoverUrl(song.cover_path) : undefined
-      )
-      if (player.isPlaying) {
-        audioPlayer.play()
+      try {
+        const needPlay = player.playOnNext || player.isPlaying
+        await audioPlayer.load(song.file_path)
+        audioPlayer.setVolume(player.volume)
+        audioPlayer.setMediaSession(
+          song.title,
+          song.artist,
+          song.cover_path ? player.getCoverUrl(song.cover_path) : undefined
+        )
+        if (needPlay) {
+          await audioPlayer.play()
+        }
+      } catch (e) {
+        console.error('加载歌曲失败:', e)
       }
     }
   }
@@ -113,7 +124,7 @@ onMounted(async () => {
   })
 
   audioPlayer.onEnded(() => {
-    // 播放结束，自动下一首
+    // 播放结束，自动下一首（playOnNext 已在 next() 中设置）
     player.next()
   })
 
@@ -131,21 +142,37 @@ onMounted(async () => {
     navigator.mediaSession.setActionHandler('nexttrack', () => player.next())
   }
 
-  // 监听全局快捷键事件（Ctrl+Alt+P 暂停/播放）
-  unlisten = await listen('global-shortcut:toggle-play', () => {
+  // 监听全局快捷键事件
+  unlistenToggle = await listen('global-shortcut:toggle-play', () => {
     player.togglePlay()
+  })
+  unlistenPrev = await listen('global-shortcut:prev-track', () => {
+    player.prev()
+  })
+  unlistenNext = await listen('global-shortcut:next-track', () => {
+    player.next()
+  })
+  unlistenVolumeUp = await listen('global-shortcut:volume-up', () => {
+    player.volume = Math.min(1, player.volume + 0.05)
+  })
+  unlistenVolumeDown = await listen('global-shortcut:volume-down', () => {
+    player.volume = Math.max(0, player.volume - 0.05)
   })
 })
 
 onUnmounted(() => {
-  unlisten?.()
+  unlistenToggle?.()
+  unlistenPrev?.()
+  unlistenNext?.()
+  unlistenVolumeUp?.()
+  unlistenVolumeDown?.()
 })
 </script>
 
 <template>
   <footer class="h-24 bg-white/80 dark:bg-gray-800/50 backdrop-blur-xl border-t border-gray-200/50 dark:border-gray-700/50 flex items-center px-6 gap-6 shrink-0">
     <!-- 左：当前歌曲信息 -->
-    <div class="flex items-center gap-4 w-72 shrink-0">
+    <div class="flex items-center gap-4 w-36 shrink-0">
       <div class="w-14 h-14 rounded-lg bg-gray-200 dark:bg-gray-700 shrink-0 overflow-hidden">
         <img
           v-if="player.currentSong?.cover_path"
@@ -177,7 +204,8 @@ onUnmounted(() => {
           :title="loopModeLabels[player.loopMode]"
           @click="player.toggleLoopMode"
         >
-          <RepeatOneIcon v-if="player.loopMode === 'single'" :size="18" />
+          <ShuffleIcon v-if="player.loopMode === 'shuffle'" :size="18" />
+          <RepeatOneIcon v-else-if="player.loopMode === 'single'" :size="18" />
           <RepeatIcon v-else-if="player.loopMode === 'list'" :size="18" />
           <ArrowRightIcon v-else :size="18" />
         </button>

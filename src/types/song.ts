@@ -31,7 +31,7 @@ export interface Playlist {
 }
 
 /// 循环模式
-export type LoopMode = 'list' | 'single' | 'none'
+export type LoopMode = 'list' | 'single' | 'none' | 'shuffle'
 
 /// 主题模式
 export type ThemeMode = 'light' | 'dark' | 'system'

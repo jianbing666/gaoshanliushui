@@ -1,4 +1,5 @@
 import { ref, onMounted } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 
 /**
  * 快捷键配置接口
@@ -123,7 +124,19 @@ export function useShortcutConfig() {
         return false
       }
 
-      // 更新快捷键
+      // 调用后端更新全局快捷键
+      try {
+        await invoke('update_global_shortcut', {
+          shortcutId,
+          newShortcut,
+        })
+      } catch (err) {
+        console.error('更新全局快捷键失败:', err)
+        alert('更新快捷键失败，请重试')
+        return false
+      }
+
+      // 更新本地状态
       const index = shortcuts.value.findIndex(s => s.id === shortcutId)
       if (index !== -1) {
         shortcuts.value[index].currentShortcut = newShortcut

@@ -53,11 +53,31 @@ export class AudioPlayer {
   }
 
   /** 加载本地音频文件（通过 Tauri convertFileSrc 转换路径） */
-  async load(filePath: string) {
-    // 将本地文件路径转为 Tauri asset:// 协议 URL
-    const url = convertFileSrc(filePath)
-    this.audio.src = url
-    this.audio.load()
+  async load(filePath: string): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const url = convertFileSrc(filePath)
+      
+      const handleLoaded = () => {
+        cleanup()
+        resolve()
+      }
+      
+      const handleError = () => {
+        cleanup()
+        reject(new Error('音频加载失败'))
+      }
+      
+      const cleanup = () => {
+        this.audio.removeEventListener('loadedmetadata', handleLoaded)
+        this.audio.removeEventListener('error', handleError)
+      }
+      
+      this.audio.addEventListener('loadedmetadata', handleLoaded)
+      this.audio.addEventListener('error', handleError)
+      
+      this.audio.src = url
+      this.audio.load()
+    })
   }
 
   /** 播放 */

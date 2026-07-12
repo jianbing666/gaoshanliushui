@@ -44,6 +44,7 @@ const {
 } = useAutoLaunch()
 
 const isScanningBgFolder = ref(false)
+const showRefreshConfirm = ref(false)
 
 async function selectFolder() {
   try {
@@ -58,6 +59,23 @@ async function selectFolder() {
   } catch (error) {
     console.error('选择文件夹失败:', error)
   }
+}
+
+async function handleRefreshMetadata() {
+  showRefreshConfirm.value = true
+}
+
+async function confirmRefreshMetadata() {
+  showRefreshConfirm.value = false
+  await player.refreshMetadata()
+}
+
+function cancelRefresh() {
+  showRefreshConfirm.value = false
+}
+
+function handleMetadataSourceChange(source: 'auto' | 'filename') {
+  player.setMetadataSource(source)
 }
 
 function handleThemeChange(theme: ThemeMode) {
@@ -147,7 +165,7 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <div class="flex-1 overflow-y-auto px-5 py-4 space-y-6">
+    <div class="flex-1 overflow-y-auto scrollbar-hide px-5 py-4 space-y-6">
       <!-- 外观 -->
       <div class="space-y-3">
         <h3 class="text-gray-900 dark:text-white text-sm font-semibold">外观</h3>
@@ -342,6 +360,74 @@ onUnmounted(() => {
           >
             {{ player.isLoading ? '扫描中...' : '更改目录' }}
           </button>
+
+          <!-- 元数据来源 -->
+          <div class="space-y-2 pt-2 border-t border-gray-200/50 dark:border-gray-700/50">
+            <p class="text-xs text-gray-500 dark:text-gray-400">元数据来源</p>
+            <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-1 flex gap-1">
+              <button
+                class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                :class="
+                  player.metadataSource === 'auto'
+                    ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                "
+                @click="handleMetadataSourceChange('auto')"
+              >
+                智能
+              </button>
+              <button
+                class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                :class="
+                  player.metadataSource === 'filename'
+                    ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                "
+                @click="handleMetadataSourceChange('filename')"
+              >
+                仅文件名
+              </button>
+            </div>
+            <p class="text-xs text-gray-400 dark:text-gray-500 leading-relaxed">
+              {{ player.metadataSource === 'auto' ? '优先使用 ID3 标签，缺失时从文件名解析' : '忽略 ID3 标签，完全从文件名解析（歌手 - 歌名）' }}
+            </p>
+          </div>
+
+          <!-- 刷新元数据 -->
+          <div v-if="player.folderPath" class="pt-2 border-t border-gray-200/50 dark:border-gray-700/50">
+            <template v-if="!showRefreshConfirm">
+              <button
+                class="w-full px-4 py-2 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-all"
+                :disabled="player.isLoading"
+                @click="handleRefreshMetadata"
+              >
+                刷新元数据
+              </button>
+            </template>
+            <template v-else>
+              <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200/50 dark:border-yellow-800/30 rounded-lg p-3 space-y-2">
+                <p class="text-xs text-yellow-700 dark:text-yellow-300">
+                  确定要刷新所有元数据吗？将清除封面缓存并重新扫描。
+                </p>
+                <div class="flex gap-2">
+                  <button
+                    class="flex-1 px-3 py-1.5 bg-gray-100 dark:bg-gray-700/50 hover:bg-gray-200 dark:hover:bg-gray-700 rounded-md text-xs text-gray-700 dark:text-gray-300 transition-colors"
+                    @click="cancelRefresh"
+                  >
+                    取消
+                  </button>
+                  <button
+                    class="flex-1 px-3 py-1.5 bg-yellow-500 hover:bg-yellow-600 text-white rounded-md text-xs font-medium transition-colors"
+                    :disabled="player.isLoading"
+                    @click="confirmRefreshMetadata"
+                  >
+                    确认刷新
+                  </button>
+                </div>
+              </div>
+            </template>
+          </div>
+
           <p class="text-xs text-gray-500 dark:text-gray-400 text-center">
             共 {{ player.playlist.length }} 首歌曲
           </p>
@@ -470,5 +556,15 @@ button {
 
 input:focus {
   outline: none;
+}
+
+/* 隐藏滚动条但保留滚动功能 */
+:deep(.scrollbar-hide) {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+
+:deep(.scrollbar-hide::-webkit-scrollbar) {
+  display: none;
 }
 </style>

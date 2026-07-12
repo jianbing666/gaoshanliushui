@@ -5,7 +5,10 @@ import Sidebar from '@/components/Sidebar.vue'
 import Player from '@/components/Player.vue'
 import ControlBar from '@/components/ControlBar.vue'
 import SettingsPanel from '@/components/SettingsPanel.vue'
+import SongContextMenu from '@/components/SongContextMenu.vue'
+import CreatePlaylistModal from '@/components/CreatePlaylistModal.vue'
 import SettingsIcon from '@/components/icons/SettingsIcon.vue'
+import BarChart3Icon from '@/components/icons/BarChart3Icon.vue'
 
 const player = usePlayerStore()
 const showSettings = ref(false)
@@ -59,21 +62,30 @@ onMounted(async () => {
       </div>
 
       <!-- 右侧设置按钮 -->
-      <button
-        class="w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-200"
-        :class="showSettings
-          ? 'bg-blue-500/10 dark:bg-blue-500/20'
-          : 'hover:bg-gray-100/50 dark:hover:bg-gray-700/50'"
-        @click="toggleSettings"
-        title="设置"
-      >
-        <SettingsIcon
-          :size="18"
+      <div class="flex items-center gap-1">
+        <button
+          class="w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-200 hover:bg-gray-100/50 dark:hover:bg-gray-700/50 text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300"
+          title="统计"
+          disabled
+        >
+          <BarChart3Icon :size="18" />
+        </button>
+        <button
+          class="w-9 h-9 rounded-xl flex items-center justify-center transition-all duration-200"
           :class="showSettings
-            ? 'text-blue-600 dark:text-blue-400'
-            : 'text-gray-600 dark:text-gray-400'"
-        />
-      </button>
+            ? 'bg-blue-500/10 dark:bg-blue-500/20'
+            : 'hover:bg-gray-100/50 dark:hover:bg-gray-700/50'"
+          @click="toggleSettings"
+          title="设置"
+        >
+          <SettingsIcon
+            :size="18"
+            :class="showSettings
+              ? 'text-blue-600 dark:text-blue-400'
+              : 'text-gray-600 dark:text-gray-400'"
+          />
+        </button>
+      </div>
     </header>
 
     <!-- 主内容区域：Flex 水平三栏布局 -->
@@ -125,6 +137,12 @@ onMounted(async () => {
         />
       </Transition>
     </div>
+
+    <!-- 全局右键菜单（单例） -->
+    <SongContextMenu />
+
+    <!-- 创建歌单弹窗 -->
+    <CreatePlaylistModal />
   </div>
 </template>
 

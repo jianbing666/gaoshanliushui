@@ -13,8 +13,8 @@ fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .manage(global_shortcut::ShortcutStore::default())
         .setup(|app| {
-            // 注册全局快捷键
             if let Err(e) = global_shortcut::register_global_shortcuts(app.handle()) {
                 eprintln!("注册全局快捷键失败: {}", e);
             }
@@ -24,6 +24,7 @@ fn main() {
             scan_folder::scan_music_folder,
             toggle_mini_mode::toggle_mini_mode,
             scan_images::scan_image_folder,
+            global_shortcut::update_global_shortcut,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
