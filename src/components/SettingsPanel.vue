@@ -147,6 +147,20 @@ function handleMinimizeToTrayToggle() {
   player.setMinimizeToTray(!player.minimizeToTray)
 }
 
+function handleShowSpectrumToggle() {
+  player.setShowSpectrum(!player.showSpectrum)
+}
+
+function handleSpectrumLowPowerToggle() {
+  player.setSpectrumLowPower(!player.spectrumLowPower)
+}
+
+function formatTime(seconds: number): string {
+  const m = Math.floor(seconds / 60)
+  const s = seconds % 60
+  return `${m}:${s.toString().padStart(2, '0')}`
+}
+
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
 })
@@ -536,12 +550,103 @@ onUnmounted(() => {
               </button>
             </div>
           </div>
+
+          <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-gray-900 dark:text-white text-sm font-medium">显示频谱</p>
+                <p class="text-gray-500 dark:text-gray-400 text-xs">播放时显示音频频谱动画</p>
+              </div>
+              <button
+                class="relative w-10 h-5 rounded-full transition-colors shrink-0"
+                :class="player.showSpectrum ? 'bg-gray-900 dark:bg-white' : 'bg-gray-300 dark:bg-gray-600'"
+                @click="handleShowSpectrumToggle"
+              >
+                <div
+                  class="absolute top-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform"
+                  :class="player.showSpectrum ? 'translate-x-5' : 'translate-x-0.5'"
+                ></div>
+              </button>
+            </div>
+          </div>
+
+          <div v-if="player.showSpectrum" class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-gray-900 dark:text-white text-sm font-medium">低功耗频谱</p>
+                <p class="text-gray-500 dark:text-gray-400 text-xs">降低采样频率，节省内存和CPU</p>
+              </div>
+              <button
+                class="relative w-10 h-5 rounded-full transition-colors shrink-0"
+                :class="player.spectrumLowPower ? 'bg-gray-900 dark:bg-white' : 'bg-gray-300 dark:bg-gray-600'"
+                @click="handleSpectrumLowPowerToggle"
+              >
+                <div
+                  class="absolute top-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform"
+                  :class="player.spectrumLowPower ? 'translate-x-5' : 'translate-x-0.5'"
+                ></div>
+              </button>
+            </div>
+          </div>
+
+          <!-- 定时关闭 -->
+          <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3 space-y-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-gray-900 dark:text-white text-sm font-medium">定时关闭</p>
+                <p class="text-gray-500 dark:text-gray-400 text-xs">
+                  {{ player.sleepTimerEnabled
+                    ? `剩余 ${formatTime(player.sleepTimerRemaining)}`
+                    : '设定时间后自动暂停播放' }}
+                </p>
+              </div>
+              <button
+                class="relative w-10 h-5 rounded-full transition-colors shrink-0"
+                :class="player.sleepTimerEnabled ? 'bg-gray-900 dark:bg-white' : 'bg-gray-300 dark:bg-gray-600'"
+                @click="player.toggleSleepTimer"
+              >
+                <div
+                  class="absolute top-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform"
+                  :class="player.sleepTimerEnabled ? 'translate-x-5' : 'translate-x-0.5'"
+                ></div>
+              </button>
+            </div>
+            <div v-if="player.sleepTimerEnabled" class="space-y-2">
+              <div class="flex gap-1">
+                <button
+                  v-for="m in [15, 30, 60, 90]"
+                  :key="m"
+                  class="flex-1 py-1 text-xs rounded-md transition-colors"
+                  :class="player.sleepTimerMinutes === m
+                    ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900'
+                    : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'"
+                  @click="player.setSleepTimerMinutes(m)"
+                >
+                  {{ m }}分
+                </button>
+              </div>
+              <div class="flex items-center gap-2">
+                <input
+                  type="range"
+                  class="flex-1"
+                  :min="5"
+                  :max="180"
+                  :value="player.sleepTimerMinutes"
+                  step="5"
+                  @input="(e) => player.setSleepTimerMinutes(parseInt((e.target as HTMLInputElement).value))"
+                />
+                <span class="text-xs text-gray-500 dark:text-gray-400 w-10 text-right">
+                  {{ player.sleepTimerMinutes }}分
+                </span>
+              </div>
+            </div>
+          </div>
         </div>
       </div>
 
       <div class="pt-2 pb-4">
         <div class="text-center space-y-1">
-          <p class="text-gray-500 dark:text-gray-400 text-xs font-medium">Bilibili Music Player</p>
+          <p class="text-gray-500 dark:text-gray-400 text-xs font-medium">高山流水</p>
           <p class="text-gray-400 dark:text-gray-500 text-xs">基于 Tauri v2 + Vue 3</p>
         </div>
       </div>

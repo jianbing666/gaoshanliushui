@@ -1,7 +1,7 @@
 use std::sync::Mutex;
 
 use tauri::{AppHandle, Emitter, Manager};
-use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut, ShortcutState};
+use tauri_plugin_global_shortcut::{Code, GlobalShortcutExt, Modifiers, Shortcut};
 
 pub struct ShortcutStore {
     pub toggle_play: Mutex<String>,
@@ -119,10 +119,8 @@ pub fn register_global_shortcuts(app: &AppHandle) -> Result<(), String> {
             Ok(shortcut) => {
                 let event_name = event_name.to_string();
                 app.global_shortcut()
-                    .on_shortcut(shortcut, move |app_handle, _shortcut, event| {
-                        if event.state == ShortcutState::Pressed {
-                            let _ = app_handle.emit(&event_name, ());
-                        }
+                    .on_shortcut(shortcut, move |app_handle, _shortcut, _event| {
+                        let _ = app_handle.emit(&event_name, ());
                     })
                     .map_err(|e| format!("注册快捷键 {} 失败: {}", shortcut_str, e))?;
             }
@@ -163,10 +161,8 @@ pub async fn update_global_shortcut(
     let event_name = format!("global-shortcut:{}", shortcut_id);
 
     app.global_shortcut()
-        .on_shortcut(new_sc, move |app_handle, _shortcut, event| {
-            if event.state == ShortcutState::Pressed {
-                let _ = app_handle.emit(&event_name, ());
-            }
+        .on_shortcut(new_sc, move |app_handle, _shortcut, _event| {
+            let _ = app_handle.emit(&event_name, ());
         })
         .map_err(|e| format!("注册新快捷键失败: {}", e))?;
 

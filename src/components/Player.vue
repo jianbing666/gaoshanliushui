@@ -1,5 +1,6 @@
 <script setup lang="ts">
 import { usePlayerStore } from '@/stores/playerStore'
+import AudioSpectrum from '@/components/AudioSpectrum.vue'
 
 const player = usePlayerStore()
 </script>
@@ -32,6 +33,9 @@ const player = usePlayerStore()
             <div class="w-12 h-12 bg-gray-900/80 rounded-full border-2 border-gray-700"></div>
           </div>
         </div>
+
+        <!-- 频谱组件（放在封面下方） -->
+        <AudioSpectrum />
 
         <!-- 歌曲信息 -->
         <h2 class="text-gray-900 dark:text-white text-2xl font-semibold mt-8">{{ player.currentSong.title }}</h2>

@@ -1,15 +1,15 @@
 [package]
-name = "bilibili-music-player"
+name = "gaoshanliushui"
 version = "1.0.0"
-description = "A lightweight music player for Bilibili downloaded MP3 files"
-authors = ["Bilibili Music Lover"]
+description = "A music player inspired by the classical Chinese melody 'High Mountain and Flowing Water'"
+authors = ["GaoShanLiuShui"]
 edition = "2021"
 
 [build-dependencies]
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset", "devtools"] }
+tauri = { version = "2", features = ["protocol-asset", "devtools", "tray-icon"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-global-shortcut = "2"
 serde = { version = "1", features = ["derive"] }

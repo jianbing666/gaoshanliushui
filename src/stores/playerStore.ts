@@ -11,6 +11,26 @@ export interface ContextMenuState {
   y: number
 }
 
+// ========== Web Audio API 主播放链路（替代 HTML5 Audio） ==========
+// AudioContext 实例
+let audioContext: AudioContext | null = null
+// AnalyserNode 实例（频谱分析）
+let analyserNode: AnalyserNode | null = null
+// GainNode 实例（音量控制）
+let gainNode: GainNode | null = null
+// AudioBufferSourceNode 实例（音频源，一次性）
+let audioSourceNode: AudioBufferSourceNode | null = null
+// AudioBuffer 缓存（避免重复解码）
+const audioBufferCache = new Map<string, AudioBuffer>()
+// 当前播放歌曲的 URL
+let currentAudioUrl: string | null = null
+// 暂停时的播放位置（秒），用于恢复播放
+let pausedOffset: number = 0
+// 播放开始时的 AudioContext 时间，用于计算当前播放时间
+let playbackStartTime: number = 0
+// 是否已暂停（用于区分主动暂停和播放结束）
+let isPaused: boolean = false
+
 // LocalStorage 持久化辅助
 const STORAGE_KEY = 'bilibili-music-player-settings'
 const MUSIC_LIBRARY_PATH_KEY = 'musicLibraryPath'
@@ -187,12 +207,24 @@ export const usePlayerStore = defineStore('player', () => {
   function addSongToPlaylist(songId: string, playlistId: string): boolean {
     const pl = playlists.value.find((p) => p.id === playlistId)
     if (!pl) return false
-    // 避免重复添加
     if (!pl.songIds.includes(songId)) {
       pl.songIds.push(songId)
       return true
     }
     return false
+  }
+
+  function toggleSongInPlaylist(songId: string, playlistId: string): boolean {
+    const pl = playlists.value.find((p) => p.id === playlistId)
+    if (!pl) return false
+    const idx = pl.songIds.indexOf(songId)
+    if (idx === -1) {
+      pl.songIds.push(songId)
+      return true
+    } else {
+      pl.songIds.splice(idx, 1)
+      return false
+    }
   }
 
   // 从指定歌单移除歌曲
@@ -396,6 +428,67 @@ export const usePlayerStore = defineStore('player', () => {
 
   function setMinimizeToTray(value: boolean) {
     minimizeToTray.value = value
+    invoke('set_minimize_to_tray', { enabled: value }).catch(console.error)
+  }
+
+  // ========== 定时关闭 ==========
+  const sleepTimerEnabled = ref<boolean>(false)
+  const sleepTimerMinutes = ref<number>(30)
+  const sleepTimerRemaining = ref<number>(0)
+  let sleepTimerInterval: ReturnType<typeof setInterval> | null = null
+
+  function startSleepTimer(minutes?: number) {
+    if (minutes !== undefined) {
+      sleepTimerMinutes.value = minutes
+    }
+    sleepTimerRemaining.value = sleepTimerMinutes.value * 60
+    sleepTimerEnabled.value = true
+    if (sleepTimerInterval) {
+      clearInterval(sleepTimerInterval)
+    }
+    sleepTimerInterval = setInterval(() => {
+      sleepTimerRemaining.value--
+      if (sleepTimerRemaining.value <= 0) {
+        stopSleepTimer()
+        pause()
+      }
+    }, 1000)
+  }
+
+  function stopSleepTimer() {
+    sleepTimerEnabled.value = false
+    sleepTimerRemaining.value = 0
+    if (sleepTimerInterval) {
+      clearInterval(sleepTimerInterval)
+      sleepTimerInterval = null
+    }
+  }
+
+  function toggleSleepTimer() {
+    if (sleepTimerEnabled.value) {
+      stopSleepTimer()
+    } else {
+      startSleepTimer()
+    }
+  }
+
+  function setSleepTimerMinutes(minutes: number) {
+    sleepTimerMinutes.value = minutes
+    if (sleepTimerEnabled.value) {
+      sleepTimerRemaining.value = minutes * 60
+    }
+  }
+
+  // ========== 频谱显示设置 ==========
+  const showSpectrum = ref<boolean>(saved.showSpectrum ?? true)
+  const spectrumLowPower = ref<boolean>(saved.spectrumLowPower ?? false)
+
+  function setShowSpectrum(value: boolean) {
+    showSpectrum.value = value
+  }
+
+  function setSpectrumLowPower(value: boolean) {
+    spectrumLowPower.value = value
   }
 
   // ========== 全局右键菜单状态（单例模式） ==========
@@ -608,6 +701,289 @@ export const usePlayerStore = defineStore('player', () => {
     }
   }
 
+  // ========== Web Audio API 主播放链路 ==========
+
+  // 初始化 AudioContext 音频链路（必须在用户交互后调用）
+  function initAudioContext() {
+    if (!audioContext) {
+      audioContext = new AudioContext()
+      analyserNode = audioContext.createAnalyser()
+      analyserNode.fftSize = 2048
+      analyserNode.smoothingTimeConstant = 0.8
+      gainNode = audioContext.createGain()
+
+      // 链路：AnalyserNode -> GainNode -> Destination
+      analyserNode.connect(gainNode)
+      gainNode.connect(audioContext.destination)
+
+      console.log('[Audio] 链路连接完成: Source -> Analyser -> GainNode -> Destination', {
+        state: audioContext.state,
+        fftSize: analyserNode.fftSize,
+        frequencyBinCount: analyserNode.frequencyBinCount,
+        maxChannelCount: audioContext.destination.maxChannelCount
+      })
+    }
+    return { audioContext, analyserNode, gainNode }
+  }
+
+  // 获取 AudioBuffer（fetch + decodeAudioData，带缓存）
+  async function getAudioBuffer(url: string): Promise<AudioBuffer | null> {
+    // 检查缓存
+    if (audioBufferCache.has(url)) {
+      console.log('[Audio] 使用缓存的 AudioBuffer:', url)
+      return audioBufferCache.get(url)!
+    }
+
+    if (!audioContext) {
+      console.warn('[Audio] AudioContext 未初始化')
+      return null
+    }
+
+    try {
+      console.log('[Audio] 开始 fetch 音频文件:', url)
+      const response = await fetch(url)
+      const arrayBuffer = await response.arrayBuffer()
+
+      console.log('[Audio] 开始 decodeAudioData, ArrayBuffer 大小:', arrayBuffer.byteLength)
+      const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
+
+      // 缓存 AudioBuffer
+      audioBufferCache.set(url, audioBuffer)
+      console.log('[Audio] AudioBuffer 解码成功并缓存:', {
+        url,
+        duration: audioBuffer.duration,
+        numberOfChannels: audioBuffer.numberOfChannels,
+        length: audioBuffer.length
+      })
+
+      return audioBuffer
+    } catch (error) {
+      console.error('[Audio] AudioBuffer 解码失败:', error)
+      return null
+    }
+  }
+
+  // 创建 AudioBufferSourceNode 并连接到 AnalyserNode
+  function createAudioSourceNode(audioBuffer: AudioBuffer): AudioBufferSourceNode | null {
+    if (!audioContext || !analyserNode) {
+      console.warn('[Audio] AudioContext 未初始化')
+      return null
+    }
+
+    // 停止旧的 AudioBufferSourceNode（避免内存泄漏）
+    if (audioSourceNode) {
+      try {
+        // 先清空 onended，防止手动 stop 触发播放结束回调
+        audioSourceNode.onended = null
+        audioSourceNode.stop()
+        audioSourceNode.disconnect()
+      } catch (e) {
+        // 忽略已停止的节点错误
+      }
+    }
+
+    // 创建新的 AudioBufferSourceNode
+    audioSourceNode = audioContext.createBufferSource()
+    audioSourceNode.buffer = audioBuffer
+
+    // 连接到 AnalyserNode（链路：Source -> Analyser -> GainNode -> Destination）
+    audioSourceNode.connect(analyserNode)
+
+    // 添加 onended 事件处理
+    audioSourceNode.onended = () => {
+      console.log('[Audio] AudioBufferSourceNode 播放结束（onended）, isPaused:', isPaused)
+      // 如果不是主动暂停，说明是自然播放结束
+      if (!isPaused) {
+        audioSourceNode = null
+        // 触发下一首（通过 onEnded 回调）
+        _onAudioEnded?.()
+      }
+    }
+
+    console.log('[Audio] AudioBufferSourceNode 创建成功', {
+      bufferDuration: audioBuffer.duration,
+      numberOfChannels: audioBuffer.numberOfChannels
+    })
+
+    return audioSourceNode
+  }
+
+  // 播放歌曲（从指定偏移量开始）
+  function playFromOffset(offset: number = 0) {
+    if (!audioContext || !currentAudioUrl) {
+      console.warn('[Audio] 无法播放：AudioContext 未初始化或 URL 为空')
+      return
+    }
+
+    // 确保 AudioContext 处于 running 状态
+    if (audioContext.state === 'suspended') {
+      audioContext.resume()
+    }
+
+    // 从缓存获取 AudioBuffer
+    const audioBuffer = audioBufferCache.get(currentAudioUrl)
+    if (!audioBuffer) {
+      console.warn('[Audio] 缓存中没有 AudioBuffer:', currentAudioUrl)
+      return
+    }
+
+    // 停止当前正在播放的节点
+    if (audioSourceNode) {
+      try {
+        // 先清空 onended，防止手动 stop 触发播放结束回调
+        audioSourceNode.onended = null
+        audioSourceNode.stop()
+        audioSourceNode.disconnect()
+        audioSourceNode = null
+      } catch (e) {
+        // 忽略已停止的节点错误
+      }
+    }
+
+    // 创建新的 AudioBufferSourceNode
+    createAudioSourceNode(audioBuffer)
+
+    if (audioSourceNode) {
+      // 记录播放开始时间，用于计算当前播放位置
+      playbackStartTime = audioContext.currentTime - offset
+      isPaused = false
+
+      try {
+        audioSourceNode.start(0, offset)
+        console.log('[Audio] AudioBufferSourceNode 开始播放, offset:', offset, ', playbackStartTime:', playbackStartTime)
+      } catch (error) {
+        console.error('[Audio] AudioBufferSourceNode 启动失败:', error)
+        audioSourceNode = null
+      }
+    }
+  }
+
+  // 暂停播放
+  function pausePlayback() {
+    if (audioSourceNode && audioContext && !isPaused) {
+      try {
+        // 计算当前播放位置
+        const currentTime = audioContext.currentTime - playbackStartTime
+        pausedOffset = currentTime
+        isPaused = true
+
+        // 先清空 onended，防止手动 stop 触发播放结束回调
+        audioSourceNode.onended = null
+        audioSourceNode.stop()
+        audioSourceNode.disconnect()
+        audioSourceNode = null
+
+        console.log('[Audio] 暂停播放, pausedOffset:', pausedOffset)
+      } catch (e) {
+        console.error('[Audio] 暂停失败:', e)
+      }
+    }
+  }
+
+  // 恢复播放（或从头开始播放）
+  function resumePlayback() {
+    if (!currentAudioUrl) {
+      console.warn('[Audio] 无法恢复播放：当前音频 URL 为空')
+      return
+    }
+
+    if (!audioContext) {
+      console.warn('[Audio] 无法恢复播放：AudioContext 未初始化')
+      return
+    }
+
+    // 确保 AudioContext 处于 running 状态
+    if (audioContext.state === 'suspended') {
+      audioContext.resume()
+    }
+
+    // 如果是从暂停状态恢复，使用 pausedOffset
+    // 如果是首次播放，从 0 开始
+    const offset = isPaused ? pausedOffset : 0
+
+    console.log('[Audio] 恢复播放, offset:', offset, ', isPaused:', isPaused)
+    playFromOffset(offset)
+  }
+
+  // 停止播放（切歌时调用）
+  function stopPlayback() {
+    if (audioSourceNode) {
+      try {
+        // 先清空 onended，防止手动 stop 触发播放结束回调
+        audioSourceNode.onended = null
+        audioSourceNode.stop()
+        audioSourceNode.disconnect()
+        audioSourceNode = null
+      } catch (e) {
+        // 忽略已停止的节点错误
+      }
+    }
+    isPaused = false
+    pausedOffset = 0
+    playbackStartTime = 0
+    console.log('[Audio] 停止播放')
+  }
+
+  // 获取当前播放时间（秒）
+  function getCurrentPlaybackTime(): number {
+    if (!audioContext || !audioSourceNode || isPaused) {
+      return pausedOffset
+    }
+    return audioContext.currentTime - playbackStartTime
+  }
+
+  // 跳转到指定播放位置（秒）
+  function seekTo(time: number) {
+    if (!audioContext || !currentAudioUrl) {
+      console.warn('[Audio] 无法 seek：AudioContext 未初始化或 URL 为空')
+      return
+    }
+
+    // 确保 time 在有效范围内
+    const audioBuffer = audioBufferCache.get(currentAudioUrl)
+    const duration = audioBuffer?.duration || 0
+    const clampedTime = Math.max(0, Math.min(time, duration))
+
+    console.log('[Audio] 跳转到:', clampedTime, '秒')
+
+    // 如果正在播放，重新创建节点并从新位置开始
+    if (audioSourceNode || isPaused) {
+      // 更新 pausedOffset
+      pausedOffset = clampedTime
+
+      if (!isPaused) {
+        // 正在播放：重新创建节点并开始播放
+        playFromOffset(clampedTime)
+      }
+    }
+  }
+
+  // 设置音量
+  function setPlaybackVolume(value: number) {
+    if (gainNode) {
+      gainNode.gain.value = value
+      console.log('[Audio] 设置音量:', value)
+    }
+  }
+
+  // 获取 AnalyserNode（供频谱组件使用）
+  function getAnalyserNode(): AnalyserNode | null {
+    return analyserNode
+  }
+
+  // 设置当前播放歌曲的 URL
+  function setCurrentAudioUrl(url: string | null) {
+    currentAudioUrl = url
+    console.log('[Audio] 设置当前音频 URL:', url)
+  }
+
+  // ========== 音频播放结束回调 ==========
+  let _onAudioEnded: (() => void) | null = null
+
+  function setOnAudioEnded(callback: () => void) {
+    _onAudioEnded = callback
+  }
+
   // ========== 播放控制 ==========
   function play() {
     isPlaying.value = true
@@ -743,20 +1119,43 @@ export const usePlayerStore = defineStore('player', () => {
     return convertFileSrc(coverPath)
   }
 
-  // ========== 持久化：自动保存设置到 localStorage ==========
+  // 持久化歌单数据（防抖，避免频繁写入）
+  let playlistSaveTimer: ReturnType<typeof setTimeout> | null = null
   watch(
-    [volume, loopMode, folderPath, theme, background, minimizeToTray, fontSettings, metadataSource],
-    ([vol, mode, path, th, bg, mt, fs, metaSrc]) => {
-      saveSettings({ volume: vol, loopMode: mode, folderPath: path, theme: th, background: bg, minimizeToTray: mt, fontSettings: fs, metadataSource: metaSrc })
+    playlists,
+    (pls) => {
+      if (playlistSaveTimer) {
+        clearTimeout(playlistSaveTimer)
+      }
+      playlistSaveTimer = setTimeout(() => {
+        savePlaylists(pls)
+      }, 500)
     },
     { deep: true }
   )
 
-  // 持久化歌单数据
+  // 持久化设置（防抖）
+  let settingsSaveTimer: ReturnType<typeof setTimeout> | null = null
   watch(
-    playlists,
-    (pls) => {
-      savePlaylists(pls)
+    [volume, loopMode, folderPath, theme, background, minimizeToTray, fontSettings, metadataSource, showSpectrum, spectrumLowPower],
+    ([vol, mode, path, th, bg, mt, fs, metaSrc, spectrum, lowPower]) => {
+      if (settingsSaveTimer) {
+        clearTimeout(settingsSaveTimer)
+      }
+      settingsSaveTimer = setTimeout(() => {
+        saveSettings({
+          volume: vol,
+          loopMode: mode,
+          folderPath: path,
+          theme: th,
+          background: bg,
+          minimizeToTray: mt,
+          fontSettings: fs,
+          metadataSource: metaSrc,
+          showSpectrum: spectrum,
+          spectrumLowPower: lowPower
+        })
+      }, 300)
     },
     { deep: true }
   )
@@ -832,6 +1231,14 @@ export const usePlayerStore = defineStore('player', () => {
     currentBackgroundUrl,
     // 托盘设置
     minimizeToTray,
+    // 定时关闭
+    sleepTimerEnabled,
+    sleepTimerMinutes,
+    sleepTimerRemaining,
+    startSleepTimer,
+    stopSleepTimer,
+    toggleSleepTimer,
+    setSleepTimerMinutes,
     // 全局右键菜单
     contextMenu,
     openContextMenu,
@@ -878,6 +1285,25 @@ export const usePlayerStore = defineStore('player', () => {
     updateBackgroundSetting,
     // 托盘设置方法
     setMinimizeToTray,
+    // 频谱设置
+    showSpectrum,
+    spectrumLowPower,
+    setShowSpectrum,
+    setSpectrumLowPower,
+    // Web Audio API 主播放链路
+    initAudioContext,
+    getAudioBuffer,
+    createAudioSourceNode,
+    playFromOffset,
+    pausePlayback,
+    resumePlayback,
+    stopPlayback,
+    getCurrentPlaybackTime,
+    seekTo,
+    setPlaybackVolume,
+    getAnalyserNode,
+    setCurrentAudioUrl,
+    setOnAudioEnded,
     // 字体设置
     fontSettings,
     currentFontFamily,
@@ -897,6 +1323,7 @@ export const usePlayerStore = defineStore('player', () => {
     togglePlaylistExpand,
     selectPlaylist,
     addSongToPlaylist,
+    toggleSongInPlaylist,
     removeSongFromPlaylist,
     isSongInPlaylist,
   }

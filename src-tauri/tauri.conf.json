@@ -1,7 +1,7 @@
 {
-  "productName": "Bilibili Music Player",
+  "productName": "高山流水",
   "version": "1.0.0",
-  "identifier": "com.bilibili.music-player",
+  "identifier": "com.gaoshanliushui.player",
   "build": {
     "beforeBuildCommand": "npm run build",
     "beforeDevCommand": "npm run dev",
@@ -12,7 +12,7 @@
     "withGlobalTauri": true,
     "windows": [
       {
-        "title": "Bilibili Music Player",
+        "title": "高山流水",
         "width": 1200,
         "height": 800,
         "minWidth": 800,
@@ -41,7 +41,9 @@
   "bundle": {
     "active": true,
     "targets": "all",
-    "icon": [],
+    "icon": [
+      "icons/icon.png"
+    ],
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",

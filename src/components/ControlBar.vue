@@ -25,6 +25,9 @@ const volumeIconRef = ref<HTMLElement | null>(null)
 // autoplay 被拦截时的轻提示
 const showAutoplayTip = ref(false)
 
+// 切歌加载锁：防止 async watch 被重复触发导致多首歌同时播放
+let isLoadingSong = false
+
 // 使用音量滑块 composable
 const {
   showVolumeSlider,
@@ -55,6 +58,9 @@ const loopModeLabels: Record<string, string> = {
 function onProgressInput(event: Event) {
   const target = event.target as HTMLInputElement
   const time = parseFloat(target.value)
+  // Web Audio 主链路：使用 seekTo 跳转
+  player.seekTo(time)
+  // 同时更新 audio 元素的进度（保持同步，仅用于元数据）
   audioPlayer.seek(time)
   player.currentTime = time
 }
@@ -79,24 +85,64 @@ function toggleMute() {
 watch(
   () => player.currentSong,
   async (song) => {
-    if (song) {
+    if (!song) return
+
+    // 防止重复触发：如果正在加载歌曲，直接返回
+    if (isLoadingSong) {
+      console.log('[ControlBar] 正在加载歌曲中，忽略本次切歌')
+      return
+    }
+
+    isLoadingSong = true
+
+    try {
+      // 切歌时立即停止当前播放，防止多首歌同时播放
+      player.stopPlayback()
+      stopTimeUpdate()
+
       // 切歌时立即重置进度，避免显示上一首歌的残留时间
       player.currentTime = 0
 
-      try {
-        await audioPlayer.load(song.file_path)
-        // load 完成（canplay 已触发），设置音量和 Media Session
-        audioPlayer.setVolume(player.volume)
-        audioPlayer.setMediaSession(
-          song.title,
-          song.artist,
-          song.cover_path ? player.getCoverUrl(song.cover_path) : undefined
-        )
-      } catch (e) {
-        console.error('[ControlBar] 加载歌曲失败:', e)
-        player.isSwitchingSong = false
-        player.pendingPlay = false
+      await audioPlayer.load(song.file_path)
+      // load 完成（canplay 已触发），设置音量和 Media Session
+      // 注意：audio 元素音量设为 0，声音由 Web Audio 输出
+      audioPlayer.setVolume(0)
+      audioPlayer.setMediaSession(
+        song.title,
+        song.artist,
+        song.cover_path ? player.getCoverUrl(song.cover_path) : undefined
+      )
+
+      // ========== Web Audio 主播放链路 ==========
+      // 初始化 AudioContext
+      player.initAudioContext()
+
+      // 获取音频 URL
+      const audioUrl = player.getAudioUrl(song.file_path)
+
+      // 获取 AudioBuffer（fetch + decodeAudioData，带缓存）
+      const audioBuffer = await player.getAudioBuffer(audioUrl)
+
+      if (audioBuffer) {
+        // 设置当前音频 URL
+        player.setCurrentAudioUrl(audioUrl)
+
+        // 如果正在播放（切歌或自动播放），立即开始播放
+        console.log('[ControlBar] 切歌完成, isPlaying:', player.isPlaying, ', pendingPlay:', player.pendingPlay)
+        if (player.isPlaying || player.pendingPlay) {
+          console.log('[ControlBar] 切歌后立即开始播放')
+          player.pendingPlay = false
+          player.isSwitchingSong = false
+          player.playFromOffset(0)
+          startTimeUpdate()
+        }
       }
+    } catch (e) {
+      console.error('[ControlBar] 加载歌曲失败:', e)
+      player.isSwitchingSong = false
+      player.pendingPlay = false
+    } finally {
+      isLoadingSong = false
     }
   }
 )
@@ -105,27 +151,51 @@ watch(
 watch(
   () => player.isPlaying,
   (playing) => {
+    console.log('[ControlBar] isPlaying 变化:', playing)
     if (playing) {
-      // 如果有 pendingPlay（autoplay 被拦截后用户点击播放），重新尝试播放
-      if (player.pendingPlay && player.currentSong) {
-        player.pendingPlay = false
-        audioPlayer.play()
-      } else {
-        audioPlayer.play()
-      }
+      // 恢复 Web Audio 播放
+      player.resumePlayback()
+      startTimeUpdate()
     } else {
+      // 暂停 Web Audio 播放
+      player.pausePlayback()
+      stopTimeUpdate()
+      // 同时暂停 audio 元素（保持同步）
       audioPlayer.pause()
     }
   }
 )
 
-// 监听音量变化，应用到音频播放器
+// 监听音量变化，应用到 Web Audio
 watch(
   () => player.volume,
   (vol) => {
-    audioPlayer.setVolume(vol)
+    // 应用到 Web Audio GainNode
+    player.setPlaybackVolume(vol)
+    // audio 元素保持静音
+    audioPlayer.setVolume(0)
   }
 )
+
+// 播放时间更新定时器
+let timeUpdateInterval: number | null = null
+
+function startTimeUpdate() {
+  if (timeUpdateInterval) return
+  timeUpdateInterval = window.setInterval(() => {
+    if (player.isPlaying) {
+      const currentTime = player.getCurrentPlaybackTime()
+      player.currentTime = currentTime
+    }
+  }, 250)
+}
+
+function stopTimeUpdate() {
+  if (timeUpdateInterval) {
+    clearInterval(timeUpdateInterval)
+    timeUpdateInterval = null
+  }
+}
 
 onMounted(async () => {
   // 绑定 store 状态访问器，让 canplay 回调能读写 pendingPlay / isSwitchingSong / isPlaying
@@ -136,39 +206,31 @@ onMounted(async () => {
     setIsPlaying: (v: boolean) => { player.isPlaying = v },
   })
 
-  // 绑定音频播放器事件
-  audioPlayer.onTimeUpdate((time) => {
-    player.currentTime = time
-  })
-
+  // 绑定音频播放器事件（audio 元素只用于获取元数据，不参与播放控制）
   audioPlayer.onDurationChange((dur) => {
     player.duration = dur
   })
 
-  audioPlayer.onEnded(() => {
-    // 播放结束，自动下一首
+  // Web Audio 播放结束回调
+  player.setOnAudioEnded(() => {
+    console.log('[ControlBar] Web Audio 播放结束，触发下一首')
+    stopTimeUpdate()
     player.next()
   })
 
-  audioPlayer.onPlay(() => {
-    // 非切歌状态下由 play 事件更新 isPlaying
-    if (!player.isSwitchingSong) {
-      player.isPlaying = true
+  // 更新页面标题：歌曲名 - 歌手名
+  const updateTitle = () => {
+    const song = player.currentSong
+    if (song) {
+      document.title = `${song.title} - ${song.artist} · 高山流水`
+    } else {
+      document.title = '高山流水'
     }
-  })
-
-  audioPlayer.onPause(() => {
-    // 切歌锁：正在切歌时，旧音频的 pause 事件不应修改 isPlaying
-    if (player.isSwitchingSong) {
-      return
-    }
-    player.isPlaying = false
-  })
-
-  audioPlayer.onAutoplayBlocked(() => {
-    showAutoplayTip.value = true
-    setTimeout(() => { showAutoplayTip.value = false }, 3000)
-  })
+  }
+  // 立即执行一次
+  updateTitle()
+  // 监听歌曲变化
+  watch(() => player.currentSong, updateTitle)
 
   // 设置媒体键处理
   if ('mediaSession' in navigator) {
@@ -195,6 +257,7 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
+  stopTimeUpdate()
   unlistenToggle?.()
   unlistenPrev?.()
   unlistenNext?.()

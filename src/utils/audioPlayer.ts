@@ -171,6 +171,16 @@ export class AudioPlayer {
     return !this.audio.paused
   }
 
+  /** 获取总时长（方法形式，供外部调用） */
+  getDuration(): number {
+    return this.audio.duration || 0
+  }
+
+  /** 获取内部音频元素（供频谱组件使用） */
+  getAudioElement(): HTMLAudioElement {
+    return this.audio
+  }
+
   // ========== 事件回调设置 ==========
 
   onTimeUpdate(callback: (time: number) => void) {

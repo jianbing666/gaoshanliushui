@@ -40,9 +40,8 @@ function backToMain() {
 
 function addToPlaylist(playlistId: string) {
   if (player.contextMenu.song) {
-    player.addSongToPlaylist(player.contextMenu.song.id, playlistId)
+    player.toggleSongInPlaylist(player.contextMenu.song.id, playlistId)
   }
-  closeMenu()
 }
 
 function createAndAddToPlaylist() {
@@ -174,15 +173,18 @@ onUnmounted(() => {
           <button
             v-for="pl in player.customPlaylists"
             :key="pl.id"
-            class="w-full px-3 py-2 rounded-lg text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 flex items-center justify-between gap-2 transition-colors"
+            class="w-full px-3 py-2 rounded-lg text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700/60 flex items-center justify-between gap-2 transition-colors"
+            :class="player.isSongInPlaylist(player.contextMenu.song!.id, pl.id)
+              ? 'text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-900/10'
+              : 'text-gray-700 dark:text-gray-300'"
             @click="addToPlaylist(pl.id)"
           >
             <div class="flex items-center gap-2 min-w-0">
-              <FolderIcon :size="14" class="text-amber-500 shrink-0" />
+              <FolderIcon :size="14" :class="player.isSongInPlaylist(player.contextMenu.song!.id, pl.id) ? 'text-blue-500 shrink-0' : 'text-amber-500 shrink-0'" />
               <span class="truncate">{{ pl.name }}</span>
             </div>
-            <span v-if="player.isSongInPlaylist(player.contextMenu.song!.id, pl.id)" class="text-blue-500 shrink-0">
-              ✓
+            <span v-if="player.isSongInPlaylist(player.contextMenu.song!.id, pl.id)" class="shrink-0 text-xs">
+              点击移除
             </span>
           </button>
         </template>
