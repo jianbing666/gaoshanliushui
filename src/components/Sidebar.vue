@@ -23,7 +23,11 @@ function playFilteredSong(index: number) {
 </script>
 
 <template>
-  <aside class="w-72 bg-white/80 dark:bg-gray-800/50 backdrop-blur-xl border-r border-gray-200/50 dark:border-gray-700/50 flex flex-col h-full">
+  <aside class="w-80 backdrop-blur-xl border-r border-gray-200/50 dark:border-gray-700/50 flex flex-col h-full" :class="
+    player.currentBackgroundUrl && player.background.mode !== 'none'
+      ? 'bg-white/30 dark:bg-gray-900/30'
+      : 'bg-white/80 dark:bg-gray-800/50'
+  ">
     <div class="p-4 border-b border-gray-200/50 dark:border-gray-700/50">
       <div class="flex items-center justify-between">
         <h2 class="text-gray-900 dark:text-white text-lg font-semibold">歌单</h2>

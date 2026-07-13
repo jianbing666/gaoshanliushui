@@ -15,7 +15,7 @@ function getSongCount(): number {
     class="flex items-center gap-2 px-3 py-2 rounded-lg cursor-pointer transition-colors group"
     :class="
       player.activePlaylistId === 'all-songs'
-        ? 'bg-blue-50 dark:bg-blue-900/20 text-blue-600 dark:text-blue-400 font-medium'
+        ? 'bg-blue-500/15 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400 font-medium'
         : 'text-gray-700 dark:text-gray-300 hover:bg-gray-100/50 dark:hover:bg-white/5'
     "
     @click="player.selectPlaylist('all-songs')"

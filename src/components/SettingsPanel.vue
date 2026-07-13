@@ -156,6 +156,10 @@ function handleSpectrumLowPowerToggle() {
   player.setSpectrumLowPower(!player.spectrumLowPower)
 }
 
+function handleLowPowerModeToggle() {
+  player.setLowPowerMode(!player.lowPowerMode)
+}
+
 const isClearingCache = ref(false)
 const cacheCleared = ref(false)
 
@@ -168,7 +172,6 @@ async function handleClearCache() {
     player.clearAudioBufferCache()
     // 清除封面缓存（后端文件）
     await invoke('clear_cover_cache')
-    console.log('[Cache] 所有缓存已清除')
     cacheCleared.value = true
     setTimeout(() => {
       cacheCleared.value = false
@@ -196,7 +199,11 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <aside class="w-[320px] bg-white/90 dark:bg-gray-900/90 backdrop-blur-2xl border-l border-gray-200/60 dark:border-gray-700/60 shadow-2xl flex flex-col h-full">
+  <aside class="w-80 backdrop-blur-2xl border-l border-gray-200/60 dark:border-gray-700/60 shadow-2xl flex flex-col h-full" :class="
+    player.currentBackgroundUrl && player.background.mode !== 'none'
+      ? 'bg-white/50 dark:bg-gray-900/50'
+      : 'bg-white/90 dark:bg-gray-900/90'
+  ">
     <div class="px-5 py-4 border-b border-gray-200/50 dark:border-gray-700/50 flex items-center gap-3">
       <div>
         <h2 class="text-gray-900 dark:text-white text-base font-semibold">设置</h2>
@@ -323,7 +330,7 @@ onUnmounted(() => {
                   class="flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-all bg-gray-100/60 dark:bg-gray-800/60"
                   :class="
                     player.background.fit === opt.value
-                      ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900'
+                      ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
                       : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200/60 dark:hover:bg-gray-700/60'
                   "
                   @click="updateBgSetting('fit', opt.value)"
@@ -393,7 +400,7 @@ onUnmounted(() => {
             </p>
           </div>
           <button
-            class="w-full px-4 py-2.5 bg-gray-900 dark:bg-white hover:bg-gray-700 dark:hover:bg-gray-200 text-white dark:text-gray-900 rounded-lg text-sm font-medium transition-all flex items-center justify-center gap-2"
+            class="w-full px-4 py-2 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-all"
             :disabled="player.isLoading"
             @click="selectFolder"
           >
@@ -520,7 +527,7 @@ onUnmounted(() => {
                 </div>
                 <button
                   v-if="shortcut.currentShortcut !== shortcut.defaultShortcut"
-                  class="px-2 py-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+                  class="px-2 py-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors shadow-sm border rounded-md"
                   @click="resetToDefault(shortcut.id)"
                   title="恢复默认"
                 >
@@ -545,7 +552,7 @@ onUnmounted(() => {
               </div>
               <button
                 class="relative w-10 h-5 rounded-full transition-colors shrink-0"
-                :class="autoLaunch ? 'bg-gray-900 dark:bg-white' : 'bg-gray-300 dark:bg-gray-600'"
+                :class="autoLaunch ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
                 :disabled="autoLaunchLoading"
                 @click="toggleAutoLaunch"
               >
@@ -565,7 +572,7 @@ onUnmounted(() => {
               </div>
               <button
                 class="relative w-10 h-5 rounded-full transition-colors shrink-0"
-                :class="player.minimizeToTray ? 'bg-gray-900 dark:bg-white' : 'bg-gray-300 dark:bg-gray-600'"
+                :class="player.minimizeToTray ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
                 @click="handleMinimizeToTrayToggle"
               >
                 <div
@@ -579,12 +586,31 @@ onUnmounted(() => {
           <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
             <div class="flex items-center justify-between">
               <div>
+                <p class="text-gray-900 dark:text-white text-sm font-medium">性能/低功耗模式</p>
+                <p class="text-gray-500 dark:text-gray-400 text-xs">迷你模式或后台时自动暂停频谱，降低CPU占用</p>
+              </div>
+              <button
+                class="relative w-10 h-5 rounded-full transition-colors shrink-0"
+                :class="player.lowPowerMode ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
+                @click="handleLowPowerModeToggle"
+              >
+                <div
+                  class="absolute top-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform"
+                  :class="player.lowPowerMode ? 'translate-x-5' : 'translate-x-0.5'"
+                ></div>
+              </button>
+            </div>
+          </div>
+
+          <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
+            <div class="flex items-center justify-between">
+              <div>
                 <p class="text-gray-900 dark:text-white text-sm font-medium">显示频谱</p>
                 <p class="text-gray-500 dark:text-gray-400 text-xs">播放时显示音频频谱动画</p>
               </div>
               <button
                 class="relative w-10 h-5 rounded-full transition-colors shrink-0"
-                :class="player.showSpectrum ? 'bg-gray-900 dark:bg-white' : 'bg-gray-300 dark:bg-gray-600'"
+                :class="player.showSpectrum ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
                 @click="handleShowSpectrumToggle"
               >
                 <div
@@ -603,7 +629,7 @@ onUnmounted(() => {
               </div>
               <button
                 class="relative w-10 h-5 rounded-full transition-colors shrink-0"
-                :class="player.spectrumLowPower ? 'bg-gray-900 dark:bg-white' : 'bg-gray-300 dark:bg-gray-600'"
+                :class="player.spectrumLowPower ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
                 @click="handleSpectrumLowPowerToggle"
               >
                 <div
@@ -621,14 +647,14 @@ onUnmounted(() => {
                 <p class="text-gray-900 dark:text-white text-sm font-medium">清除缓存</p>
                 <p class="text-gray-500 dark:text-gray-400 text-xs">清除音频解码缓存和封面图片缓存</p>
               </div>
-              <button
-                class="px-3 py-1.5 rounded-md text-xs font-medium transition-colors shrink-0"
-                :class="cacheCleared
-                  ? 'bg-green-500 text-white'
-                  : 'bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-700 dark:hover:bg-gray-200'"
-                :disabled="isClearingCache"
-                @click="handleClearCache"
-              >
+                <button
+                  class="px-3 py-1.5 rounded-md text-xs font-medium transition-colors shrink-0"
+                  :class="cacheCleared
+                    ? 'bg-gray-100 dark:bg-gray-600 text-gray-900 dark:text-white'
+                    : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700'"
+                  :disabled="isClearingCache"
+                  @click="handleClearCache"
+                >
                 {{ isClearingCache ? '清除中...' : cacheCleared ? '已清除' : '清除' }}
               </button>
             </div>
@@ -647,7 +673,7 @@ onUnmounted(() => {
               </div>
               <button
                 class="relative w-10 h-5 rounded-full transition-colors shrink-0"
-                :class="player.sleepTimerEnabled ? 'bg-gray-900 dark:bg-white' : 'bg-gray-300 dark:bg-gray-600'"
+                :class="player.sleepTimerEnabled ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
                 @click="player.toggleSleepTimer"
               >
                 <div
@@ -663,8 +689,8 @@ onUnmounted(() => {
                   :key="m"
                   class="flex-1 py-1 text-xs rounded-md transition-colors"
                   :class="player.sleepTimerMinutes === m
-                    ? 'bg-gray-900 dark:bg-white text-white dark:text-gray-900'
-                    : 'bg-white dark:bg-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-600'"
+                    ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'"
                   @click="player.setSleepTimerMinutes(m)"
                 >
                   {{ m }}分

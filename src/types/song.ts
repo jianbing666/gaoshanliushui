@@ -78,3 +78,29 @@ export interface FontSettings {
   /** 自定义字体颜色（仅在 useThemeColor 为 false 时生效） */
   customColor?: string
 }
+
+/// 播放历史记录
+export interface PlayHistoryItem {
+  /** 唯一标识 */
+  id: string
+  /** 歌曲 ID */
+  songId: string
+  /** 歌曲标题（冗余存储，方便展示） */
+  title: string
+  /** 艺术家（冗余存储） */
+  artist: string
+  /** 专辑（冗余存储） */
+  album: string
+  /** 歌曲时长（秒） */
+  duration: number
+  /** 封面路径（冗余存储） */
+  cover_path: string | null
+  /** 文件路径（冗余存储） */
+  file_path: string
+  /** 开始播放时间（时间戳） */
+  playedAt: number
+  /** 实际播放时长（秒） */
+  playedDuration: number
+  /** 是否完整播放（播放超过 80% 视为完整播放） */
+  completed: boolean
+}

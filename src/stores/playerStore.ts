@@ -1,6 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed, nextTick, watch } from 'vue'
-import type { Song, LoopMode, ThemeMode, Playlist, BackgroundSettings, FontSettings, FontFamily } from '@/types/song'
+import type { Song, LoopMode, ThemeMode, Playlist, BackgroundSettings, FontSettings, FontFamily, PlayHistoryItem } from '@/types/song'
 import { invoke } from '@tauri-apps/api/core'
 import { convertFileSrc } from '@tauri-apps/api/core'
 
@@ -21,23 +21,9 @@ let analyserNode: AnalyserNode | null = null
 let gainNode: GainNode | null = null
 // AudioBufferSourceNode 实例（音频源，一次性）
 let audioSourceNode: AudioBufferSourceNode | null = null
-// AudioBuffer 缓存（避免重复解码）
-const audioBufferCache = new Map<string, AudioBuffer>()
-const AUDIO_BUFFER_CACHE_MAX = 20
-
-function addToAudioBufferCache(url: string, buffer: AudioBuffer) {
-  if (audioBufferCache.has(url)) {
-    audioBufferCache.delete(url)
-  }
-  audioBufferCache.set(url, buffer)
-  if (audioBufferCache.size > AUDIO_BUFFER_CACHE_MAX) {
-    const firstKey = audioBufferCache.keys().next().value
-    if (firstKey) {
-      audioBufferCache.delete(firstKey)
-      console.log('[Audio] 缓存已满，淘汰最旧的 AudioBuffer:', firstKey)
-    }
-  }
-}
+// 当前播放歌曲的 AudioBuffer（仅保留一首，最大程度节省内存）
+let currentAudioBuffer: AudioBuffer | null = null
+let currentBufferUrl: string | null = null
 // 当前播放歌曲的 URL
 let currentAudioUrl: string | null = null
 // 暂停时的播放位置（秒），用于恢复播放
@@ -51,6 +37,10 @@ let isPaused: boolean = false
 const STORAGE_KEY = 'gaoshanliushui-settings'
 const MUSIC_LIBRARY_PATH_KEY = 'musicLibraryPath'
 const PLAYLISTS_KEY = 'gaoshanliushui-playlists'
+const HISTORY_KEY = 'gaoshanliushui-history'
+const FULL_HISTORY_KEY = 'gaoshanliushui-full-history'
+const MAX_HISTORY_ITEMS = 500
+const MAX_FULL_HISTORY_ITEMS = 10000
 
 function loadSettings() {
   try {
@@ -148,6 +138,319 @@ export const usePlayerStore = defineStore('player', () => {
   const playlists = ref<Playlist[]>(loadPlaylists())
   // 当前选中的歌单 ID
   const activePlaylistId = ref<string>('all-songs')
+
+  // ========== 播放历史记录 ==========
+  // 展示用历史记录（去重，同一首歌只保留最新一次）
+  const playHistory = ref<PlayHistoryItem[]>(loadPlayHistory())
+  // 完整播放记录（不去重，用于数据统计）
+  const fullPlayHistory = ref<PlayHistoryItem[]>(loadFullPlayHistory())
+  const showHistoryDrawer = ref(false)
+
+  // 当前播放的记录（用于累加播放时长）
+  let currentHistoryItem: PlayHistoryItem | null = null
+  let currentPlayStartTime = 0
+
+  function loadPlayHistory(): PlayHistoryItem[] {
+    try {
+      const raw = localStorage.getItem(HISTORY_KEY)
+      return raw ? JSON.parse(raw) : []
+    } catch {
+      return []
+    }
+  }
+
+  function loadFullPlayHistory(): PlayHistoryItem[] {
+    try {
+      const raw = localStorage.getItem(FULL_HISTORY_KEY)
+      if (raw) return JSON.parse(raw)
+      // 首次加载时，如果没有完整记录，用现有展示记录初始化
+      const displayRaw = localStorage.getItem(HISTORY_KEY)
+      return displayRaw ? JSON.parse(displayRaw) : []
+    } catch {
+      return []
+    }
+  }
+
+  function savePlayHistory() {
+    try {
+      localStorage.setItem(HISTORY_KEY, JSON.stringify(playHistory.value))
+    } catch {
+      // 忽略写入失败
+    }
+  }
+
+  function saveFullPlayHistory() {
+    try {
+      localStorage.setItem(FULL_HISTORY_KEY, JSON.stringify(fullPlayHistory.value))
+    } catch {
+      // 忽略写入失败
+    }
+  }
+
+  // 开始记录播放历史
+  function startHistoryRecord(song: Song) {
+    // 先结束上一首歌的记录
+    endHistoryRecord()
+
+    currentHistoryItem = {
+      id: generateId(),
+      songId: song.id,
+      title: song.title,
+      artist: song.artist,
+      album: song.album,
+      duration: song.duration,
+      cover_path: song.cover_path,
+      file_path: song.file_path,
+      playedAt: Date.now(),
+      playedDuration: 0,
+      completed: false,
+    }
+    currentPlayStartTime = audioContext ? audioContext.currentTime : Date.now() / 1000
+  }
+
+  // 结束记录播放历史
+  function endHistoryRecord() {
+    if (!currentHistoryItem || !audioContext) return
+
+    const playedDuration = audioContext.currentTime - currentPlayStartTime
+    currentHistoryItem.playedDuration = playedDuration
+    currentHistoryItem.completed = playedDuration >= currentHistoryItem.duration * 0.8
+
+    // 1. 添加到完整播放记录（不去重，用于统计）
+    fullPlayHistory.value.unshift({ ...currentHistoryItem })
+    // 限制完整记录最大条数
+    if (fullPlayHistory.value.length > MAX_FULL_HISTORY_ITEMS) {
+      fullPlayHistory.value = fullPlayHistory.value.slice(0, MAX_FULL_HISTORY_ITEMS)
+    }
+    saveFullPlayHistory()
+
+    // 2. 更新展示用历史记录（去重，同一首歌只保留最新一次）
+    playHistory.value = playHistory.value.filter((item) => item.songId !== currentHistoryItem!.songId)
+    playHistory.value.unshift(currentHistoryItem)
+    // 限制展示记录最大条数
+    if (playHistory.value.length > MAX_HISTORY_ITEMS) {
+      playHistory.value = playHistory.value.slice(0, MAX_HISTORY_ITEMS)
+    }
+    savePlayHistory()
+
+    currentHistoryItem = null
+  }
+
+  // 切换历史记录抽屉
+  function toggleHistoryDrawer() {
+    // 同侧互斥：展开历史记录时收起侧边栏
+    if (!showHistoryDrawer.value && showSidebar.value) {
+      showSidebar.value = false
+    }
+    showHistoryDrawer.value = !showHistoryDrawer.value
+  }
+
+  // 清空历史记录
+  function clearPlayHistory() {
+    playHistory.value = []
+    fullPlayHistory.value = []
+    savePlayHistory()
+    saveFullPlayHistory()
+  }
+
+  // 删除单条历史记录
+  function removeHistoryItem(id: string) {
+    // 从展示记录中删除
+    const idx = playHistory.value.findIndex((item) => item.id === id)
+    if (idx !== -1) {
+      playHistory.value.splice(idx, 1)
+      savePlayHistory()
+    }
+    // 从完整记录中删除
+    const fullIdx = fullPlayHistory.value.findIndex((item) => item.id === id)
+    if (fullIdx !== -1) {
+      fullPlayHistory.value.splice(fullIdx, 1)
+      saveFullPlayHistory()
+    }
+  }
+
+  // ========== 数据统计 ==========
+  const showStatsPanel = ref(false)
+
+  function toggleStatsPanel() {
+    showStatsPanel.value = !showStatsPanel.value
+  }
+
+  // ========== 侧边栏 ==========
+  const showSidebar = ref(true)
+
+  function toggleSidebar() {
+    // 同侧互斥：展开侧边栏时收起历史记录
+    if (!showSidebar.value && showHistoryDrawer.value) {
+      showHistoryDrawer.value = false
+    }
+    showSidebar.value = !showSidebar.value
+  }
+
+  // 获取某一时间段内的播放记录
+  function getHistoryInRange(startTime: number, endTime: number): PlayHistoryItem[] {
+    return fullPlayHistory.value.filter((item) => item.playedAt >= startTime && item.playedAt < endTime)
+  }
+
+  // 今天的开始时间
+  const todayStats = computed(() => {
+    const now = new Date()
+    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
+    const endOfDay = startOfDay + 86400000
+    const items = getHistoryInRange(startOfDay, endOfDay)
+    const totalDuration = items.reduce((sum, item) => sum + item.playedDuration, 0)
+    return {
+      count: items.length,
+      totalDuration,
+      completedCount: items.filter((i) => i.completed).length,
+    }
+  })
+
+  // 本月统计
+  const monthStats = computed(() => {
+    const now = new Date()
+    const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime()
+    const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime()
+    const items = getHistoryInRange(startOfMonth, endOfMonth)
+    const totalDuration = items.reduce((sum, item) => sum + item.playedDuration, 0)
+    return {
+      count: items.length,
+      totalDuration,
+      completedCount: items.filter((i) => i.completed).length,
+    }
+  })
+
+  // 本年统计
+  const yearStats = computed(() => {
+    const now = new Date()
+    const startOfYear = new Date(now.getFullYear(), 0, 1).getTime()
+    const endOfYear = new Date(now.getFullYear() + 1, 0, 1).getTime()
+    const items = getHistoryInRange(startOfYear, endOfYear)
+    const totalDuration = items.reduce((sum, item) => sum + item.playedDuration, 0)
+    return {
+      count: items.length,
+      totalDuration,
+      completedCount: items.filter((i) => i.completed).length,
+    }
+  })
+
+  // 听歌之最：单曲循环次数最多的歌
+  const mostLoopedSong = computed(() => {
+    const songPlayCount: Record<string, { song: PlayHistoryItem; count: number }> = {}
+    for (const item of fullPlayHistory.value) {
+      if (!songPlayCount[item.songId]) {
+        songPlayCount[item.songId] = { song: item, count: 0 }
+      }
+      songPlayCount[item.songId].count++
+    }
+    const sorted = Object.values(songPlayCount).sort((a, b) => b.count - a.count)
+    return sorted.length > 0 ? sorted[0] : null
+  })
+
+  // 听歌之最：总播放时长最久的歌
+  const longestPlayedSong = computed(() => {
+    const songDuration: Record<string, { song: PlayHistoryItem; duration: number }> = {}
+    for (const item of fullPlayHistory.value) {
+      if (!songDuration[item.songId]) {
+        songDuration[item.songId] = { song: item, duration: 0 }
+      }
+      songDuration[item.songId].duration += item.playedDuration
+    }
+    const sorted = Object.values(songDuration).sort((a, b) => b.duration - a.duration)
+    return sorted.length > 0 ? sorted[0] : null
+  })
+
+  // 全部时间统计
+  const allTimeStats = computed(() => {
+    const totalDuration = fullPlayHistory.value.reduce((sum, item) => sum + item.playedDuration, 0)
+    return {
+      count: fullPlayHistory.value.length,
+      totalDuration,
+      completedCount: fullPlayHistory.value.filter((i) => i.completed).length,
+      uniqueSongs: new Set(fullPlayHistory.value.map((i) => i.songId)).size,
+    }
+  })
+
+  // 生成 Markdown 格式的统计报告
+  function generateStatsMarkdown(): string {
+    const now = new Date()
+    const dateStr = now.toLocaleDateString('zh-CN')
+
+    function formatDuration(seconds: number): string {
+      const hours = Math.floor(seconds / 3600)
+      const minutes = Math.floor((seconds % 3600) / 60)
+      const secs = Math.floor(seconds % 60)
+      if (hours > 0) {
+        return `${hours}小时${minutes}分${secs}秒`
+      } else if (minutes > 0) {
+        return `${minutes}分${secs}秒`
+      } else {
+        return `${secs}秒`
+      }
+    }
+
+    let md = `# 听歌数据统计报告\n\n`
+    md += `> 生成时间：${dateStr}\n\n`
+
+    md += `## 📊 听歌时长\n\n`
+    md += `| 时间范围 | 播放次数 | 总时长 | 完整播放 |\n`
+    md += `|----------|----------|--------|----------|\n`
+    md += `| 今天 | ${todayStats.value.count} 首 | ${formatDuration(todayStats.value.totalDuration)} | ${todayStats.value.completedCount} 首 |\n`
+    md += `| 本月 | ${monthStats.value.count} 首 | ${formatDuration(monthStats.value.totalDuration)} | ${monthStats.value.completedCount} 首 |\n`
+    md += `| 本年 | ${yearStats.value.count} 首 | ${formatDuration(yearStats.value.totalDuration)} | ${yearStats.value.completedCount} 首 |\n`
+    md += `| 全部 | ${allTimeStats.value.count} 首 | ${formatDuration(allTimeStats.value.totalDuration)} | ${allTimeStats.value.completedCount} 首 |\n\n`
+
+    md += `## 🏆 听歌之最\n\n`
+
+    if (mostLoopedSong.value) {
+      md += `### 播放次数最多的歌曲\n\n`
+      md += `- **歌曲**：${mostLoopedSong.value.song.title}\n`
+      md += `- **歌手**：${mostLoopedSong.value.song.artist || '未知艺术家'}\n`
+      md += `- **播放次数**：${mostLoopedSong.value.count} 次\n\n`
+    }
+
+    if (longestPlayedSong.value) {
+      md += `### 累计播放时长最久的歌曲\n\n`
+      md += `- **歌曲**：${longestPlayedSong.value.song.title}\n`
+      md += `- **歌手**：${longestPlayedSong.value.song.artist || '未知艺术家'}\n`
+      md += `- **累计时长**：${formatDuration(longestPlayedSong.value.duration)}\n\n`
+    }
+
+    md += `## 📈 其他统计\n\n`
+    md += `- **累计收听歌曲数**：${allTimeStats.value.uniqueSongs} 首\n`
+    md += `- **完整播放率**：${allTimeStats.value.count > 0 ? ((allTimeStats.value.completedCount / allTimeStats.value.count) * 100).toFixed(1) : 0}%\n`
+
+    return md
+  }
+
+  // 导出统计报告（Markdown 格式）
+  async function exportStatsReport() {
+    try {
+      const markdown = generateStatsMarkdown()
+      const now = new Date()
+      const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+      const filename = `听歌统计报告_${dateStr}.md`
+
+      // 使用 Tauri API 保存文件
+      const { save } = await import('@tauri-apps/plugin-dialog')
+      const { writeTextFile } = await import('@tauri-apps/plugin-fs')
+
+      const filePath = await save({
+        defaultPath: filename,
+        filters: [{ name: 'Markdown 文件', extensions: ['md'] }],
+      })
+
+      if (filePath) {
+        await writeTextFile(filePath, markdown)
+        console.log('[Stats] 统计报告已导出:', filePath)
+        return true
+      }
+      return false
+    } catch (e) {
+      console.error('[Stats] 导出统计报告失败:', e)
+      return false
+    }
+  }
 
   // 根据 songId 查找歌曲
   function findSongById(songId: string): Song | undefined {
@@ -507,6 +810,88 @@ export const usePlayerStore = defineStore('player', () => {
     spectrumLowPower.value = value
   }
 
+  // ========== 性能/低功耗模式 ==========
+  const lowPowerMode = ref<boolean>(saved.lowPowerMode ?? false)
+  const isMiniMode = ref<boolean>(false)
+  const spectrumPaused = ref<boolean>(false)
+
+  function setLowPowerMode(value: boolean) {
+    lowPowerMode.value = value
+    // 开启低功耗模式时，如果当前在播放且显示频谱，则暂停频谱动画
+    if (value && isPlaying.value && showSpectrum.value) {
+      spectrumPaused.value = true
+    } else if (!value) {
+      // 关闭低功耗模式时恢复频谱
+      spectrumPaused.value = false
+    }
+  }
+
+  function setMiniMode(value: boolean) {
+    isMiniMode.value = value
+    // 调用 Tauri 后端调整实际窗口大小
+    invoke('toggle_mini_mode', { isMini: value })
+      .then(() => {
+        console.log('[MiniMode] 迷你模式切换成功:', value)
+      })
+      .catch((err) => {
+        console.error('[MiniMode] 迷你模式切换失败:', err)
+      })
+    // 低功耗模式下，进入迷你模式时暂停频谱并断开 AnalyserNode
+    if (lowPowerMode.value) {
+      spectrumPaused.value = value
+      if (value) {
+        disconnectAnalyser()
+      } else {
+        reconnectAnalyser()
+      }
+    }
+  }
+
+  function resumeSpectrum() {
+    spectrumPaused.value = false
+  }
+
+  function pauseSpectrum() {
+    spectrumPaused.value = true
+  }
+
+  // 断开频谱分析链路（低功耗模式下进一步节省 CPU）
+  function disconnectAnalyser() {
+    if (audioSourceNode && analyserNode && gainNode && audioContext) {
+      try {
+        audioSourceNode.disconnect()
+        audioSourceNode.connect(gainNode)
+      } catch (e) {
+        // 忽略断开失败
+      }
+    }
+  }
+
+  // 重新连接频谱分析链路
+  function reconnectAnalyser() {
+    if (audioSourceNode && analyserNode && gainNode && audioContext) {
+      try {
+        audioSourceNode.disconnect()
+        audioSourceNode.connect(analyserNode)
+      } catch (e) {
+        // 忽略重连失败
+      }
+    }
+  }
+
+  // 恢复 AudioContext 运行状态（页面重新可见/窗口显示时调用）
+  function resumeAudioContext() {
+    if (audioContext && audioContext.state === 'suspended') {
+      audioContext.resume()
+        .then(() => {
+          console.log('[Audio] AudioContext 已恢复 running')
+        })
+        .catch((e) => {
+          console.error('[Audio] AudioContext 恢复失败:', e)
+        })
+    }
+  }
+
   // ========== 全局右键菜单状态（单例模式） ==========
   const contextMenu = ref<ContextMenuState>({
     visible: false,
@@ -733,49 +1118,31 @@ export const usePlayerStore = defineStore('player', () => {
       // 链路：AnalyserNode -> GainNode -> Destination
       analyserNode.connect(gainNode)
       gainNode.connect(audioContext.destination)
-
-      console.log('[Audio] 链路连接完成: Source -> Analyser -> GainNode -> Destination', {
-        state: audioContext.state,
-        fftSize: analyserNode.fftSize,
-        frequencyBinCount: analyserNode.frequencyBinCount,
-        maxChannelCount: audioContext.destination.maxChannelCount
-      })
     }
     return { audioContext, analyserNode, gainNode }
   }
 
-  // 获取 AudioBuffer（fetch + decodeAudioData，带缓存）
+  // 获取 AudioBuffer（fetch + decodeAudioData，仅保留当前一首）
   async function getAudioBuffer(url: string): Promise<AudioBuffer | null> {
-    // 检查缓存（命中时更新 LRU 位置）
-    if (audioBufferCache.has(url)) {
-      const buffer = audioBufferCache.get(url)!
-      audioBufferCache.delete(url)
-      audioBufferCache.set(url, buffer)
-      console.log('[Audio] 使用缓存的 AudioBuffer:', url)
-      return buffer
+    // 检查当前缓存是否就是目标 URL
+    if (currentAudioBuffer && currentBufferUrl === url) {
+      return currentAudioBuffer
     }
 
-    if (!audioContext) {
-      console.warn('[Audio] AudioContext 未初始化')
-      return null
-    }
+    if (!audioContext) return null
 
     try {
-      console.log('[Audio] 开始 fetch 音频文件:', url)
       const response = await fetch(url)
       const arrayBuffer = await response.arrayBuffer()
-
-      console.log('[Audio] 开始 decodeAudioData, ArrayBuffer 大小:', arrayBuffer.byteLength)
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
 
-      // 缓存 AudioBuffer
-      addToAudioBufferCache(url, audioBuffer)
-      console.log('[Audio] AudioBuffer 解码成功并缓存:', {
-        url,
-        duration: audioBuffer.duration,
-        numberOfChannels: audioBuffer.numberOfChannels,
-        length: audioBuffer.length
-      })
+      // 释放旧的 AudioBuffer（立即让 GC 回收）
+      currentAudioBuffer = null
+      currentBufferUrl = null
+
+      // 仅保留当前歌曲的 AudioBuffer
+      currentAudioBuffer = audioBuffer
+      currentBufferUrl = url
 
       return audioBuffer
     } catch (error) {
@@ -786,10 +1153,7 @@ export const usePlayerStore = defineStore('player', () => {
 
   // 创建 AudioBufferSourceNode 并连接到 AnalyserNode
   function createAudioSourceNode(audioBuffer: AudioBuffer): AudioBufferSourceNode | null {
-    if (!audioContext || !analyserNode) {
-      console.warn('[Audio] AudioContext 未初始化')
-      return null
-    }
+    if (!audioContext || !analyserNode) return null
 
     // 停止旧的 AudioBufferSourceNode（避免内存泄漏）
     if (audioSourceNode) {
@@ -812,7 +1176,6 @@ export const usePlayerStore = defineStore('player', () => {
 
     // 添加 onended 事件处理
     audioSourceNode.onended = () => {
-      console.log('[Audio] AudioBufferSourceNode 播放结束（onended）, isPaused:', isPaused)
       // 如果不是主动暂停，说明是自然播放结束
       if (!isPaused) {
         audioSourceNode = null
@@ -821,37 +1184,25 @@ export const usePlayerStore = defineStore('player', () => {
       }
     }
 
-    console.log('[Audio] AudioBufferSourceNode 创建成功', {
-      bufferDuration: audioBuffer.duration,
-      numberOfChannels: audioBuffer.numberOfChannels
-    })
-
     return audioSourceNode
   }
 
   // 播放歌曲（从指定偏移量开始）
   function playFromOffset(offset: number = 0) {
-    if (!audioContext || !currentAudioUrl) {
-      console.warn('[Audio] 无法播放：AudioContext 未初始化或 URL 为空')
-      return
-    }
+    if (!audioContext || !currentAudioUrl) return
 
     // 确保 AudioContext 处于 running 状态
     if (audioContext.state === 'suspended') {
       audioContext.resume()
     }
 
-    // 从缓存获取 AudioBuffer
-    const audioBuffer = audioBufferCache.get(currentAudioUrl)
-    if (!audioBuffer) {
-      console.warn('[Audio] 缓存中没有 AudioBuffer:', currentAudioUrl)
-      return
-    }
+    // 从当前缓存获取 AudioBuffer
+    const audioBuffer = currentAudioBuffer
+    if (!audioBuffer) return
 
-    // 停止当前正在播放的节点
+    // 销毁旧的 AudioBufferSourceNode（防止内存泄漏）
     if (audioSourceNode) {
       try {
-        // 先清空 onended，防止手动 stop 触发播放结束回调
         audioSourceNode.onended = null
         audioSourceNode.stop()
         audioSourceNode.disconnect()
@@ -862,20 +1213,37 @@ export const usePlayerStore = defineStore('player', () => {
     }
 
     // 创建新的 AudioBufferSourceNode
-    createAudioSourceNode(audioBuffer)
+    const newSource = audioContext.createBufferSource()
+    newSource.buffer = audioBuffer
+    newSource.connect(analyserNode!)
 
-    if (audioSourceNode) {
-      // 记录播放开始时间，用于计算当前播放位置
-      playbackStartTime = audioContext.currentTime - offset
-      isPaused = false
-
-      try {
-        audioSourceNode.start(0, offset)
-        console.log('[Audio] AudioBufferSourceNode 开始播放, offset:', offset, ', playbackStartTime:', playbackStartTime)
-      } catch (error) {
-        console.error('[Audio] AudioBufferSourceNode 启动失败:', error)
+    // 添加 onended 事件处理
+    newSource.onended = () => {
+      if (!isPaused) {
         audioSourceNode = null
+        // 结束记录播放历史
+        endHistoryRecord()
+        _onAudioEnded?.()
       }
+    }
+
+    audioSourceNode = newSource
+
+    // 记录播放开始时间
+    playbackStartTime = audioContext.currentTime - offset
+    isPaused = false
+    isPlaying.value = true
+
+    // 开始记录播放历史
+    if (currentSong.value) {
+      startHistoryRecord(currentSong.value)
+    }
+
+    try {
+      newSource.start(0, offset)
+    } catch (error) {
+      console.error('[Audio] AudioBufferSourceNode 启动失败:', error)
+      audioSourceNode = null
     }
   }
 
@@ -887,31 +1255,28 @@ export const usePlayerStore = defineStore('player', () => {
         const currentTime = audioContext.currentTime - playbackStartTime
         pausedOffset = currentTime
         isPaused = true
+        isPlaying.value = false
+
+        // 结束记录播放历史
+        endHistoryRecord()
 
         // 先清空 onended，防止手动 stop 触发播放结束回调
         audioSourceNode.onended = null
         audioSourceNode.stop()
         audioSourceNode.disconnect()
         audioSourceNode = null
-
-        console.log('[Audio] 暂停播放, pausedOffset:', pausedOffset)
       } catch (e) {
-        console.error('[Audio] 暂停失败:', e)
+        // 忽略暂停失败
       }
     }
   }
 
   // 恢复播放（或从头开始播放）
   function resumePlayback() {
-    if (!currentAudioUrl) {
-      console.warn('[Audio] 无法恢复播放：当前音频 URL 为空')
-      return
-    }
+    if (!currentAudioUrl || !audioContext) return
 
-    if (!audioContext) {
-      console.warn('[Audio] 无法恢复播放：AudioContext 未初始化')
-      return
-    }
+    // 如果已经在播放，直接返回（防止重复触发导致从头开始）
+    if (audioSourceNode && !isPaused) return
 
     // 确保 AudioContext 处于 running 状态
     if (audioContext.state === 'suspended') {
@@ -921,8 +1286,6 @@ export const usePlayerStore = defineStore('player', () => {
     // 如果是从暂停状态恢复，使用 pausedOffset
     // 如果是首次播放，从 0 开始
     const offset = isPaused ? pausedOffset : 0
-
-    console.log('[Audio] 恢复播放, offset:', offset, ', isPaused:', isPaused)
     playFromOffset(offset)
   }
 
@@ -939,10 +1302,12 @@ export const usePlayerStore = defineStore('player', () => {
         // 忽略已停止的节点错误
       }
     }
+    // 结束记录播放历史
+    endHistoryRecord()
     isPaused = false
+    isPlaying.value = false
     pausedOffset = 0
     playbackStartTime = 0
-    console.log('[Audio] 停止播放')
   }
 
   // 获取当前播放时间（秒）
@@ -955,25 +1320,18 @@ export const usePlayerStore = defineStore('player', () => {
 
   // 跳转到指定播放位置（秒）
   function seekTo(time: number) {
-    if (!audioContext || !currentAudioUrl) {
-      console.warn('[Audio] 无法 seek：AudioContext 未初始化或 URL 为空')
-      return
-    }
+    if (!audioContext || !currentAudioUrl) return
 
     // 确保 time 在有效范围内
-    const audioBuffer = audioBufferCache.get(currentAudioUrl)
-    const duration = audioBuffer?.duration || 0
-    const clampedTime = Math.max(0, Math.min(time, duration))
+    const audioBuffer = currentAudioBuffer
+    const dur = audioBuffer?.duration || 0
+    const clampedTime = Math.max(0, Math.min(time, dur))
 
-    console.log('[Audio] 跳转到:', clampedTime, '秒')
-
-    // 如果正在播放，重新创建节点并从新位置开始
+    // 如果正在播放或暂停，重新创建节点并从新位置开始
     if (audioSourceNode || isPaused) {
-      // 更新 pausedOffset
       pausedOffset = clampedTime
 
       if (!isPaused) {
-        // 正在播放：重新创建节点并开始播放
         playFromOffset(clampedTime)
       }
     }
@@ -983,7 +1341,6 @@ export const usePlayerStore = defineStore('player', () => {
   function setPlaybackVolume(value: number) {
     if (gainNode) {
       gainNode.gain.value = value
-      console.log('[Audio] 设置音量:', value)
     }
   }
 
@@ -995,15 +1352,13 @@ export const usePlayerStore = defineStore('player', () => {
   // 设置当前播放歌曲的 URL
   function setCurrentAudioUrl(url: string | null) {
     currentAudioUrl = url
-    console.log('[Audio] 设置当前音频 URL:', url)
   }
 
   // 清除音频缓存（AudioBuffer）
   function clearAudioBufferCache() {
-    const count = audioBufferCache.size
-    audioBufferCache.clear()
-    console.log('[Audio] 已清除 AudioBuffer 缓存，共', count, '个')
-    return count
+    currentAudioBuffer = null
+    currentBufferUrl = null
+    currentAudioUrl = null
   }
 
   // ========== 音频播放结束回调 ==========
@@ -1166,8 +1521,8 @@ export const usePlayerStore = defineStore('player', () => {
   // 持久化设置（防抖）
   let settingsSaveTimer: ReturnType<typeof setTimeout> | null = null
   watch(
-    [volume, loopMode, folderPath, theme, background, minimizeToTray, fontSettings, metadataSource, showSpectrum, spectrumLowPower],
-    ([vol, mode, path, th, bg, mt, fs, metaSrc, spectrum, lowPower]) => {
+    [volume, loopMode, folderPath, theme, background, minimizeToTray, fontSettings, metadataSource, showSpectrum, spectrumLowPower, lowPowerMode],
+    ([vol, mode, path, th, bg, mt, fs, metaSrc, spectrum, lowPower, lpm]) => {
       if (settingsSaveTimer) {
         clearTimeout(settingsSaveTimer)
       }
@@ -1182,7 +1537,8 @@ export const usePlayerStore = defineStore('player', () => {
           fontSettings: fs,
           metadataSource: metaSrc,
           showSpectrum: spectrum,
-          spectrumLowPower: lowPower
+          spectrumLowPower: lowPower,
+          lowPowerMode: lpm
         })
       }, 300)
     },
@@ -1319,6 +1675,17 @@ export const usePlayerStore = defineStore('player', () => {
     spectrumLowPower,
     setShowSpectrum,
     setSpectrumLowPower,
+    // 性能/低功耗模式
+    lowPowerMode,
+    isMiniMode,
+    spectrumPaused,
+    setLowPowerMode,
+    setMiniMode,
+    resumeSpectrum,
+    pauseSpectrum,
+    disconnectAnalyser,
+    reconnectAnalyser,
+    resumeAudioContext,
     // Web Audio API 主播放链路
     initAudioContext,
     getAudioBuffer,
@@ -1356,5 +1723,25 @@ export const usePlayerStore = defineStore('player', () => {
     toggleSongInPlaylist,
     removeSongFromPlaylist,
     isSongInPlaylist,
+    // 播放历史记录
+    playHistory,
+    showHistoryDrawer,
+    toggleHistoryDrawer,
+    clearPlayHistory,
+    removeHistoryItem,
+    // 数据统计
+    showStatsPanel,
+    toggleStatsPanel,
+    todayStats,
+    monthStats,
+    yearStats,
+    allTimeStats,
+    mostLoopedSong,
+    longestPlayedSong,
+    generateStatsMarkdown,
+    exportStatsReport,
+    // 侧边栏
+    showSidebar,
+    toggleSidebar,
   }
 })

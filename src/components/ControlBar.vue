@@ -28,6 +28,17 @@ const showAutoplayTip = ref(false)
 // 切歌加载锁：防止 async watch 被重复触发导致多首歌同时播放
 let isLoadingSong = false
 
+// 快捷键防抖时间戳（防止按键重复触发）
+let lastShortcutTime = 0
+const SHORTCUT_DEBOUNCE_MS = 300
+
+function handleShortcutToggle() {
+  const now = Date.now()
+  if (now - lastShortcutTime < SHORTCUT_DEBOUNCE_MS) return
+  lastShortcutTime = now
+  player.togglePlay()
+}
+
 // 使用音量滑块 composable
 const {
   showVolumeSlider,
@@ -88,10 +99,7 @@ watch(
     if (!song) return
 
     // 防止重复触发：如果正在加载歌曲，直接返回
-    if (isLoadingSong) {
-      console.log('[ControlBar] 正在加载歌曲中，忽略本次切歌')
-      return
-    }
+    if (isLoadingSong) return
 
     isLoadingSong = true
 
@@ -128,9 +136,7 @@ watch(
         player.setCurrentAudioUrl(audioUrl)
 
         // 如果正在播放（切歌或自动播放），立即开始播放
-        console.log('[ControlBar] 切歌完成, isPlaying:', player.isPlaying, ', pendingPlay:', player.pendingPlay)
         if (player.isPlaying || player.pendingPlay) {
-          console.log('[ControlBar] 切歌后立即开始播放')
           player.pendingPlay = false
           player.isSwitchingSong = false
           player.playFromOffset(0)
@@ -151,7 +157,6 @@ watch(
 watch(
   () => player.isPlaying,
   (playing) => {
-    console.log('[ControlBar] isPlaying 变化:', playing)
     if (playing) {
       // 恢复 Web Audio 播放
       player.resumePlayback()
@@ -213,7 +218,6 @@ onMounted(async () => {
 
   // Web Audio 播放结束回调
   player.setOnAudioEnded(() => {
-    console.log('[ControlBar] Web Audio 播放结束，触发下一首')
     stopTimeUpdate()
     player.next()
   })
@@ -239,9 +243,7 @@ onMounted(async () => {
   }
 
   // 监听全局快捷键事件
-  unlistenToggle = await listen('global-shortcut:toggle-play', () => {
-    player.togglePlay()
-  })
+  unlistenToggle = await listen('global-shortcut:toggle-play', handleShortcutToggle)
   unlistenPrev = await listen('global-shortcut:prev-track', () => {
     player.prev()
   })
@@ -268,7 +270,14 @@ onUnmounted(() => {
 
 <template>
   <div v-bind="$attrs">
-    <footer class="h-24 bg-white/80 dark:bg-gray-800/50 backdrop-blur-xl border-t border-gray-200/50 dark:border-gray-700/50 flex items-center px-6 gap-6 shrink-0">
+    <footer 
+      class="backdrop-blur-xl border-t border-gray-200/50 dark:border-gray-700/50 flex items-center px-6 gap-6 shrink-0 h-24"
+      :class="
+        player.currentBackgroundUrl && player.background.mode !== 'none'
+          ? 'bg-white/30 dark:bg-gray-900/30'
+          : 'bg-white/80 dark:bg-gray-800/50'
+      "
+    >
     <!-- 左：当前歌曲信息 -->
     <div class="flex items-center gap-4 w-36 shrink-0">
       <div class="w-14 h-14 rounded-lg bg-gray-200 dark:bg-gray-700 shrink-0 overflow-hidden">

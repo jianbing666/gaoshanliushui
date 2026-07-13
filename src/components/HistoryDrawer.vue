@@ -1,0 +1,122 @@
+<script setup lang="ts">
+import { usePlayerStore } from '@/stores/playerStore'
+import { formatTime } from '@/utils/formatTime'
+import MusicIcon from '@/components/icons/MusicIcon.vue'
+import ChevronLeftIcon from '@/components/icons/ChevronLeftIcon.vue'
+import TrashIcon from '@/components/icons/TrashIcon.vue'
+
+const player = usePlayerStore()
+
+function formatDate(timestamp: number): string {
+  const date = new Date(timestamp)
+  const now = new Date()
+  const today = new Date(now.getFullYear(), now.getMonth(), now.getDate())
+  const yesterday = new Date(today.getTime() - 86400000)
+  const itemDate = new Date(date.getFullYear(), date.getMonth(), date.getDate())
+
+  if (itemDate.getTime() === today.getTime()) {
+    return '今天 ' + date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  } else if (itemDate.getTime() === yesterday.getTime()) {
+    return '昨天 ' + date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
+  } else {
+    return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+  }
+}
+
+function playHistoryItem(index: number) {
+  const item = player.playHistory[index]
+  if (!item) return
+  
+  const song = player.findSongById(item.songId)
+  if (song) {
+    const globalIndex = player.playlist.findIndex((s) => s.id === song.id)
+    if (globalIndex !== -1) {
+      player.playByIndex(globalIndex)
+    }
+  }
+}
+</script>
+
+<template>
+  <div
+    class="w-80 h-full flex flex-col bg-white/50 dark:bg-gray-900/60 backdrop-blur-2xl border-r border-gray-200/60 dark:border-gray-700/60 shadow-2xl"
+  >
+    <!-- 头部 -->
+    <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200/50 dark:border-gray-700/50">
+      <div class="flex items-center gap-2">
+        <h2 class="text-gray-900 dark:text-white text-base font-semibold">播放历史</h2>
+        <span class="text-xs text-gray-500 dark:text-gray-400">{{ player.playHistory.length }} 首</span>
+      </div>
+      <div class="flex items-center gap-1">
+        <button
+          v-if="player.playHistory.length > 0"
+          class="p-1.5 rounded-md hover:bg-gray-200/60 dark:hover:bg-gray-700/60 text-gray-500 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
+          title="清空历史"
+          @click="player.clearPlayHistory()"
+        >
+          <TrashIcon :size="16" />
+        </button>
+        <button
+          class="p-1.5 rounded-md hover:bg-gray-200/60 dark:hover:bg-gray-700/60 text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white transition-colors"
+          title="关闭"
+          @click="player.toggleHistoryDrawer()"
+        >
+          <ChevronLeftIcon :size="18" />
+        </button>
+      </div>
+    </div>
+
+    <!-- 历史记录列表 -->
+    <div class="flex-1 overflow-y-auto min-h-0">
+      <template v-if="player.playHistory.length > 0">
+        <div
+          v-for="(item, index) in player.playHistory"
+          :key="item.id"
+          class="flex items-center gap-3 px-3 py-2 hover:bg-gray-100/60 dark:hover:bg-white/10 cursor-pointer transition-colors group"
+          @click="playHistoryItem(index)"
+        >
+          <!-- 封面 -->
+          <div class="w-10 h-10 rounded bg-gray-200/70 dark:bg-gray-700/70 shrink-0 overflow-hidden">
+            <img
+              v-if="item.cover_path"
+              :src="player.getCoverUrl(item.cover_path)"
+              :alt="item.title"
+              class="w-full h-full object-cover"
+            />
+            <div v-else class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500">
+              <MusicIcon :size="16" />
+            </div>
+          </div>
+
+          <!-- 歌曲信息 -->
+          <div class="flex-1 min-w-0">
+            <p class="text-gray-900 dark:text-white text-sm font-medium truncate">{{ item.title }}</p>
+            <p class="text-gray-600 dark:text-gray-300 text-xs truncate">{{ item.artist }}</p>
+            <div class="flex items-center gap-2 mt-0.5">
+              <span class="text-xs text-gray-500 dark:text-gray-400">{{ formatDate(item.playedAt) }}</span>
+              <span class="text-xs" :class="item.completed ? 'text-green-500 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'">
+                {{ item.completed ? '完整播放' : formatTime(item.playedDuration) }}
+              </span>
+            </div>
+          </div>
+
+          <!-- 删除按钮 -->
+          <button
+            class="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition-all"
+            title="删除记录"
+            @click.stop="player.removeHistoryItem(item.id)"
+          >
+            <TrashIcon :size="14" />
+          </button>
+        </div>
+      </template>
+      <template v-else>
+        <div class="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-400">
+          <MusicIcon :size="48" class="mb-3 opacity-30" />
+          <p class="text-sm">暂无播放记录</p>
+          <p class="text-xs mt-1">播放的歌曲会在这里显示</p>
+        </div>
+      </template>
+    </div>
+  </div>
+</template>

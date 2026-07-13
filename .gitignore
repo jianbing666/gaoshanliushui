@@ -91,3 +91,5 @@ mp4-test/
 *.njsproj
 *.sln
 *.sw?
+
+*.md
