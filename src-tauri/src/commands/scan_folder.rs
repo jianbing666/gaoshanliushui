@@ -79,7 +79,7 @@ fn parse_audio_file(file_path: &Path, use_filename_only: bool, force_refresh: bo
 
     // 强制刷新时，先删除旧的封面缓存
     if force_refresh {
-        let temp_dir = std::env::temp_dir().join("bilibili-music-player-covers");
+        let temp_dir = std::env::temp_dir().join("gaoshanliushui-covers");
         let cover_path = temp_dir.join(format!("{}.jpg", id));
         if cover_path.exists() {
             let _ = std::fs::remove_file(&cover_path);
@@ -254,7 +254,7 @@ fn extract_cover_art(file_path: &Path, song_id: &str) -> Option<String> {
     let picture = &pictures[0];
 
     // 创建临时目录
-    let temp_dir = std::env::temp_dir().join("bilibili-music-player-covers");
+    let temp_dir = std::env::temp_dir().join("gaoshanliushui-covers");
     if !temp_dir.exists() {
         let _ = std::fs::create_dir_all(&temp_dir);
     }
@@ -271,8 +271,9 @@ fn extract_cover_art(file_path: &Path, song_id: &str) -> Option<String> {
 }
 
 /// 清除所有封面缓存
-fn clear_cover_cache() {
-    let temp_dir = std::env::temp_dir().join("bilibili-music-player-covers");
+#[tauri::command]
+pub fn clear_cover_cache() {
+    let temp_dir = std::env::temp_dir().join("gaoshanliushui-covers");
     if temp_dir.exists() {
         if let Ok(entries) = std::fs::read_dir(&temp_dir) {
             for entry in entries.flatten() {

@@ -7,6 +7,7 @@ import { convertFileSrc } from '@tauri-apps/api/core'
 export interface ContextMenuState {
   visible: boolean
   song: Song | null
+  playlistId: string | null
   x: number
   y: number
 }
@@ -22,6 +23,21 @@ let gainNode: GainNode | null = null
 let audioSourceNode: AudioBufferSourceNode | null = null
 // AudioBuffer 缓存（避免重复解码）
 const audioBufferCache = new Map<string, AudioBuffer>()
+const AUDIO_BUFFER_CACHE_MAX = 20
+
+function addToAudioBufferCache(url: string, buffer: AudioBuffer) {
+  if (audioBufferCache.has(url)) {
+    audioBufferCache.delete(url)
+  }
+  audioBufferCache.set(url, buffer)
+  if (audioBufferCache.size > AUDIO_BUFFER_CACHE_MAX) {
+    const firstKey = audioBufferCache.keys().next().value
+    if (firstKey) {
+      audioBufferCache.delete(firstKey)
+      console.log('[Audio] 缓存已满，淘汰最旧的 AudioBuffer:', firstKey)
+    }
+  }
+}
 // 当前播放歌曲的 URL
 let currentAudioUrl: string | null = null
 // 暂停时的播放位置（秒），用于恢复播放
@@ -32,9 +48,9 @@ let playbackStartTime: number = 0
 let isPaused: boolean = false
 
 // LocalStorage 持久化辅助
-const STORAGE_KEY = 'bilibili-music-player-settings'
+const STORAGE_KEY = 'gaoshanliushui-settings'
 const MUSIC_LIBRARY_PATH_KEY = 'musicLibraryPath'
-const PLAYLISTS_KEY = 'bilibili-music-player-playlists'
+const PLAYLISTS_KEY = 'gaoshanliushui-playlists'
 
 function loadSettings() {
   try {
@@ -495,14 +511,16 @@ export const usePlayerStore = defineStore('player', () => {
   const contextMenu = ref<ContextMenuState>({
     visible: false,
     song: null,
+    playlistId: null,
     x: 0,
     y: 0,
   })
 
-  function openContextMenu(song: Song, x: number, y: number) {
+  function openContextMenu(song: Song, playlistId: string | null, x: number, y: number) {
     contextMenu.value = {
       visible: true,
       song,
+      playlistId,
       x,
       y,
     }
@@ -728,10 +746,13 @@ export const usePlayerStore = defineStore('player', () => {
 
   // 获取 AudioBuffer（fetch + decodeAudioData，带缓存）
   async function getAudioBuffer(url: string): Promise<AudioBuffer | null> {
-    // 检查缓存
+    // 检查缓存（命中时更新 LRU 位置）
     if (audioBufferCache.has(url)) {
+      const buffer = audioBufferCache.get(url)!
+      audioBufferCache.delete(url)
+      audioBufferCache.set(url, buffer)
       console.log('[Audio] 使用缓存的 AudioBuffer:', url)
-      return audioBufferCache.get(url)!
+      return buffer
     }
 
     if (!audioContext) {
@@ -748,7 +769,7 @@ export const usePlayerStore = defineStore('player', () => {
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
 
       // 缓存 AudioBuffer
-      audioBufferCache.set(url, audioBuffer)
+      addToAudioBufferCache(url, audioBuffer)
       console.log('[Audio] AudioBuffer 解码成功并缓存:', {
         url,
         duration: audioBuffer.duration,
@@ -975,6 +996,14 @@ export const usePlayerStore = defineStore('player', () => {
   function setCurrentAudioUrl(url: string | null) {
     currentAudioUrl = url
     console.log('[Audio] 设置当前音频 URL:', url)
+  }
+
+  // 清除音频缓存（AudioBuffer）
+  function clearAudioBufferCache() {
+    const count = audioBufferCache.size
+    audioBufferCache.clear()
+    console.log('[Audio] 已清除 AudioBuffer 缓存，共', count, '个')
+    return count
   }
 
   // ========== 音频播放结束回调 ==========
@@ -1304,6 +1333,7 @@ export const usePlayerStore = defineStore('player', () => {
     getAnalyserNode,
     setCurrentAudioUrl,
     setOnAudioEnded,
+    clearAudioBufferCache,
     // 字体设置
     fontSettings,
     currentFontFamily,

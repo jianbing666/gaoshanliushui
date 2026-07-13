@@ -121,6 +121,7 @@ function handleContextMenu(e: MouseEvent) {
           :song="song"
           :index="index"
           :compact="true"
+          :playlist-id="playlist.id"
           @play="playSongInPlaylist"
         />
       </template>

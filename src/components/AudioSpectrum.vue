@@ -13,6 +13,9 @@ let animationId: number | null = null
 // 上一次采样时间（用于控制采样频率）
 let lastSampleTime = 0
 
+// 复用的频域数据数组（避免每次创建新的 Uint8Array）
+let dataArray: Uint8Array<ArrayBuffer> | null = null
+
 // 计算采样间隔（30fps = 33ms，低功耗模式 20fps = 50ms）
 const sampleInterval = computed(() => player.spectrumLowPower ? 50 : 33)
 
@@ -66,9 +69,11 @@ function animationLoop() {
     if (timestamp - lastSampleTime >= sampleInterval.value) {
       lastSampleTime = timestamp
 
-      // 获取频域数据
+      // 获取频域数据（复用数组，避免频繁分配内存）
       const bufferLength = analyserNode.frequencyBinCount
-      const dataArray = new Uint8Array(bufferLength)
+      if (!dataArray || dataArray.length !== bufferLength) {
+        dataArray = new Uint8Array(bufferLength)
+      }
       analyserNode.getByteFrequencyData(dataArray)
 
       // 提取 64 个关键频率点（均匀采样）

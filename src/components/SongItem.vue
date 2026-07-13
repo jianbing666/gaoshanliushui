@@ -10,6 +10,7 @@ const props = defineProps<{
   song: Song
   index: number
   compact?: boolean
+  playlistId?: string | null
 }>()
 
 const emit = defineEmits<{
@@ -24,7 +25,7 @@ const isCurrentSong = computed(() => {
 function handleContextMenu(e: MouseEvent) {
   e.preventDefault()
   e.stopPropagation()
-  player.openContextMenu(props.song, e.clientX, e.clientY)
+  player.openContextMenu(props.song, props.playlistId || null, e.clientX, e.clientY)
 }
 </script>
 

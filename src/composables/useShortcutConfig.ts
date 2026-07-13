@@ -12,7 +12,7 @@ export interface ShortcutConfig {
   description: string
 }
 
-const STORAGE_KEY = 'bilibili-music-player-shortcuts'
+const STORAGE_KEY = 'gaoshanliushui-shortcuts'
 
 // 默认快捷键配置
 const defaultShortcuts: ShortcutConfig[] = [

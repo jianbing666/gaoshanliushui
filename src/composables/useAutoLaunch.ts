@@ -1,6 +1,6 @@
 import { ref, onMounted } from 'vue'
 
-const STORAGE_KEY = 'bilibili-music-player-auto-launch'
+const STORAGE_KEY = 'gaoshanliushui-auto-launch'
 
 /**
  * 开机自启 Composable

@@ -5,13 +5,12 @@ import ChevronRightIcon from '@/components/icons/ChevronRightIcon.vue'
 import ChevronLeftIcon from '@/components/icons/ChevronLeftIcon.vue'
 import PlusIcon from '@/components/icons/PlusIcon.vue'
 import TrashIcon from '@/components/icons/TrashIcon.vue'
-import MusicIcon from '@/components/icons/MusicIcon.vue'
 import FolderIcon from '@/components/icons/FolderIcon.vue'
 
 const player = usePlayerStore()
 const menuRef = ref<HTMLElement | null>(null)
 
-type MenuMode = 'main' | 'move'
+type MenuMode = 'main' | 'add' | 'move'
 const menuMode = ref<MenuMode>('main')
 const isClosing = ref(false)
 
@@ -30,6 +29,10 @@ function closeMenu() {
   }, 150)
 }
 
+function openAddPanel() {
+  menuMode.value = 'add'
+}
+
 function openMovePanel() {
   menuMode.value = 'move'
 }
@@ -40,8 +43,18 @@ function backToMain() {
 
 function addToPlaylist(playlistId: string) {
   if (player.contextMenu.song) {
-    player.toggleSongInPlaylist(player.contextMenu.song.id, playlistId)
+    player.addSongToPlaylist(player.contextMenu.song.id, playlistId)
   }
+}
+
+function moveToPlaylist(playlistId: string) {
+  if (player.contextMenu.song && player.contextMenu.playlistId !== 'all-songs' && player.contextMenu.playlistId) {
+    const songId = player.contextMenu.song.id
+    const currentPlaylistId = player.contextMenu.playlistId
+    player.addSongToPlaylist(songId, playlistId)
+    player.removeSongFromPlaylist(songId, currentPlaylistId)
+  }
+  closeMenu()
 }
 
 function createAndAddToPlaylist() {
@@ -59,8 +72,8 @@ function createAndAddToPlaylist() {
 }
 
 function removeFromCurrentPlaylist() {
-  if (player.activePlaylistId !== 'all-songs' && player.contextMenu.song) {
-    player.removeSongFromPlaylist(player.contextMenu.song.id, player.activePlaylistId)
+  if (player.contextMenu.playlistId !== 'all-songs' && player.contextMenu.playlistId && player.contextMenu.song) {
+    player.removeSongFromPlaylist(player.contextMenu.song.id, player.contextMenu.playlistId)
   }
   closeMenu()
 }
@@ -121,6 +134,7 @@ onUnmounted(() => {
     :style="{ left: `${player.contextMenu.x}px`, top: `${player.contextMenu.y}px` }"
     @click.stop
   >
+    <!-- 主菜单 -->
     <div
       class="p-1.5"
       :class="{
@@ -130,17 +144,29 @@ onUnmounted(() => {
     >
       <button
         class="w-full px-3 py-2 rounded-lg text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 flex items-center justify-between gap-2 transition-colors"
-        @click="openMovePanel"
+        @click="openAddPanel"
       >
         <div class="flex items-center gap-2">
-          <MusicIcon :size="14" class="text-blue-500" />
+          <PlusIcon :size="14" class="text-blue-500" />
           <span>添加到歌单</span>
         </div>
         <ChevronRightIcon :size="14" class="text-gray-400" />
       </button>
 
-      <template v-if="player.activePlaylistId !== 'all-songs'">
+      <template v-if="player.contextMenu.playlistId !== 'all-songs' && player.contextMenu.playlistId">
+        <button
+          class="w-full px-3 py-2 rounded-lg text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 flex items-center justify-between gap-2 transition-colors"
+          @click="openMovePanel"
+        >
+          <div class="flex items-center gap-2">
+            <FolderIcon :size="14" class="text-amber-500" />
+            <span>转移至其他歌单</span>
+          </div>
+          <ChevronRightIcon :size="14" class="text-gray-400" />
+        </button>
+
         <div class="h-px bg-gray-200/60 dark:bg-gray-700/60 my-1"></div>
+
         <button
           class="w-full px-3 py-2 rounded-lg text-left text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2 transition-colors"
           @click="removeFromCurrentPlaylist"
@@ -151,11 +177,12 @@ onUnmounted(() => {
       </template>
     </div>
 
+    <!-- 添加到歌单子菜单 -->
     <div
       class="p-1.5"
       :class="{
-        'animate-menu-slide-left': menuMode === 'move',
-        'hidden': menuMode !== 'move',
+        'animate-menu-slide-left': menuMode === 'add',
+        'hidden': menuMode !== 'add',
       }"
     >
       <button
@@ -163,7 +190,7 @@ onUnmounted(() => {
         @click="backToMain"
       >
         <ChevronLeftIcon :size="14" class="text-gray-400" />
-        <span class="font-medium">添加到歌单</span>
+        <span class="font-medium">返回</span>
       </button>
 
       <div class="h-px bg-gray-200/60 dark:bg-gray-700/60 my-1"></div>
@@ -184,7 +211,7 @@ onUnmounted(() => {
               <span class="truncate">{{ pl.name }}</span>
             </div>
             <span v-if="player.isSongInPlaylist(player.contextMenu.song!.id, pl.id)" class="shrink-0 text-xs">
-              点击移除
+              已添加
             </span>
           </button>
         </template>
@@ -203,6 +230,43 @@ onUnmounted(() => {
         <PlusIcon :size="14" />
         <span>新建歌单...</span>
       </button>
+    </div>
+
+    <!-- 转移至其他歌单子菜单 -->
+    <div
+      class="p-1.5"
+      :class="{
+        'animate-menu-slide-left': menuMode === 'move',
+        'hidden': menuMode !== 'move',
+      }"
+    >
+      <button
+        class="w-full px-3 py-2 rounded-lg text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 flex items-center gap-2 transition-colors mb-1"
+        @click="backToMain"
+      >
+        <ChevronLeftIcon :size="14" class="text-gray-400" />
+        <span class="font-medium">返回</span>
+      </button>
+
+      <div class="h-px bg-gray-200/60 dark:bg-gray-700/60 my-1"></div>
+
+      <div class="max-h-56 overflow-y-auto">
+        <template v-if="player.customPlaylists.filter(pl => pl.id !== player.contextMenu.playlistId).length > 0">
+          <button
+            v-for="pl in player.customPlaylists.filter(pl => pl.id !== player.contextMenu.playlistId)"
+            :key="pl.id"
+            class="w-full px-3 py-2 rounded-lg text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 flex items-center gap-2 transition-colors"
+            @click="moveToPlaylist(pl.id)"
+          >
+            <FolderIcon :size="14" class="text-amber-500 shrink-0" />
+            <span class="truncate">{{ pl.name }}</span>
+          </button>
+        </template>
+
+        <div v-else class="px-3 py-4 text-center">
+          <p class="text-gray-400 dark:text-gray-500 text-xs">暂无其他歌单</p>
+        </div>
+      </div>
     </div>
   </div>
 </template>

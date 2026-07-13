@@ -1,75 +1,128 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" width="512" height="512">
   <defs>
-    <linearGradient id="bgGradient" x1="0%" y1="0%" x2="100%" y2="100%">
-      <stop offset="0%" style="stop-color:#1a365d;stop-opacity:1" />
-      <stop offset="50%" style="stop-color:#2d5a87;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#1e3a5f;stop-opacity:1" />
+    <linearGradient id="paperBg" x1="0%" y1="0%" x2="100%" y2="100%">
+      <stop offset="0%" style="stop-color:#f5f2eb;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#ebe7dc;stop-opacity:1" />
     </linearGradient>
-    <linearGradient id="mountainGradient" x1="50%" y1="0%" x2="50%" y2="100%">
-      <stop offset="0%" style="stop-color:#4a7c59;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#2d5a3d;stop-opacity:1" />
+
+    <linearGradient id="inkFar" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" style="stop-color:#9ca3af;stop-opacity:0.6" />
+      <stop offset="100%" style="stop-color:#6b7280;stop-opacity:0.4" />
     </linearGradient>
-    <linearGradient id="waterGradient" x1="0%" y1="0%" x2="100%" y2="0%">
-      <stop offset="0%" style="stop-color:#60a5fa;stop-opacity:0.9" />
-      <stop offset="50%" style="stop-color:#93c5fd;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#60a5fa;stop-opacity:0.9" />
+
+    <linearGradient id="inkMid" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" style="stop-color:#6b7280;stop-opacity:0.85" />
+      <stop offset="100%" style="stop-color:#4b5563;stop-opacity:0.7" />
     </linearGradient>
-    <linearGradient id="sunGradient" x1="50%" y1="0%" x2="50%" y2="100%">
-      <stop offset="0%" style="stop-color:#fbbf24;stop-opacity:1" />
-      <stop offset="100%" style="stop-color:#f59e0b;stop-opacity:1" />
+
+    <linearGradient id="inkNear" x1="50%" y1="0%" x2="50%" y2="100%">
+      <stop offset="0%" style="stop-color:#374151;stop-opacity:1" />
+      <stop offset="100%" style="stop-color:#1f2937;stop-opacity:0.95" />
     </linearGradient>
-    <filter id="glow">
-      <feGaussianBlur stdDeviation="3" result="coloredBlur"/>
-      <feMerge>
-        <feMergeNode in="coloredBlur"/>
-        <feMergeNode in="SourceGraphic"/>
-      </feMerge>
+
+    <linearGradient id="waterInk" x1="0%" y1="0%" x2="100%" y2="0%">
+      <stop offset="0%" style="stop-color:#4b5563;stop-opacity:0.5" />
+      <stop offset="50%" style="stop-color:#6b7280;stop-opacity:0.7" />
+      <stop offset="100%" style="stop-color:#4b5563;stop-opacity:0.5" />
+    </linearGradient>
+
+    <filter id="inkBlur">
+      <feGaussianBlur stdDeviation="1.5" />
+    </filter>
+
+    <filter id="softShadow">
+      <feDropShadow dx="0" dy="4" stdDeviation="8" flood-color="#000000" flood-opacity="0.08"/>
     </filter>
   </defs>
 
-  <!-- 背景 -->
-  <rect width="512" height="512" rx="96" ry="96" fill="url(#bgGradient)"/>
+  <!-- 宣纸背景（圆角方形） -->
+  <rect width="512" height="512" rx="100" ry="100" fill="url(#paperBg)" filter="url(#softShadow)"/>
 
-  <!-- 远山（后层山 -->
-  <path d="M 0 380 L 80 300 L 140 340 L 220 260 L 300 320 L 380 280 L 450 340 L 512 310 L 512 512 L 0 512 Z"
-        fill="#3b5998" opacity="0.4"/>
+  <!-- 远山（最淡） -->
+  <path d="M -10 370
+           C 40 340, 70 350, 100 330
+           C 140 305, 170 325, 210 300
+           C 250 275, 280 290, 320 270
+           C 360 250, 400 265, 440 245
+           C 470 230, 500 245, 522 230
+           L 522 522 L -10 522 Z"
+        fill="url(#inkFar)" filter="url(#inkBlur)"/>
 
-  <!-- 中景山脉 -->
-  <path d="M 0 420 L 60 360 L 120 400 L 200 300 L 280 380 L 360 320 L 440 380 L 512 350 L 512 512 L 0 512 Z"
-        fill="url(#mountainGradient)" opacity="0.7"/>
+  <!-- 中景山 -->
+  <path d="M -10 410
+           C 30 380, 60 395, 100 365
+           C 140 335, 180 360, 230 320
+           C 270 285, 300 310, 340 280
+           C 380 250, 420 275, 460 255
+           C 490 240, 510 260, 522 250
+           L 522 522 L -10 522 Z"
+        fill="url(#inkMid)" opacity="0.9"/>
 
-  <!-- 主峰（高山） -->
-  <path d="M 120 420 L 220 200 L 260 280 L 320 160 L 400 320 L 420 420 Z"
-        fill="url(#mountainGradient)"/>
+  <!-- 近景主峰（高山） -->
+  <path d="M 100 440
+           L 180 290
+           L 230 340
+           L 280 230
+           L 330 310
+           L 380 260
+           L 430 360
+           L 420 440 Z"
+        fill="url(#inkNear)"/>
 
-  <!-- 山顶积雪 -->
-  <path d="M 200 240 L 220 200 L 240 250 Z" fill="#ffffff" opacity="0.8"/>
-  <path d="M 290 210 L 320 160 L 345 220 L 310 240 Z" fill="#ffffff" opacity="0.9"/>
+  <!-- 山顶留白（云烟效果） -->
+  <path d="M 260 270 Q 280 230 300 270"
+        stroke="#f5f2eb" stroke-width="6" fill="none" stroke-linecap="round" opacity="0.8"/>
+  <path d="M 170 310 Q 185 290 200 315"
+        stroke="#f5f2eb" stroke-width="4" fill="none" stroke-linecap="round" opacity="0.6"/>
+  <path d="M 350 295 Q 370 270 390 295"
+        stroke="#f5f2eb" stroke-width="5" fill="none" stroke-linecap="round" opacity="0.7"/>
 
-  <!-- 太阳/月亮 -->
-  <circle cx="380" cy="130" r="36" fill="url(#sunGradient)" filter="url(#glow)" opacity="0.9"/>
-
-  <!-- 流水（瀑布+波浪 -->
-  <g opacity="0.9">
-    <!-- 瀑布 -->
-    <path d="M 240 330 Q 250 380 Q 235 420 Q 255 460 Q 240 500"
-          stroke="url(#waterGradient)" stroke-width="8" fill="none" stroke-linecap="round"/>
-    <path d="M 260 350 Q 270 390 Q 255 430 Q 275 470 Q 260 510"
-          stroke="url(#waterGradient)" stroke-width="6" fill="none" stroke-linecap="round" opacity="0.7"/>
+  <!-- 流水（瀑布） -->
+  <g opacity="0.75">
+    <path d="M 255 350
+             Q 265 385, 250 420
+             Q 268 455, 255 490
+             Q 248 505, 258 515"
+          stroke="url(#waterInk)" stroke-width="7" fill="none" stroke-linecap="round"/>
+    <path d="M 275 370
+             Q 282 400, 270 430
+             Q 285 460, 275 490"
+          stroke="#9ca3af" stroke-width="4" fill="none" stroke-linecap="round" opacity="0.5"/>
   </g>
 
-  <!-- 底部水面波浪 -->
+  <!-- 底部水面波纹（流水） -->
   <g>
-    <path d="M 0 470 Q 60 460 120 470 T 240 470 T 360 470 T 512 470 L 512 512 L 0 512 Z"
-          fill="#60a5fa" opacity="0.3"/>
-    <path d="M 0 485 Q 80 475 160 485 T 320 485 T 512 485 L 512 512 L 0 512 Z"
-          fill="#93c5fd" opacity="0.4"/>
+    <path d="M 0 465
+             Q 50 455, 100 465
+             T 200 465
+             T 300 465
+             T 400 465
+             T 512 465
+             L 512 522 L 0 522 Z"
+          fill="#9ca3af" opacity="0.25"/>
+    <path d="M 0 485
+             Q 60 475, 120 485
+             T 240 485
+             T 360 485
+             T 512 485
+             L 512 522 L 0 522 Z"
+          fill="#6b7280" opacity="0.2"/>
   </g>
 
-  <!-- 音乐符号点缀（高音谱号的简化抽象） -->
-  <g transform="translate(100, 120)" opacity="0.15" fill="#ffffff">
-    <circle cx="0" cy="30" r="12"/>
-    <path d="M 0 18 Q 20 0 40 20 Q 60 40 40 60 Q 20 80 0 60 Q -10 50 -5 40"
-          stroke="#ffffff" stroke-width="4" fill="none"/>
+  <!-- 简约琴弦/音乐符号（左下，呼应"高山流水遇知音"） -->
+  <g transform="translate(70, 380)" opacity="0.35">
+    <line x1="0" y1="0" x2="0" y2="50" stroke="#1f2937" stroke-width="1.5" stroke-linecap="round"/>
+    <line x1="8" y1="0" x2="8" y2="50" stroke="#1f2937" stroke-width="1.5" stroke-linecap="round"/>
+    <line x1="16" y1="0" x2="16" y2="50" stroke="#1f2937" stroke-width="1.5" stroke-linecap="round"/>
+    <line x1="24" y1="0" x2="24" y2="50" stroke="#1f2937" stroke-width="1.5" stroke-linecap="round"/>
+    <line x1="32" y1="0" x2="32" y2="50" stroke="#1f2937" stroke-width="1.5" stroke-linecap="round"/>
+    <line x1="-2" y1="15" x2="34" y2="15" stroke="#1f2937" stroke-width="1" opacity="0.5"/>
+    <line x1="-2" y1="35" x2="34" y2="35" stroke="#1f2937" stroke-width="1" opacity="0.5"/>
+  </g>
+
+  <!-- 右上印章式点缀（红色小印章，增加水墨韵味） -->
+  <g transform="translate(400, 70)" opacity="0.6">
+    <rect x="0" y="0" width="28" height="28" rx="4" ry="4" fill="none" stroke="#b91c1c" stroke-width="2"/>
+    <text x="14" y="20" text-anchor="middle" font-size="14" fill="#b91c1c" font-family="serif" font-weight="bold">山</text>
   </g>
 </svg>

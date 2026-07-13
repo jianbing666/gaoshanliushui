@@ -57,6 +57,7 @@ fn main() {
         })
         .invoke_handler(tauri::generate_handler![
             scan_folder::scan_music_folder,
+            scan_folder::clear_cover_cache,
             toggle_mini_mode::toggle_mini_mode,
             scan_images::scan_image_folder,
             global_shortcut::update_global_shortcut,

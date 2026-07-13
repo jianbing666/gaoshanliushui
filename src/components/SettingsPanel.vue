@@ -1,6 +1,7 @@
 <script setup lang="ts">
 import { usePlayerStore } from '@/stores/playerStore'
 import { open } from '@tauri-apps/plugin-dialog'
+import { invoke } from '@tauri-apps/api/core'
 import type { ThemeMode, BackgroundSettings } from '@/types/song'
 import { useShortcutConfig } from '@/composables/useShortcutConfig'
 import { useAutoLaunch } from '@/composables/useAutoLaunch'
@@ -153,6 +154,30 @@ function handleShowSpectrumToggle() {
 
 function handleSpectrumLowPowerToggle() {
   player.setSpectrumLowPower(!player.spectrumLowPower)
+}
+
+const isClearingCache = ref(false)
+const cacheCleared = ref(false)
+
+async function handleClearCache() {
+  if (isClearingCache.value) return
+  isClearingCache.value = true
+  cacheCleared.value = false
+  try {
+    // 清除音频缓存（前端内存）
+    player.clearAudioBufferCache()
+    // 清除封面缓存（后端文件）
+    await invoke('clear_cover_cache')
+    console.log('[Cache] 所有缓存已清除')
+    cacheCleared.value = true
+    setTimeout(() => {
+      cacheCleared.value = false
+    }, 2000)
+  } catch (error) {
+    console.error('清除缓存失败:', error)
+  } finally {
+    isClearingCache.value = false
+  }
 }
 
 function formatTime(seconds: number): string {
@@ -585,6 +610,26 @@ onUnmounted(() => {
                   class="absolute top-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform"
                   :class="player.spectrumLowPower ? 'translate-x-5' : 'translate-x-0.5'"
                 ></div>
+              </button>
+            </div>
+          </div>
+
+          <!-- 清除缓存 -->
+          <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-gray-900 dark:text-white text-sm font-medium">清除缓存</p>
+                <p class="text-gray-500 dark:text-gray-400 text-xs">清除音频解码缓存和封面图片缓存</p>
+              </div>
+              <button
+                class="px-3 py-1.5 rounded-md text-xs font-medium transition-colors shrink-0"
+                :class="cacheCleared
+                  ? 'bg-green-500 text-white'
+                  : 'bg-gray-900 dark:bg-white text-white dark:text-gray-900 hover:bg-gray-700 dark:hover:bg-gray-200'"
+                :disabled="isClearingCache"
+                @click="handleClearCache"
+              >
+                {{ isClearingCache ? '清除中...' : cacheCleared ? '已清除' : '清除' }}
               </button>
             </div>
           </div>

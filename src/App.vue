@@ -58,7 +58,7 @@ onMounted(async () => {
     <header class="h-12 bg-white/80 dark:bg-gray-800/80 backdrop-blur-xl border-b border-gray-200/50 dark:border-gray-700/50 flex items-center justify-between px-4 shrink-0 relative z-20">
       <!-- 左侧标题 -->
       <div class="flex items-center gap-2">
-        <h1 class="text-gray-900 dark:text-white text-sm font-medium">Bilibili Music Player</h1>
+        <h1 class="text-gray-900 dark:text-white text-sm font-medium">高山流水</h1>
       </div>
 
       <!-- 右侧设置按钮 -->

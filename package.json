@@ -1,7 +1,7 @@
 {
-  "name": "bilibili-music-player",
+  "name": "gaoshanliushui",
   "version": "1.0.0",
-  "description": "A lightweight music player for Bilibili downloaded MP3 files",
+  "description": "高山流水 - 一款优雅的本地音乐播放器",
   "type": "module",
   "scripts": {
     "dev": "vite",
