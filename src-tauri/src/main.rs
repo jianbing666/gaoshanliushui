@@ -10,6 +10,7 @@ use commands::global_shortcut;
 use commands::scan_images;
 use commands::tray;
 use commands::download_bilibili;
+use commands::webview_memory;
 
 use std::sync::Mutex;
 use tauri::Manager;
@@ -81,6 +82,11 @@ fn main() {
             download_bilibili::parse_bilibili_url,
             download_bilibili::download_bilibili_music,
             download_bilibili::read_batch_file,
+            // 2026-07-14: WebView2 内存优化 (强制 GC + 渲染进程挂起)
+            webview_memory::clean_renderer_memory,
+            webview_memory::try_suspend_renderer,
+            webview_memory::try_resume_renderer,
+            webview_memory::is_renderer_suspended,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

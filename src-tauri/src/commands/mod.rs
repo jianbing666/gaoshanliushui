@@ -4,3 +4,4 @@ pub mod global_shortcut;
 pub mod scan_images;
 pub mod tray;
 pub mod download_bilibili;
+pub mod webview_memory;

@@ -993,6 +993,8 @@ export const usePlayerStore = defineStore('player', () => {
 
   function setSpectrumQuality(value: SpectrumQuality) {
     spectrumQuality.value = value
+    // 2026-07-14: 切换频谱质量档位时触发 GC, 释放旧的频谱缓冲区等临时对象
+    void invoke('clean_renderer_memory').catch(() => { /* 静默失败 */ })
   }
 
   // 频谱相关计算属性
@@ -1695,6 +1697,8 @@ export const usePlayerStore = defineStore('player', () => {
     currentAudioBuffer = null
     currentBufferUrl = null
     currentAudioUrl = null
+    // 2026-07-14: 主动清空引用后, 立即触发 GC 立即回收大块内存
+    void invoke('clean_renderer_memory').catch(() => { /* 静默失败 */ })
   }
 
   // ========== 音频播放结束回调 ==========
@@ -1822,6 +1826,9 @@ export const usePlayerStore = defineStore('player', () => {
     } else if (loopMode.value === 'list') {
       currentIndex.value = 0
     }
+
+    // 2026-07-14: 切歌后异步触发 JS 堆 GC, 让旧 AudioBuffer 尽快释放
+    void invoke('clean_renderer_memory').catch(() => { /* 静默失败, 不影响切歌 */ })
   }
 
   function prev() {
@@ -1856,6 +1863,9 @@ export const usePlayerStore = defineStore('player', () => {
     } else if (loopMode.value === 'list') {
       currentIndex.value = playlist.value.length - 1
     }
+
+    // 2026-07-14: 切歌后异步触发 JS 堆 GC, 让旧 AudioBuffer 尽快释放
+    void invoke('clean_renderer_memory').catch(() => { /* 静默失败, 不影响切歌 */ })
   }
 
   function playByIndex(index: number) {
