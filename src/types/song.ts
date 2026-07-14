@@ -14,6 +14,8 @@ export interface Song {
   duration: number
   /** 封面图片路径 */
   cover_path: string | null
+  /** 缩略图路径（Rust 端生成, 128px 宽, 旧数据可能为 null） */
+  cover_thumb_path?: string | null
 }
 
 /// 歌单数据类型

@@ -1,0 +1,9 @@
+/* 阶段 2.1: 虚拟滚动全局样式
+ * 直接复用 vue-virtual-scroller 自带 CSS（约 600 字节），按需可在此覆盖
+ */
+@import 'vue-virtual-scroller/dist/vue-virtual-scroller.css';
+
+/* 覆盖：让虚拟列表占满父容器，避免与外层 flex 布局冲突 */
+.vue-recycle-scroller {
+  min-height: 0;
+}

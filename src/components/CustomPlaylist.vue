@@ -5,6 +5,8 @@ import FolderIcon from '@/components/icons/FolderIcon.vue'
 import ChevronRightIcon from '@/components/icons/ChevronRightIcon.vue'
 import ChevronDownIcon from '@/components/icons/ChevronDownIcon.vue'
 import SongItem from '@/components/SongItem.vue'
+// 阶段 2.1: 虚拟列表
+import VirtualSongList from '@/components/VirtualSongList.vue'
 import { computed } from 'vue'
 
 const props = defineProps<{
@@ -19,6 +21,9 @@ const songs = computed(() => {
     .map((id) => player.findSongById(id))
     .filter((s) => s !== undefined)
 })
+
+// 阶段 2.1: 长度 > 200 启用虚拟滚动
+const useVirtualList = computed(() => songs.value.length > 200)
 
 // 是否激活
 const isActive = computed(() => player.activePlaylistId === props.playlist.id)
@@ -48,23 +53,10 @@ function playSongInPlaylist(index: number) {
   }
 }
 
-// 右键菜单
-// const showContextMenu = ref(false)
-// const contextMenuX = ref(0)
-// const contextMenuY = ref(0)
-
 function handleContextMenu(e: MouseEvent) {
   e.preventDefault()
   e.stopPropagation()
-  // contextMenuX.value = e.clientX
-  // contextMenuY.value = e.clientY
-  // showContextMenu.value = true
 }
-
-// function handleDeletePlaylist() {
-//   player.deletePlaylist(props.playlist.id)
-//   showContextMenu.value = false
-// }
 </script>
 
 <template>
@@ -113,17 +105,39 @@ function handleContextMenu(e: MouseEvent) {
     </div>
 
     <!-- 展开的歌曲列表（缩进显示） -->
-    <div v-if="playlist.expanded" class="ml-6 space-y-0.5 mt-0.5">
+    <div v-if="playlist.expanded" class="ml-6 mt-0.5">
       <template v-if="songs.length > 0">
-        <SongItem
-          v-for="(song, index) in songs"
-          :key="song.id"
-          :song="song"
-          :index="index"
+        <!-- 阶段 2.1: 大列表走虚拟滚动, 小列表保留 v-for -->
+        <VirtualSongList
+          v-if="useVirtualList"
+          :songs="songs"
           :compact="true"
           :playlist-id="playlist.id"
           @play="playSongInPlaylist"
-        />
+        >
+          <template #default="{ song, index }">
+            <SongItem
+              :song="song"
+              :index="index"
+              :compact="true"
+              :playlist-id="playlist.id"
+              @play="playSongInPlaylist"
+            />
+          </template>
+        </VirtualSongList>
+        <template v-else>
+          <div class="space-y-0.5">
+            <SongItem
+              v-for="(song, index) in songs"
+              :key="song.id"
+              :song="song"
+              :index="index"
+              :compact="true"
+              :playlist-id="playlist.id"
+              @play="playSongInPlaylist"
+            />
+          </div>
+        </template>
       </template>
       <div v-else class="px-3 py-2 text-xs text-gray-400 dark:text-gray-500">
         暂无歌曲

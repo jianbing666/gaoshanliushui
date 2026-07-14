@@ -199,7 +199,7 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <aside class="w-80 backdrop-blur-2xl border-l border-gray-200/60 dark:border-gray-700/60 shadow-2xl flex flex-col h-full" :class="
+  <aside class="w-80 backdrop-blur border-l border-gray-200/60 dark:border-gray-700/60 shadow-2xl flex flex-col h-full will-change-auto" :class="
     player.currentBackgroundUrl && player.background.mode !== 'none'
       ? 'bg-white/50 dark:bg-gray-900/50'
       : 'bg-white/90 dark:bg-gray-900/90'

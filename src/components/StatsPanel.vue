@@ -31,11 +31,17 @@ function formatDurationShort(seconds: number): string {
 async function handleExport() {
   await player.exportStatsReport()
 }
+
+// 阶段 3.7: 封面加载失败时静默隐藏
+function onCoverError(e: Event) {
+  const img = e.target as HTMLImageElement
+  img.style.display = 'none'
+}
 </script>
 
 <template>
   <div
-    class="w-80 h-full flex flex-col bg-white/50 dark:bg-gray-900/60 backdrop-blur-2xl border-l border-gray-200/60 dark:border-gray-700/60 shadow-2xl"
+    class="w-80 h-full flex flex-col bg-white/50 dark:bg-gray-900/60 backdrop-blur border-l border-gray-200/60 dark:border-gray-700/60 shadow-2xl will-change-auto"
   >
     <!-- 头部 -->
     <div class="flex items-center justify-between px-5 py-4 border-b border-gray-200/50 dark:border-gray-700/50">
@@ -121,6 +127,8 @@ async function handleExport() {
                   :src="player.getCoverUrl(player.mostLoopedSong.song.cover_path)"
                   :alt="player.mostLoopedSong.song.title"
                   class="w-full h-full object-cover"
+                  loading="lazy"
+                  decoding="async"
                 />
                 <div v-else class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500">
                   <MusicIcon :size="20" />
@@ -143,6 +151,9 @@ async function handleExport() {
                   :src="player.getCoverUrl(player.longestPlayedSong.song.cover_path)"
                   :alt="player.longestPlayedSong.song.title"
                   class="w-full h-full object-cover"
+                  loading="lazy"
+                  decoding="async"
+                  @error="onCoverError"
                 />
                 <div v-else class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500">
                   <MusicIcon :size="20" />

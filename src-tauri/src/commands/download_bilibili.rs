@@ -18,6 +18,47 @@ use tauri::{AppHandle, Emitter};
 use tauri_plugin_shell::ShellExt;
 use tokio::io::AsyncWriteExt;
 
+/// 读取批量下载文档 (.md / .txt)
+/// 返回 UTF-8 解码后的文件内容, 由前端负责解析为条目。
+/// 限定扩展名: .md / .txt / .markdown (防止用户误选二进制文件)
+#[tauri::command]
+pub async fn read_batch_file(path: String) -> Result<String, String> {
+    use std::path::Path;
+
+    let p = Path::new(&path);
+    if !p.exists() {
+        return Err(format!("文件不存在: {}", path));
+    }
+    if !p.is_file() {
+        return Err(format!("不是文件: {}", path));
+    }
+
+    // 扩展名校验
+    let ext = p
+        .extension()
+        .and_then(|e| e.to_str())
+        .map(|s| s.to_lowercase())
+        .unwrap_or_default();
+    if !matches!(ext.as_str(), "md" | "txt" | "markdown") {
+        return Err(format!(
+            "仅支持 .md / .txt / .markdown 文件,当前扩展名: .{}",
+            ext
+        ));
+    }
+
+    // 读取并尝试 UTF-8 解码,失败时退回 lossy
+    let bytes = std::fs::read(p).map_err(|e| format!("读取文件失败: {}", e))?;
+    let content = String::from_utf8(bytes.clone())
+        .unwrap_or_else(|_| String::from_utf8_lossy(&bytes).to_string());
+
+    // 文件大小上限 2MB, 防止误选超大文件卡住 UI
+    if content.len() > 2 * 1024 * 1024 {
+        return Err(format!("文件过大 (>2MB): {}", path));
+    }
+
+    Ok(content)
+}
+
 /// 视频信息（前端展示用）
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct VideoInfo {

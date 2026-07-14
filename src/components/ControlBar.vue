@@ -118,7 +118,7 @@ onUnmounted(() => {
 <template>
   <div v-bind="$attrs">
     <footer 
-      class="backdrop-blur-xl border-t border-gray-200/50 dark:border-gray-700/50 flex items-center px-6 gap-6 shrink-0 h-24"
+      class="backdrop-blur border-t border-gray-200/50 dark:border-gray-700/50 flex items-center px-6 gap-6 shrink-0 h-24"
       :class="
         player.currentBackgroundUrl && player.background.mode !== 'none'
           ? 'bg-white/30 dark:bg-gray-900/30'

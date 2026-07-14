@@ -73,11 +73,14 @@ fn main() {
             scan_folder::scan_music_folder,
             scan_folder::clear_cover_cache,
             toggle_mini_mode::toggle_mini_mode,
+            toggle_mini_mode::set_window_size,
+            toggle_mini_mode::get_window_size,
             scan_images::scan_image_folder,
             global_shortcut::update_global_shortcut,
             tray::set_minimize_to_tray,
             download_bilibili::parse_bilibili_url,
             download_bilibili::download_bilibili_music,
+            download_bilibili::read_batch_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

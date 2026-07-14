@@ -18,6 +18,14 @@ const SUPPORTED_EXTENSIONS: &[&str] = &["mp3", "mp4", "flac", "wav", "m4a", "aac
 /// 支持的图片扩展名
 const COVER_IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "gif", "bmp", "webp"];
 
+/// ========== 阶段 3.1: 缩略图配置 ==========
+/// 缩略图最大宽度
+const THUMB_WIDTH: u32 = 128;
+/// 缩略图 jpeg 质量
+const THUMB_QUALITY: u8 = 75;
+/// 缩略图缓存目录名
+const THUMB_DIR: &str = "gaoshanliushui-covers-thumb";
+
 /// 递归扫描指定文件夹下的所有音频文件，并解析元数据
 #[tauri::command]
 pub async fn scan_music_folder(
@@ -79,10 +87,16 @@ fn parse_audio_file(file_path: &Path, use_filename_only: bool, force_refresh: bo
 
     // 强制刷新时，先删除旧的封面缓存
     if force_refresh {
-        let temp_dir = std::env::temp_dir().join("gaoshanliushui-covers");
-        let cover_path = temp_dir.join(format!("{}.jpg", id));
+        let cover_dir = std::env::temp_dir().join("gaoshanliushui-covers");
+        let cover_path = cover_dir.join(format!("{}.jpg", id));
         if cover_path.exists() {
             let _ = std::fs::remove_file(&cover_path);
+        }
+        // 阶段 3.1: 同步清理缩略图
+        let thumb_dir = std::env::temp_dir().join(THUMB_DIR);
+        let thumb_path = thumb_dir.join(format!("{}.jpg", id));
+        if thumb_path.exists() {
+            let _ = std::fs::remove_file(&thumb_path);
         }
     }
 
@@ -104,6 +118,7 @@ fn parse_audio_file(file_path: &Path, use_filename_only: bool, force_refresh: bo
             .and_then(|p| p.read().ok())
             .map(|f| f.properties().duration().as_secs())
             .unwrap_or(0);
+        // 阶段 3.1: 文件名模式无内嵌封面, 缩略图与封面路径同步 (复用同级图片)
         let cover_path = find_sibling_cover_image(file_path);
         return Ok(Song {
             id,
@@ -112,12 +127,13 @@ fn parse_audio_file(file_path: &Path, use_filename_only: bool, force_refresh: bo
             artist,
             album: String::new(),
             duration,
-            cover_path,
+            cover_path: cover_path.clone(),
+            cover_thumb_path: cover_path,
         });
     }
 
     // 尝试解析 ID3 标签
-    let (title, artist, album, duration, cover_path) = match Probe::open(file_path) {
+    let (title, artist, album, duration, cover_path, cover_thumb_path) = match Probe::open(file_path) {
         Ok(probe) => match probe.read() {
             Ok(tagged_file) => {
                 let duration = tagged_file.properties().duration().as_secs();
@@ -136,8 +152,15 @@ fn parse_audio_file(file_path: &Path, use_filename_only: bool, force_refresh: bo
                 }
 
                 // 提取封面图片（优先使用内嵌封面，否则尝试同名图片）
-                let cover_path = extract_cover_art(file_path, &id)
-                    .or_else(|| find_sibling_cover_image(file_path));
+                // 阶段 3.1: 同时返回 (cover, thumb)
+                let (mut cover_path, mut cover_thumb_path) = extract_cover_art(file_path, &id);
+
+                // 同级图片兜底
+                if cover_path.is_none() {
+                    let sibling = find_sibling_cover_image(file_path);
+                    cover_path = sibling.clone();
+                    cover_thumb_path = sibling;
+                }
 
                 // 如果元数据缺失，尝试从文件名解析
                 if title.is_empty() || artist.is_empty() {
@@ -159,7 +182,7 @@ fn parse_audio_file(file_path: &Path, use_filename_only: bool, force_refresh: bo
                         .to_string();
                 }
 
-                (title, artist, album, duration, cover_path)
+                (title, artist, album, duration, cover_path, cover_thumb_path)
             }
             Err(_e) => {
                 // 解析标签失败，仅使用文件名
@@ -173,8 +196,8 @@ fn parse_audio_file(file_path: &Path, use_filename_only: bool, force_refresh: bo
                 } else {
                     title
                 };
-                let cover_path = find_sibling_cover_image(file_path);
-                (title, artist, String::new(), 0u64, cover_path)
+                let sibling = find_sibling_cover_image(file_path);
+                (title, artist, String::new(), 0u64, sibling.clone(), sibling)
             }
         },
         Err(_) => {
@@ -189,8 +212,8 @@ fn parse_audio_file(file_path: &Path, use_filename_only: bool, force_refresh: bo
             } else {
                 title
             };
-            let cover_path = find_sibling_cover_image(file_path);
-            (title, artist, String::new(), 0u64, cover_path)
+            let sibling = find_sibling_cover_image(file_path);
+            (title, artist, String::new(), 0u64, sibling.clone(), sibling)
         }
     };
 
@@ -202,6 +225,7 @@ fn parse_audio_file(file_path: &Path, use_filename_only: bool, force_refresh: bo
         album,
         duration,
         cover_path,
+        cover_thumb_path,
     })
 }
 
@@ -239,47 +263,107 @@ fn find_sibling_cover_image(audio_path: &Path) -> Option<String> {
     None
 }
 
-/// 提取音频文件中的封面图片，保存到临时目录
-fn extract_cover_art(file_path: &Path, song_id: &str) -> Option<String> {
-    let tagged_file = Probe::open(file_path).ok()?.read().ok()?;
+/// 提取音频文件中的封面图片, 同时生成 128px 缩略图
+/// 返回 (原图路径, 缩略图路径), 任一失败不影响另一者
+fn extract_cover_art(file_path: &Path, song_id: &str) -> (Option<String>, Option<String>) {
+    let tagged_file = match Probe::open(file_path).ok().and_then(|p| p.read().ok()) {
+        Some(f) => f,
+        None => return (None, None),
+    };
 
-    let tag = tagged_file.primary_tag().or_else(|| tagged_file.first_tag())?;
+    let tag = match tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
+        Some(t) => t,
+        None => return (None, None),
+    };
 
-    // 查找封面图片
     let pictures = tag.pictures();
     if pictures.is_empty() {
-        return None;
+        return (None, None);
     }
 
     let picture = &pictures[0];
 
-    // 创建临时目录
-    let temp_dir = std::env::temp_dir().join("gaoshanliushui-covers");
-    if !temp_dir.exists() {
-        let _ = std::fs::create_dir_all(&temp_dir);
+    // 1. 保存原图
+    let cover_dir = std::env::temp_dir().join("gaoshanliushui-covers");
+    if !cover_dir.exists() {
+        let _ = std::fs::create_dir_all(&cover_dir);
     }
+    let cover_path = cover_dir.join(format!("{}.jpg", song_id));
+    let cover_str = match std::fs::write(&cover_path, picture.data()) {
+        Ok(_) => cover_path.to_str().map(String::from),
+        Err(_) => None,
+    };
 
-    // 保存封面图片
-    let cover_filename = format!("{}.jpg", song_id);
-    let cover_path = temp_dir.join(&cover_filename);
+    // 2. 阶段 3.1: 生成缩略图 (失败不回退, 不阻塞)
+    let thumb_str = generate_thumbnail(picture.data(), song_id);
 
-    if std::fs::write(&cover_path, picture.data()).is_ok() {
-        cover_path.to_str().map(|s| s.to_string())
-    } else {
-        None
-    }
+    (cover_str, thumb_str)
 }
 
-/// 清除所有封面缓存
+/// 阶段 3.1: 生成 128px 宽 jpeg 缩略图
+/// 失败时返回 None (不影响主流程)
+fn generate_thumbnail(data: &[u8], song_id: &str) -> Option<String> {
+    use image::ImageReader;
+    use std::io::Cursor;
+
+    let reader = ImageReader::new(Cursor::new(data))
+        .with_guessed_format()
+        .ok()?;
+    let img = reader.decode().ok()?;
+
+    // 原图已很小, 无需缩放
+    if img.width() <= THUMB_WIDTH {
+        return None;
+    }
+
+    let thumb = img.resize(
+        THUMB_WIDTH,
+        THUMB_WIDTH,
+        image::imageops::FilterType::Triangle,
+    );
+
+    // 确保缩略图目录存在
+    let thumb_dir = std::env::temp_dir().join(THUMB_DIR);
+    if !thumb_dir.exists() {
+        let _ = std::fs::create_dir_all(&thumb_dir);
+    }
+    let thumb_path = thumb_dir.join(format!("{}.jpg", song_id));
+
+    // 编码为 jpeg (RGB 8-bit, 减小编码复杂度)
+    let rgb = thumb.into_rgb8();
+    let mut buf = Vec::with_capacity(8 * 1024);
+    {
+        let mut encoder =
+            image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, THUMB_QUALITY);
+        if encoder
+            .encode(
+                rgb.as_raw(),
+                rgb.width(),
+                rgb.height(),
+                image::ExtendedColorType::Rgb8,
+            )
+            .is_err()
+        {
+            return None;
+        }
+    }
+
+    std::fs::write(&thumb_path, &buf).ok()?;
+    thumb_path.to_str().map(String::from)
+}
+
+/// 清除所有封面与缩略图缓存
 #[tauri::command]
 pub fn clear_cover_cache() {
-    let temp_dir = std::env::temp_dir().join("gaoshanliushui-covers");
-    if temp_dir.exists() {
-        if let Ok(entries) = std::fs::read_dir(&temp_dir) {
-            for entry in entries.flatten() {
-                let path = entry.path();
-                if path.is_file() {
-                    let _ = std::fs::remove_file(&path);
+    for dir_name in &["gaoshanliushui-covers", THUMB_DIR] {
+        let dir = std::env::temp_dir().join(dir_name);
+        if dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        let _ = std::fs::remove_file(&path);
+                    }
                 }
             }
         }

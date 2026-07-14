@@ -4,6 +4,8 @@ export default {
   content: [
     "./index.html",
     "./src/**/*.{vue,js,ts,jsx,tsx}",
+    "!./src-tauri/**",     // 阶段 4.3: 显式排除 Rust 编译产物路径
+    "!./node_modules/**",  // 阶段 4.3: 显式排除依赖目录
   ],
   theme: {
     extend: {

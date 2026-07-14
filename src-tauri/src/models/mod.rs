@@ -17,6 +17,9 @@ pub struct Song {
     pub duration: u64,
     /// 封面图片路径（提取后保存到临时目录）
     pub cover_path: Option<String>,
+    /// 缩略图路径（128px 宽, 保存到 temp_dir/gaoshanliushui-covers-thumb/, 旧数据为 None）
+    #[serde(default)]
+    pub cover_thumb_path: Option<String>,
 }
 
 /// 循环模式

@@ -27,10 +27,22 @@ function handleContextMenu(e: MouseEvent) {
   e.stopPropagation()
   player.openContextMenu(props.song, props.playlistId || null, e.clientX, e.clientY)
 }
+
+// 阶段 3.7: 封面加载失败时静默隐藏
+function onCoverError(e: Event) {
+  const img = e.target as HTMLImageElement
+  img.style.display = 'none'
+}
 </script>
 
 <template>
+  <!--
+    阶段 2.x: v-memo 优化
+    仅当 song.id / isCurrentSong / player.isPlaying 变化时重渲染,
+    避免 compact 等无关 prop 变化触发整个列表 diff (5000 首歌场景收益显著)
+  -->
   <div
+    v-memo="[song.id, isCurrentSong, player.isPlaying]"
     class="flex items-center gap-3 px-3 rounded-lg cursor-pointer transition-colors hover:bg-gray-100/50 dark:hover:bg-white/10 group"
     :class="[
       compact ? 'py-1.5' : 'py-2',
@@ -61,6 +73,9 @@ function handleContextMenu(e: MouseEvent) {
         :src="player.getCoverUrl(song.cover_path)"
         :alt="song.title"
         class="w-full h-full object-cover"
+        loading="lazy"
+        decoding="async"
+        @error="onCoverError"
       />
       <div class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500">
         <span :class="compact ? 'text-[10px]' : 'text-xs'">♪</span>

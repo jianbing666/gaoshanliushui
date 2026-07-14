@@ -57,7 +57,7 @@ const emit = defineEmits<{
 
 <template>
   <div
-    class="flex items-center h-12 px-3 select-none relative z-50 bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border-b border-gray-200/50 dark:border-gray-700/50"
+    class="flex items-center h-12 px-3 select-none relative z-50 bg-white/90 dark:bg-gray-900/90 backdrop-blur border-b border-gray-200/50 dark:border-gray-700/50"
   >
     <!-- 左侧：图标 + 标题 + 侧边栏按钮 + 历史记录按钮 -->
     <div class="flex items-center gap-2 flex-1 h-full">

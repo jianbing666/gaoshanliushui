@@ -1,5 +1,5 @@
 import { defineStore } from 'pinia'
-import { ref, computed, nextTick, watch } from 'vue'
+import { ref, computed, nextTick, watch, markRaw, shallowRef } from 'vue'
 import type { Song, LoopMode, ThemeMode, Playlist, BackgroundSettings, FontSettings, FontFamily, PlayHistoryItem } from '@/types/song'
 import { invoke } from '@tauri-apps/api/core'
 import { convertFileSrc } from '@tauri-apps/api/core'
@@ -27,6 +27,13 @@ let currentAudioBuffer: AudioBuffer | null = null
 let currentBufferUrl: string | null = null
 // 当前播放歌曲的 URL
 let currentAudioUrl: string | null = null
+// ========== 阶段 3.3: AudioBuffer LRU 缓存（保留前一首） ==========
+// 目的: 切回上一首 < 50ms, 跳过 fetch + decodeAudioData
+// 内存代价: ~30-50MB（视歌曲长度/码率）, 用户已接受
+// 命中键: prevSongId, prevBufferUrl 同步以备 stale 校验
+let prevBuffer: AudioBuffer | null = null
+let prevBufferUrl: string | null = null
+let prevSongId: string | null = null
 // 暂停时的播放位置（秒），用于恢复播放
 let pausedOffset: number = 0
 // 播放开始时的 AudioContext 时间，用于计算当前播放时间
@@ -34,7 +41,7 @@ let playbackStartTime: number = 0
 // 是否已暂停（用于区分主动暂停和播放结束）
 let isPaused: boolean = false
 
-// LocalStorage 持久化辅助
+// LocalStorage 键与限制
 const STORAGE_KEY = 'gaoshanliushui-settings'
 const MUSIC_LIBRARY_PATH_KEY = 'musicLibraryPath'
 const PLAYLISTS_KEY = 'gaoshanliushui-playlists'
@@ -132,7 +139,11 @@ export const usePlayerStore = defineStore('player', () => {
   const saved = loadSettings()
 
   // ========== 播放列表（所有歌曲） ==========
-  const playlist = ref<Song[]>([])
+  // 阶段 4.x: shallowRef 替代 ref
+  // 原因: 10000 首歌时深响应 proxy 重建成本显著 (启动 +200ms / 内存 +5-10MB)
+  // 写入约束: 必须整体替换 (playlist.value = newArr), 不能 push/splice
+  // 读取: computed 内部 `playlist.value[index]` 仍响应
+  const playlist = shallowRef<Song[]>([])
   const currentIndex = ref(-1)
 
   // ========== 歌单分组管理 ==========
@@ -150,6 +161,71 @@ export const usePlayerStore = defineStore('player', () => {
   // 当前播放的记录（用于累加播放时长）
   let currentHistoryItem: PlayHistoryItem | null = null
   let currentPlayStartTime = 0
+
+  // ========== 阶段 2.5-2.6: 统计预聚合索引 ==========
+  // 目的: 避免 6 个 computed 每次都对全量 fullPlayHistory 做 O(n) 扫描
+  // 数据规模: max 10000 条, 直接 filter + sort 需 5-10ms; 预聚合后 <1ms
+  // 设计: shallowRef + 整体替换 (新对象) 触发响应, 避免深 Proxy 重建
+
+  // 按日分桶: { 'YYYY-MM-DD': PlayHistoryItem[] }
+  const playHistoryByDay = shallowRef<Record<string, PlayHistoryItem[]>>({})
+  // 按歌曲计数: { songId: count }
+  const songPlayCount = shallowRef<Record<string, number>>({})
+  // 按歌曲累计时长: { songId: totalPlayedSeconds }
+  const songPlayDuration = shallowRef<Record<string, number>>({})
+  // 全量总时长（避免每次 reduce）
+  let totalPlayedDuration = 0
+  // 完整播放次数
+  let totalCompletedCount = 0
+  // 唯一歌曲数
+  let totalUniqueSongs = 0
+
+  // 从 fullPlayHistory 构建预聚合索引（启动时一次性）
+  function buildStatsIndex() {
+    const byDay: Record<string, PlayHistoryItem[]> = {}
+    const count: Record<string, number> = {}
+    const duration: Record<string, number> = {}
+    const uniqueIds = new Set<string>()
+
+    for (const item of fullPlayHistory.value) {
+      // 按日分桶
+      const d = new Date(item.playedAt)
+      const dayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      if (!byDay[dayKey]) byDay[dayKey] = []
+      byDay[dayKey].push(item)
+
+      // 计数
+      count[item.songId] = (count[item.songId] || 0) + 1
+      // 累计时长
+      duration[item.songId] = (duration[item.songId] || 0) + item.playedDuration
+      // 总时长
+      totalPlayedDuration += item.playedDuration
+      // 完整播放
+      if (item.completed) totalCompletedCount++
+      // 唯一
+      uniqueIds.add(item.songId)
+    }
+
+    // 排序每个桶（按 playedAt 降序）
+    for (const k of Object.keys(byDay)) {
+      byDay[k].sort((a, b) => b.playedAt - a.playedAt)
+    }
+
+    playHistoryByDay.value = byDay
+    songPlayCount.value = count
+    songPlayDuration.value = duration
+    totalUniqueSongs = uniqueIds.size
+  }
+  // 启动时同步构建一次
+  buildStatsIndex()
+
+  // 重新构建索引（清空历史时调用）
+  function rebuildStatsIndex() {
+    totalPlayedDuration = 0
+    totalCompletedCount = 0
+    totalUniqueSongs = 0
+    buildStatsIndex()
+  }
 
   function loadPlayHistory(): PlayHistoryItem[] {
     try {
@@ -234,6 +310,33 @@ export const usePlayerStore = defineStore('player', () => {
     }
     savePlayHistory()
 
+    // 3. 阶段 2.5: 增量更新预聚合索引
+    const item = currentHistoryItem
+    const d = new Date(item.playedAt)
+    const dayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+
+    // 按日分桶增量
+    const dayBucket = playHistoryByDay.value[dayKey] ? [...playHistoryByDay.value[dayKey]] : []
+    dayBucket.unshift(item)
+    playHistoryByDay.value = { ...playHistoryByDay.value, [dayKey]: dayBucket }
+
+    // 计数/时长增量（先取旧值，再赋新值）
+    const oldCount = songPlayCount.value[item.songId] || 0
+    const newCount = oldCount + 1
+    songPlayCount.value = {
+      ...songPlayCount.value,
+      [item.songId]: newCount,
+    }
+    songPlayDuration.value = {
+      ...songPlayDuration.value,
+      [item.songId]: (songPlayDuration.value[item.songId] || 0) + item.playedDuration,
+    }
+
+    // 模块级变量
+    totalPlayedDuration += item.playedDuration
+    if (item.completed) totalCompletedCount++
+    if (oldCount === 0) totalUniqueSongs++
+
     currentHistoryItem = null
   }
 
@@ -252,6 +355,8 @@ export const usePlayerStore = defineStore('player', () => {
     fullPlayHistory.value = []
     savePlayHistory()
     saveFullPlayHistory()
+    // 阶段 2.5: 重建预聚合索引
+    rebuildStatsIndex()
   }
 
   // 删除单条历史记录
@@ -262,11 +367,36 @@ export const usePlayerStore = defineStore('player', () => {
       playHistory.value.splice(idx, 1)
       savePlayHistory()
     }
-    // 从完整记录中删除
+    // 从完整记录中删除（同时更新预聚合索引）
     const fullIdx = fullPlayHistory.value.findIndex((item) => item.id === id)
     if (fullIdx !== -1) {
+      const removed = fullPlayHistory.value[fullIdx]
       fullPlayHistory.value.splice(fullIdx, 1)
       saveFullPlayHistory()
+      // 阶段 2.5: 增量回滚预聚合
+      const d = new Date(removed.playedAt)
+      const dayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      const bucket = playHistoryByDay.value[dayKey]
+      if (bucket) {
+        playHistoryByDay.value = {
+          ...playHistoryByDay.value,
+          [dayKey]: bucket.filter((i) => i.id !== id),
+        }
+      }
+      const oldCount = songPlayCount.value[removed.songId] || 0
+      const newCount = Math.max(0, oldCount - 1)
+      songPlayCount.value = {
+        ...songPlayCount.value,
+        [removed.songId]: newCount,
+      }
+      const newDuration = Math.max(0, (songPlayDuration.value[removed.songId] || 0) - removed.playedDuration)
+      songPlayDuration.value = {
+        ...songPlayDuration.value,
+        [removed.songId]: newDuration,
+      }
+      totalPlayedDuration = Math.max(0, totalPlayedDuration - removed.playedDuration)
+      if (removed.completed) totalCompletedCount = Math.max(0, totalCompletedCount - 1)
+      if (newCount === 0) totalUniqueSongs = Math.max(0, totalUniqueSongs - 1)
     }
   }
 
@@ -295,23 +425,44 @@ export const usePlayerStore = defineStore('player', () => {
     showSidebar.value = !showSidebar.value
   }
 
-  // 获取某一时间段内的播放记录
+  // 获取某一时间段内的播放记录（基于按日分桶索引, O(桶数) 而非 O(全量)）
   function getHistoryInRange(startTime: number, endTime: number): PlayHistoryItem[] {
-    return fullPlayHistory.value.filter((item) => item.playedAt >= startTime && item.playedAt < endTime)
+    const result: PlayHistoryItem[] = []
+    const start = new Date(startTime)
+    const end = new Date(endTime)
+    // 生成涵盖此区间的所有 dayKey
+    for (let d = new Date(start.getFullYear(), start.getMonth(), start.getDate()); d.getTime() < end.getTime(); d.setDate(d.getDate() + 1)) {
+      const dayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      const bucket = playHistoryByDay.value[dayKey]
+      if (bucket) {
+        for (const item of bucket) {
+          if (item.playedAt >= startTime && item.playedAt < endTime) {
+            result.push(item)
+          }
+        }
+      }
+    }
+    return result
   }
 
-  // 今天的开始时间
+  // 汇总桶内数据
+  function summarizeBucket(items: PlayHistoryItem[]): { count: number; totalDuration: number; completedCount: number } {
+    let count = 0
+    let totalDuration = 0
+    let completedCount = 0
+    for (const item of items) {
+      count++
+      totalDuration += item.playedDuration
+      if (item.completed) completedCount++
+    }
+    return { count, totalDuration, completedCount }
+  }
+
+  // 今天的统计（O(1) 直接读桶）
   const todayStats = computed(() => {
     const now = new Date()
-    const startOfDay = new Date(now.getFullYear(), now.getMonth(), now.getDate()).getTime()
-    const endOfDay = startOfDay + 86400000
-    const items = getHistoryInRange(startOfDay, endOfDay)
-    const totalDuration = items.reduce((sum, item) => sum + item.playedDuration, 0)
-    return {
-      count: items.length,
-      totalDuration,
-      completedCount: items.filter((i) => i.completed).length,
-    }
+    const dayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
+    return summarizeBucket(playHistoryByDay.value[dayKey] || [])
   })
 
   // 本月统计
@@ -319,13 +470,7 @@ export const usePlayerStore = defineStore('player', () => {
     const now = new Date()
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime()
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime()
-    const items = getHistoryInRange(startOfMonth, endOfMonth)
-    const totalDuration = items.reduce((sum, item) => sum + item.playedDuration, 0)
-    return {
-      count: items.length,
-      totalDuration,
-      completedCount: items.filter((i) => i.completed).length,
-    }
+    return summarizeBucket(getHistoryInRange(startOfMonth, endOfMonth))
   })
 
   // 本年统计
@@ -333,51 +478,47 @@ export const usePlayerStore = defineStore('player', () => {
     const now = new Date()
     const startOfYear = new Date(now.getFullYear(), 0, 1).getTime()
     const endOfYear = new Date(now.getFullYear() + 1, 0, 1).getTime()
-    const items = getHistoryInRange(startOfYear, endOfYear)
-    const totalDuration = items.reduce((sum, item) => sum + item.playedDuration, 0)
-    return {
-      count: items.length,
-      totalDuration,
-      completedCount: items.filter((i) => i.completed).length,
-    }
+    return summarizeBucket(getHistoryInRange(startOfYear, endOfYear))
   })
 
-  // 听歌之最：单曲循环次数最多的歌
+  // 听歌之最：单曲循环次数最多的歌（O(唯一歌曲数)）
   const mostLoopedSong = computed(() => {
-    const songPlayCount: Record<string, { song: PlayHistoryItem; count: number }> = {}
-    for (const item of fullPlayHistory.value) {
-      if (!songPlayCount[item.songId]) {
-        songPlayCount[item.songId] = { song: item, count: 0 }
+    let maxId = ''
+    let maxCount = 0
+    for (const [id, count] of Object.entries(songPlayCount.value)) {
+      if (count > maxCount) {
+        maxCount = count
+        maxId = id
       }
-      songPlayCount[item.songId].count++
     }
-    const sorted = Object.values(songPlayCount).sort((a, b) => b.count - a.count)
-    return sorted.length > 0 ? sorted[0] : null
+    if (!maxId) return null
+    // 从 fullPlayHistory 中找到该 songId 的最近一条
+    const item = fullPlayHistory.value.find((i) => i.songId === maxId)
+    return item ? { song: item, count: maxCount } : null
   })
 
   // 听歌之最：总播放时长最久的歌
   const longestPlayedSong = computed(() => {
-    const songDuration: Record<string, { song: PlayHistoryItem; duration: number }> = {}
-    for (const item of fullPlayHistory.value) {
-      if (!songDuration[item.songId]) {
-        songDuration[item.songId] = { song: item, duration: 0 }
+    let maxId = ''
+    let maxDuration = 0
+    for (const [id, dur] of Object.entries(songPlayDuration.value)) {
+      if (dur > maxDuration) {
+        maxDuration = dur
+        maxId = id
       }
-      songDuration[item.songId].duration += item.playedDuration
     }
-    const sorted = Object.values(songDuration).sort((a, b) => b.duration - a.duration)
-    return sorted.length > 0 ? sorted[0] : null
+    if (!maxId) return null
+    const item = fullPlayHistory.value.find((i) => i.songId === maxId)
+    return item ? { song: item, duration: maxDuration } : null
   })
 
-  // 全部时间统计
-  const allTimeStats = computed(() => {
-    const totalDuration = fullPlayHistory.value.reduce((sum, item) => sum + item.playedDuration, 0)
-    return {
-      count: fullPlayHistory.value.length,
-      totalDuration,
-      completedCount: fullPlayHistory.value.filter((i) => i.completed).length,
-      uniqueSongs: new Set(fullPlayHistory.value.map((i) => i.songId)).size,
-    }
-  })
+  // 全部时间统计（直接读模块级累计变量）
+  const allTimeStats = computed(() => ({
+    count: fullPlayHistory.value.length,
+    totalDuration: totalPlayedDuration,
+    completedCount: totalCompletedCount,
+    uniqueSongs: totalUniqueSongs,
+  }))
 
   // 生成 Markdown 格式的统计报告
   function generateStatsMarkdown(): string {
@@ -825,6 +966,13 @@ export const usePlayerStore = defineStore('player', () => {
   const isMiniMode = ref<boolean>(false)
   const spectrumPaused = ref<boolean>(false)
 
+  // ========== 下载页：上次输出目录 (持久化,进入下载页自动填充) ==========
+  const downloadOutputDir = ref<string>(saved.downloadOutputDir ?? '')
+
+  function setDownloadOutputDir(path: string) {
+    downloadOutputDir.value = path
+  }
+
   function setLowPowerMode(value: boolean) {
     lowPowerMode.value = value
     // 开启低功耗模式时，如果当前在播放且显示频谱，则暂停频谱动画
@@ -836,12 +984,41 @@ export const usePlayerStore = defineStore('player', () => {
     }
   }
 
+  // ========== 迷你模式切换：rAF 插值窗口尺寸 (320ms easeOutCubic) ==========
+  // 目标尺寸 (与后端 toggle_mini_mode.rs 中常量保持一致)
+  const MINI_TARGET_W = 472
+  const MINI_TARGET_H = 112
+  const NORMAL_TARGET_W = 1200
+  const NORMAL_TARGET_H = 800
+  const MINI_ANIM_DURATION = 320 // ms
+  const MINI_INVOKE_INTERVAL = 10 // ms - IPC 节流, 避免每帧调用
+
+  let miniModeAnimId: number | null = null
+  let miniModeAnimStartTime = 0
+  let miniModeAnimLastInvoke = 0
+  let miniModeStartSize: [number, number] = [0, 0]
+  let miniModeTargetSize: [number, number] = [0, 0]
+
+  /** easeOutCubic: t∈[0,1] -> 缓出曲线,起始快,末尾渐缓 */
+  function easeOutCubic(t: number): number {
+    return 1 - Math.pow(1 - t, 3)
+  }
+
   function setMiniMode(value: boolean) {
+    // 取消任何正在进行的动画, 重新开始
+    if (miniModeAnimId !== null) {
+      cancelAnimationFrame(miniModeAnimId)
+      miniModeAnimId = null
+    }
+
+    // 1. 立即切换 Vue 状态,让 UI 过渡与尺寸缩放同步开始
     isMiniMode.value = value
-    // 调用 Tauri 后端调整实际窗口大小
+
+    // 2. 立即调用后端处理"看不见的属性" (min/max size, decorations, always-on-top)
     invoke('toggle_mini_mode', { isMini: value })
-      .catch(() => {})
-    // 低功耗模式下，进入迷你模式时暂停频谱并断开 AnalyserNode
+      .catch((e) => console.warn('[miniMode] toggle_mini_mode 失败:', e))
+
+    // 3. 低功耗模式下, 进入迷你模式时暂停频谱并断开 AnalyserNode
     if (lowPowerMode.value) {
       spectrumPaused.value = value
       if (value) {
@@ -850,6 +1027,66 @@ export const usePlayerStore = defineStore('player', () => {
         reconnectAnalyser()
       }
     }
+
+    // 4. 异步启动 rAF 动画插值窗口尺寸
+    void animateMiniModeSize(value)
+  }
+
+  async function animateMiniModeSize(value: boolean) {
+    // 读取当前窗口尺寸作为起点
+    let startSize: [number, number] = [NORMAL_TARGET_W, NORMAL_TARGET_H]
+    try {
+      const cur = await invoke<[number, number]>('get_window_size')
+      if (cur && cur.length === 2 && cur[0] > 0 && cur[1] > 0) {
+        startSize = [cur[0], cur[1]]
+      }
+    } catch (e) {
+      // 兜底: 使用理论目标值
+      startSize = value
+        ? [NORMAL_TARGET_W, NORMAL_TARGET_H]
+        : [MINI_TARGET_W, MINI_TARGET_H]
+    }
+
+    const targetSize: [number, number] = value
+      ? [MINI_TARGET_W, MINI_TARGET_H]
+      : [NORMAL_TARGET_W, NORMAL_TARGET_H]
+
+    // 用户在动画期间再次切换 -> 起点取当前已显示的尺寸
+    // 这里我们信任 get_window_size 的返回值, 它反映系统当前实际尺寸
+
+    miniModeStartSize = startSize
+    miniModeTargetSize = targetSize
+    miniModeAnimStartTime = performance.now()
+    miniModeAnimLastInvoke = 0
+
+    const step = (now: number) => {
+      const elapsed = now - miniModeAnimStartTime
+      const progress = Math.min(elapsed / MINI_ANIM_DURATION, 1)
+      const eased = easeOutCubic(progress)
+
+      const w = miniModeStartSize[0] + (miniModeTargetSize[0] - miniModeStartSize[0]) * eased
+      const h = miniModeStartSize[1] + (miniModeTargetSize[1] - miniModeStartSize[1]) * eased
+
+      // IPC 节流: 每 ~10ms 才调用一次 set_window_size
+      // (rAF 是 60fps ≈ 16ms, 这样每 ~1.6 帧调用一次, 总共约 32 次)
+      if (now - miniModeAnimLastInvoke >= MINI_INVOKE_INTERVAL || progress >= 1) {
+        miniModeAnimLastInvoke = now
+        invoke('set_window_size', { width: w, height: h }).catch(() => {})
+      }
+
+      if (progress < 1) {
+        miniModeAnimId = requestAnimationFrame(step)
+      } else {
+        // 动画结束: 强制设为精确目标值, 清除累积误差
+        miniModeAnimId = null
+        invoke('set_window_size', {
+          width: miniModeTargetSize[0],
+          height: miniModeTargetSize[1]
+        }).catch(() => {})
+      }
+    }
+
+    miniModeAnimId = requestAnimationFrame(step)
   }
 
   function resumeSpectrum() {
@@ -965,13 +1202,14 @@ export const usePlayerStore = defineStore('player', () => {
   })
 
   // 字体映射
-  const fontFamilyMap: Record<FontFamily, string> = {
+  // 阶段 1.4: markRaw 包装不可变静态配置, 避免 Vue 深度 Proxy 包装, 减少初始化与访问开销
+  const fontFamilyMap: Record<FontFamily, string> = markRaw({
     system: 'system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
     serif: 'Georgia, "Times New Roman", serif',
     kaiti: '"KaiTi", "楷体", "STKaiti", serif',
     songti: '"SimSun", "宋体", "STSong", serif',
     fangsong: '"FangSong", "仿宋", "STFangsong", serif',
-  }
+  })
 
   // 计算当前字体 CSS
   const currentFontFamily = computed(() => fontFamilyMap[fontSettings.value.family])
@@ -1124,13 +1362,34 @@ export const usePlayerStore = defineStore('player', () => {
     return { audioContext, analyserNode, gainNode }
   }
 
-  // 获取 AudioBuffer（fetch + decodeAudioData，仅保留当前一首）
-  async function getAudioBuffer(url: string): Promise<AudioBuffer | null> {
+  // 获取 AudioBuffer（fetch + decodeAudioData，LRU 保留前一首）
+  // 阶段 3.3: 支持 LRU, 切回上一首 < 50ms
+  async function getAudioBuffer(url: string, songId?: string): Promise<AudioBuffer | null> {
+    // 命中 current
     if (currentAudioBuffer && currentBufferUrl === url) {
       return currentAudioBuffer
     }
 
     if (!audioContext) return null
+
+    // ========== 阶段 3.3: 命中 prev（切回上一首） ==========
+    // 双键校验: songId 匹配 + prevBufferUrl 匹配 (防止 songId 复用导致错位)
+    if (songId && prevBuffer && prevSongId === songId && prevBufferUrl === url) {
+      // current 降级为 prev（保持 LRU 大小恒定）
+      if (currentAudioBuffer) {
+        prevBuffer = currentAudioBuffer
+        prevBufferUrl = currentBufferUrl
+        prevSongId = currentSong.value?.id ?? null
+      }
+      // prev 提升为 current
+      currentAudioBuffer = prevBuffer
+      currentBufferUrl = url
+      // 清空 prev 槽（避免重复命中）
+      prevBuffer = null
+      prevBufferUrl = null
+      prevSongId = null
+      return currentAudioBuffer
+    }
 
     try {
       const response = await fetch(url)
@@ -1138,8 +1397,12 @@ export const usePlayerStore = defineStore('player', () => {
       const arrayBuffer = await response.arrayBuffer()
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
 
-      currentAudioBuffer = null
-      currentBufferUrl = null
+      // 旧的 current 降级为 prev
+      if (currentAudioBuffer) {
+        prevBuffer = currentAudioBuffer
+        prevBufferUrl = currentBufferUrl
+        prevSongId = currentSong.value?.id ?? null
+      }
       currentAudioBuffer = audioBuffer
       currentBufferUrl = url
 
@@ -1488,13 +1751,30 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   // ========== 工具方法 ==========
+  // 阶段 1.3: convertFileSrc URL 缓存
+  // 原生 convertFileSrc 内部会创建 URL 对象并做路径处理, 频繁调用存在非零开销
+  // 用 Map 缓存后, 同一路径只处理一次, 列表滚动时几乎零成本
+  const coverUrlCache = new Map<string, string>()
+  const audioUrlCache = new Map<string, string>()
+
   function getAudioUrl(filePath: string): string {
-    return convertFileSrc(filePath)
+    if (!filePath) return ''
+    let url = audioUrlCache.get(filePath)
+    if (url === undefined) {
+      url = convertFileSrc(filePath)
+      audioUrlCache.set(filePath, url)
+    }
+    return url
   }
 
   function getCoverUrl(coverPath: string | null): string {
     if (!coverPath) return ''
-    return convertFileSrc(coverPath)
+    let url = coverUrlCache.get(coverPath)
+    if (url === undefined) {
+      url = convertFileSrc(coverPath)
+      coverUrlCache.set(coverPath, url)
+    }
+    return url
   }
 
   // 持久化歌单数据（防抖，避免频繁写入）
@@ -1509,14 +1789,15 @@ export const usePlayerStore = defineStore('player', () => {
         savePlaylists(pls)
       }, 500)
     },
-    { deep: true }
+    // 阶段 2.8: flush='post' 避免在 reactive getter 中抢占主线程
+    { deep: true, flush: 'post' }
   )
 
   // 持久化设置（防抖）
   let settingsSaveTimer: ReturnType<typeof setTimeout> | null = null
   watch(
-    [volume, loopMode, folderPath, theme, background, minimizeToTray, fontSettings, metadataSource, showSpectrum, spectrumLowPower, lowPowerMode],
-    ([vol, mode, path, th, bg, mt, fs, metaSrc, spectrum, lowPower, lpm]) => {
+    [volume, loopMode, folderPath, theme, background, minimizeToTray, fontSettings, metadataSource, showSpectrum, spectrumLowPower, lowPowerMode, downloadOutputDir],
+    ([vol, mode, path, th, bg, mt, fs, metaSrc, spectrum, lowPower, lpm, dlDir]) => {
       if (settingsSaveTimer) {
         clearTimeout(settingsSaveTimer)
       }
@@ -1532,11 +1813,13 @@ export const usePlayerStore = defineStore('player', () => {
           metadataSource: metaSrc,
           showSpectrum: spectrum,
           spectrumLowPower: lowPower,
-          lowPowerMode: lpm
+          lowPowerMode: lpm,
+          downloadOutputDir: dlDir
         })
       }, 300)
     },
-    { deep: true }
+    // 阶段 2.8: flush='post' 让 settings 持久化在 DOM 更新后执行
+    { deep: true, flush: 'post' }
   )
 
   // ========== 自动加载音乐库（启动时自动扫描） ==========
@@ -1658,7 +1941,7 @@ export const usePlayerStore = defineStore('player', () => {
         initAudioContext()
 
         const audioUrl = getAudioUrl(song.file_path)
-        const audioBuffer = await getAudioBuffer(audioUrl)
+        const audioBuffer = await getAudioBuffer(audioUrl, song.id)
 
         if (audioBuffer) {
           setCurrentAudioUrl(audioUrl)
@@ -1818,6 +2101,9 @@ export const usePlayerStore = defineStore('player', () => {
     spectrumPaused,
     setLowPowerMode,
     setMiniMode,
+    // 下载页
+    downloadOutputDir,
+    setDownloadOutputDir,
     resumeSpectrum,
     pauseSpectrum,
     disconnectAnalyser,

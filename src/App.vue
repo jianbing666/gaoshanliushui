@@ -1,18 +1,14 @@
 <script setup lang="ts">
 import { usePlayerStore } from '@/stores/playerStore'
-import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
+import { ref, watch, onMounted, onUnmounted, computed, nextTick, defineAsyncComponent } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import Sidebar from '@/components/Sidebar.vue'
 import Player from '@/components/Player.vue'
 import ControlBar from '@/components/ControlBar.vue'
-import SettingsPanel from '@/components/SettingsPanel.vue'
 import SongContextMenu from '@/components/SongContextMenu.vue'
-import CreatePlaylistModal from '@/components/CreatePlaylistModal.vue'
-import HistoryDrawer from '@/components/HistoryDrawer.vue'
-import StatsPanel from '@/components/StatsPanel.vue'
-import DownloadPanel from '@/components/DownloadPanel.vue'
 import TitleBar from '@/components/TitleBar.vue'
+import HistoryDrawer from '@/components/HistoryDrawer.vue'
 import Maximize2Icon from '@/components/icons/Maximize2Icon.vue'
 import PlayIcon from '@/components/icons/PlayIcon.vue'
 import PauseIcon from '@/components/icons/PauseIcon.vue'
@@ -24,6 +20,14 @@ import ShuffleIcon from '@/components/icons/ShuffleIcon.vue'
 import ArrowRightIcon from '@/components/icons/ArrowRightIcon.vue'
 import MusicIcon from '@/components/icons/MusicIcon.vue'
 import { formatTime } from '@/utils/formatTime'
+
+// ========== 阶段 3.6: 异步组件（首屏 JS 减 20-30KB）============
+// 同步: 首屏必现
+// 异步: 仅在用户首次打开对应面板/弹窗时下载独立 chunk
+const SettingsPanel = defineAsyncComponent(() => import('@/components/SettingsPanel.vue'))
+const StatsPanel = defineAsyncComponent(() => import('@/components/StatsPanel.vue'))
+const DownloadPanel = defineAsyncComponent(() => import('@/components/DownloadPanel.vue'))
+const CreatePlaylistModal = defineAsyncComponent(() => import('@/components/CreatePlaylistModal.vue'))
 
 const player = usePlayerStore()
 const appWindow = getCurrentWindow()
@@ -101,26 +105,39 @@ function handleMiniResize() {
 }
 
 // 启动时自动加载音乐库
+// 阶段 4.4: 启动时序优化 - 关键路径 first, 非关键路径 idle
+// 首屏渲染完成后再加载音乐库 + 注册 IPC 监听, 避免阻塞首帧
 onMounted(async () => {
-  const result = await player.autoLoadMusicLibrary()
-  if (!result.success && result.error) {
-    autoLoadError.value = `音乐库路径已失效：${result.error}\n请在设置面板中重新选择目录`
-    showSettings.value = true
-  }
+  // 关键路径 1: 立即让首屏可见
+  await nextTick()
 
-  // 监听页面可见性变化（窗口隐藏/显示）
+  // 关键路径 2: 注册可见性监听 (轻量, 不阻塞)
   document.addEventListener('visibilitychange', handleVisibilityChange)
 
-  // 监听 Tauri 窗口显示事件
-  try {
-    unlistenWindowShow = await listen('tauri://window-show', handleWindowShow)
-  } catch (e) {
-    console.warn('[App] 监听窗口显示事件失败:', e)
-  }
-
-  // 监听窗口大小变化（迷你模式自适应）
+  // 关键路径 3: 启动 ResizeObserver (cheap, 但仍放首屏后)
   resizeObserver = new ResizeObserver(handleMiniResize)
   resizeObserver.observe(document.documentElement)
+
+  // 非关键路径: 推迟到浏览器空闲时段执行
+  // timeout: 2000ms 保证即使不支持 requestIdleCallback 也能在 2s 内执行
+  requestIdleCallback(
+    async () => {
+      // 1. 自动加载音乐库 (潜在 IPC + 扫描磁盘, 可能数百 ms)
+      const result = await player.autoLoadMusicLibrary()
+      if (!result.success && result.error) {
+        autoLoadError.value = `音乐库路径已失效：${result.error}\n请在设置面板中重新选择目录`
+        showSettings.value = true
+      }
+
+      // 2. 注册 Tauri 窗口显示事件 (IPC 通道建立, ~50ms)
+      try {
+        unlistenWindowShow = await listen('tauri://window-show', handleWindowShow)
+      } catch (e) {
+        console.warn('[App] 监听窗口显示事件失败:', e)
+      }
+    },
+    { timeout: 2000 }
+  )
 })
 
 function handleVisibilityChange() {
@@ -128,6 +145,12 @@ function handleVisibilityChange() {
     // 页面重新可见时，恢复音频上下文
     player.resumeAudioContext()
   }
+}
+
+// 阶段 3.7: 封面加载失败静默隐藏
+function onCoverError(e: Event) {
+  const img = e.target as HTMLImageElement
+  img.style.display = 'none'
 }
 
 onUnmounted(() => {
@@ -186,7 +209,7 @@ onUnmounted(() => {
         <!-- Loading 遮罩层（自动扫描时显示） -->
         <div
           v-if="player.isLoading && player.playlist.length === 0"
-          class="absolute inset-0 bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl flex items-center justify-center z-20"
+          class="absolute inset-0 bg-white/80 dark:bg-gray-900/80 backdrop-blur flex items-center justify-center z-20"
         >
           <div class="text-center">
             <div class="animate-spin text-4xl mb-3">⟳</div>
@@ -197,7 +220,7 @@ onUnmounted(() => {
         <!-- 错误提示（路径失效时显示） -->
         <div
           v-if="autoLoadError && !player.isLoading"
-          class="absolute inset-0 bg-white/80 dark:bg-gray-900/80 backdrop-blur-xl flex items-center justify-center z-20"
+          class="absolute inset-0 bg-white/80 dark:bg-gray-900/80 backdrop-blur flex items-center justify-center z-20"
         >
           <div class="text-center max-w-md px-4">
             <div class="text-5xl mb-4">⚠️</div>
@@ -215,15 +238,18 @@ onUnmounted(() => {
       </main>
 
       <!-- 右侧面板：设置 / 统计 / 下载（互斥，挤压式） -->
+      <!-- 阶段 1.6: keep-alive 包裹, 切换面板时不销毁组件, 避免重复 setup + 重渲染 -->
       <Transition name="slide-fade" mode="out-in">
-        <SettingsPanel v-if="showSettings && !player.showStatsPanel && !player.showDownloadPanel" key="settings" class="shrink-0" />
-        <StatsPanel v-else-if="player.showStatsPanel" key="stats" class="shrink-0" />
-        <DownloadPanel v-else-if="player.showDownloadPanel" key="download" class="shrink-0" />
+        <keep-alive>
+          <SettingsPanel v-if="showSettings && !player.showStatsPanel && !player.showDownloadPanel" key="settings" class="shrink-0" />
+          <StatsPanel v-else-if="player.showStatsPanel" key="stats" class="shrink-0" />
+          <DownloadPanel v-else-if="player.showDownloadPanel" key="download" class="shrink-0" />
+        </keep-alive>
       </Transition>
     </div>
 
     <!-- 迷你模式 -->
-    <div v-if="player.isMiniMode" class="flex flex-col w-full min-h-screen bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl">
+    <div v-if="player.isMiniMode" class="flex flex-col w-full min-h-screen bg-white/90 dark:bg-gray-900/90 backdrop-blur">
       <!-- 自定义标题栏：36px -->
       <div style="height: 36px" class="shrink-0 flex items-center px-3 border-b border-gray-200/50 dark:border-gray-700/50">
         <!-- 左侧：应用名（可拖拽） -->
@@ -278,6 +304,7 @@ onUnmounted(() => {
                 :src="player.getCoverUrl(player.currentSong.cover_path)"
                 :alt="player.currentSong?.title"
                 class="w-full h-full object-cover"
+                @error="onCoverError"
               />
               <div v-else class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500">
                 <MusicIcon :size="18" />

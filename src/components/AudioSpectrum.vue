@@ -75,6 +75,14 @@ function startSpectrumAnimation() {
     analyserNode.fftSize = fftSize.value
   }
 
+  // 阶段 2.7: smoothingTimeConstant 低功耗时降低抖动
+  // 正常模式 0.8: 视觉平滑, 减少高频抖动
+  // 低功耗 0.5: 更快的频谱响应（用户能更明显看到低功耗模式的差异）
+  const targetSmoothing = player.spectrumLowPower ? 0.5 : 0.8
+  if (analyserNode.smoothingTimeConstant !== targetSmoothing) {
+    analyserNode.smoothingTimeConstant = targetSmoothing
+  }
+
   // 停止之前的定时器
   stopSpectrumAnimation()
 

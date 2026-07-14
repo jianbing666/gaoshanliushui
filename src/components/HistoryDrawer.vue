@@ -4,8 +4,15 @@ import { formatTime } from '@/utils/formatTime'
 import MusicIcon from '@/components/icons/MusicIcon.vue'
 import ChevronLeftIcon from '@/components/icons/ChevronLeftIcon.vue'
 import TrashIcon from '@/components/icons/TrashIcon.vue'
+// 阶段 2.1: 虚拟列表
+import VirtualSongList from '@/components/VirtualSongList.vue'
+import type { PlayHistoryItem } from '@/types/song'
+import { computed } from 'vue'
 
 const player = usePlayerStore()
+
+// 阶段 2.1: 长度 > 200 启用虚拟滚动
+const useVirtualList = computed(() => player.playHistory.length > 200)
 
 function formatDate(timestamp: number): string {
   const date = new Date(timestamp)
@@ -26,7 +33,7 @@ function formatDate(timestamp: number): string {
 function playHistoryItem(index: number) {
   const item = player.playHistory[index]
   if (!item) return
-  
+
   const song = player.findSongById(item.songId)
   if (song) {
     const globalIndex = player.playlist.findIndex((s) => s.id === song.id)
@@ -35,11 +42,17 @@ function playHistoryItem(index: number) {
     }
   }
 }
+
+// 阶段 3.7: 封面加载失败时静默隐藏
+function onCoverError(e: Event) {
+  const img = e.target as HTMLImageElement
+  img.style.display = 'none'
+}
 </script>
 
 <template>
   <div
-    class="w-80 h-full flex flex-col bg-white/50 dark:bg-gray-900/60 backdrop-blur-2xl border-r border-gray-200/60 dark:border-gray-700/60"
+    class="w-80 h-full flex flex-col bg-white/50 dark:bg-gray-900/60 backdrop-blur border-r border-gray-200/60 dark:border-gray-700/60 will-change-auto"
   >
     <!-- 头部 -->
     <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200/50 dark:border-gray-700/50">
@@ -69,46 +82,100 @@ function playHistoryItem(index: number) {
     <!-- 历史记录列表 -->
     <div class="flex-1 overflow-y-auto min-h-0">
       <template v-if="player.playHistory.length > 0">
-        <div
-          v-for="(item, index) in player.playHistory"
-          :key="item.id"
-          class="flex items-center gap-3 px-3 py-2 hover:bg-gray-100/60 dark:hover:bg-white/10 cursor-pointer transition-colors group"
-          @click="playHistoryItem(index)"
+        <!-- 阶段 2.1: 大列表走虚拟滚动, 小列表保留 v-for -->
+        <VirtualSongList
+          v-if="useVirtualList"
+          :songs="player.playHistory"
+          :item-size="64"
         >
-          <!-- 封面 -->
-          <div class="w-10 h-10 rounded bg-gray-200/70 dark:bg-gray-700/70 shrink-0 overflow-hidden">
-            <img
-              v-if="item.cover_path"
-              :src="player.getCoverUrl(item.cover_path)"
-              :alt="item.title"
-              class="w-full h-full object-cover"
-            />
-            <div v-else class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500">
-              <MusicIcon :size="16" />
-            </div>
-          </div>
+          <template #default="{ song, index }">
+            <div
+              class="flex items-center gap-3 px-3 py-2 hover:bg-gray-100/60 dark:hover:bg-white/10 cursor-pointer transition-colors group"
+              @click="playHistoryItem(index)"
+            >
+              <!-- 封面 -->
+              <div class="w-10 h-10 rounded bg-gray-200/70 dark:bg-gray-700/70 shrink-0 overflow-hidden">
+                <img
+                  v-if="(song as PlayHistoryItem).cover_path"
+                  :src="player.getCoverUrl((song as PlayHistoryItem).cover_path as string)"
+                  :alt="(song as PlayHistoryItem).title"
+                  class="w-full h-full object-cover"
+                  loading="lazy"
+                  decoding="async"
+                />
+                <div v-else class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500">
+                  <MusicIcon :size="16" />
+                </div>
+              </div>
 
-          <!-- 歌曲信息 -->
-          <div class="flex-1 min-w-0">
-            <p class="text-gray-900 dark:text-white text-sm font-medium truncate">{{ item.title }}</p>
-            <p class="text-gray-600 dark:text-gray-300 text-xs truncate">{{ item.artist }}</p>
-            <div class="flex items-center gap-2 mt-0.5">
-              <span class="text-xs text-gray-500 dark:text-gray-400">{{ formatDate(item.playedAt) }}</span>
-              <span class="text-xs" :class="item.completed ? 'text-green-500 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'">
-                {{ item.completed ? '完整播放' : formatTime(item.playedDuration) }}
-              </span>
-            </div>
-          </div>
+              <!-- 歌曲信息 -->
+              <div class="flex-1 min-w-0">
+                <p class="text-gray-900 dark:text-white text-sm font-medium truncate">{{ (song as PlayHistoryItem).title }}</p>
+                <p class="text-gray-600 dark:text-gray-300 text-xs truncate">{{ (song as PlayHistoryItem).artist }}</p>
+                <div class="flex items-center gap-2 mt-0.5">
+                  <span class="text-xs text-gray-500 dark:text-gray-400">{{ formatDate((song as PlayHistoryItem).playedAt) }}</span>
+                  <span class="text-xs" :class="(song as PlayHistoryItem).completed ? 'text-green-500 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'">
+                    {{ (song as PlayHistoryItem).completed ? '完整播放' : formatTime((song as PlayHistoryItem).playedDuration) }}
+                  </span>
+                </div>
+              </div>
 
-          <!-- 删除按钮 -->
-          <button
-            class="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition-all"
-            title="删除记录"
-            @click.stop="player.removeHistoryItem(item.id)"
+              <!-- 删除按钮 -->
+              <button
+                class="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition-all"
+                title="删除记录"
+                @click.stop="player.removeHistoryItem((song as PlayHistoryItem).id)"
+              >
+                <TrashIcon :size="14" />
+              </button>
+            </div>
+          </template>
+        </VirtualSongList>
+        <template v-else>
+          <div
+            v-for="(item, index) in player.playHistory"
+            :key="item.id"
+            class="flex items-center gap-3 px-3 py-2 hover:bg-gray-100/60 dark:hover:bg-white/10 cursor-pointer transition-colors group"
+            @click="playHistoryItem(index)"
           >
-            <TrashIcon :size="14" />
-          </button>
-        </div>
+            <!-- 封面 -->
+            <div class="w-10 h-10 rounded bg-gray-200/70 dark:bg-gray-700/70 shrink-0 overflow-hidden">
+              <img
+                v-if="item.cover_path"
+                :src="player.getCoverUrl(item.cover_path)"
+                :alt="item.title"
+                class="w-full h-full object-cover"
+                loading="lazy"
+                decoding="async"
+                @error="onCoverError"
+              />
+              <div v-else class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500">
+                <MusicIcon :size="16" />
+              </div>
+            </div>
+
+            <!-- 歌曲信息 -->
+            <div class="flex-1 min-w-0">
+              <p class="text-gray-900 dark:text-white text-sm font-medium truncate">{{ item.title }}</p>
+              <p class="text-gray-600 dark:text-gray-300 text-xs truncate">{{ item.artist }}</p>
+              <div class="flex items-center gap-2 mt-0.5">
+                <span class="text-xs text-gray-500 dark:text-gray-400">{{ formatDate(item.playedAt) }}</span>
+                <span class="text-xs" :class="item.completed ? 'text-green-500 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'">
+                  {{ item.completed ? '完整播放' : formatTime(item.playedDuration) }}
+                </span>
+              </div>
+            </div>
+
+            <!-- 删除按钮 -->
+            <button
+              class="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition-all"
+              title="删除记录"
+              @click.stop="player.removeHistoryItem(item.id)"
+            >
+              <TrashIcon :size="14" />
+            </button>
+          </div>
+        </template>
       </template>
       <template v-else>
         <div class="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-400">

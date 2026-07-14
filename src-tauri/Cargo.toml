@@ -9,7 +9,8 @@ edition = "2021"
 tauri-build = { version = "2", features = [] }
 
 [dependencies]
-tauri = { version = "2", features = ["protocol-asset", "devtools", "tray-icon"] }
+# 阶段 2.1.5: 关闭 devtools（仅 dev features 启用, 节省 ~500KB）
+tauri = { version = "2", features = ["protocol-asset", "tray-icon"] }
 tauri-plugin-dialog = "2"
 tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2"
@@ -19,10 +20,34 @@ serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 lofty = "0.21"
 walkdir = "2"
-tokio = { version = "1", features = ["full"] }
+# 阶段 2.1.1: tokio 显式裁剪（去 full, 仅保留 rt-multi-thread + macros + fs）
+# 审计: src-tauri/src 仅使用 tokio::fs / tokio::io::AsyncWriteExt, 无 net/time/sync mpsc
+tokio = { version = "1", default-features = false, features = ["rt-multi-thread", "macros", "fs"] }
 regex = "1"
+# reqwest 用于 B 站下载 (download_bilibili.rs), 保留 rustls-tls + json
 reqwest = { version = "0.12", default-features = false, features = ["rustls-tls", "json"] }
+# 阶段 3.1: 仅 jpeg 解码 + 缩放, 关闭 png/gif/webp 等无关特性以控制体积
+# 关闭 default-features 避免拉入 png/gif/webp/tiff 等解码器
+# 阶段 2.1.6: 关闭 rayon (代码审计零 rayon / par_iter 调用, 节省编译 -3s + 二进制 -800KB)
+image = { version = "0.25", default-features = false, features = ["jpeg"] }
 
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]
+# 阶段 2.1.5: dev 构建启用 devtools, 生产构建自动剥离
+# 使用方式: cargo tauri dev --features dev
+dev = ["tauri/devtools"]
+
+# ========== Release 构建优化 (阶段 1.1) ==========
+# 参考: https://tauri.app/concept/size/
+# 效果: 二进制体积 -25~40%, 启动期性能显著提升
+[profile.release]
+panic = "abort"            # 移除 panic 展开代码, 减小体积
+codegen-units = 1          # LLVM 单元数=1, 跨 crate 优化更彻底
+lto = true                 # 启用链接时优化
+opt-level = "s"            # 体积优先 (s) 而非速度优先 (3), Tauri 官方推荐
+strip = true               # 剥离调试符号与 debuginfo
+incremental = false        # 关闭增量编译以获得完整优化
+
+[profile.dev]
+incremental = true         # 开发模式保留增量编译, 加速构建

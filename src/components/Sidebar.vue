@@ -3,7 +3,10 @@ import { usePlayerStore } from '@/stores/playerStore'
 import DefaultPlaylist from '@/components/DefaultPlaylist.vue'
 import CustomPlaylist from '@/components/CustomPlaylist.vue'
 import SongItem from '@/components/SongItem.vue'
+// 阶段 2.1: 虚拟列表
+import VirtualSongList from '@/components/VirtualSongList.vue'
 import PlusIcon from '@/components/icons/PlusIcon.vue'
+import { computed } from 'vue'
 
 const player = usePlayerStore()
 
@@ -20,10 +23,13 @@ function playFilteredSong(index: number) {
     }
   }
 }
+
+// 阶段 2.1: 长度 > 200 启用虚拟滚动
+const useVirtualList = computed(() => player.filteredActivePlaylistSongs.length > 200)
 </script>
 
 <template>
-  <aside class="w-80 backdrop-blur-xl border-r border-gray-200/50 dark:border-gray-700/50 flex flex-col h-full" :class="
+  <aside class="w-80 backdrop-blur border-r border-gray-200/50 dark:border-gray-700/50 flex flex-col h-full will-change-auto" :class="
     player.currentBackgroundUrl && player.background.mode !== 'none'
       ? 'bg-white/30 dark:bg-gray-900/30'
       : 'bg-white/80 dark:bg-gray-800/50'
@@ -96,13 +102,29 @@ function playFilteredSong(index: number) {
       </div>
       <div class="flex-1 overflow-y-auto p-2 space-y-0.5">
         <template v-if="player.filteredActivePlaylistSongs.length > 0">
-          <SongItem
-            v-for="(song, index) in player.filteredActivePlaylistSongs"
-            :key="song.id"
-            :song="song"
-            :index="index"
+          <!-- 阶段 2.1: 大列表走虚拟滚动, 小列表保留 v-for -->
+          <VirtualSongList
+            v-if="useVirtualList"
+            :songs="player.filteredActivePlaylistSongs"
             @play="playFilteredSong"
-          />
+          >
+            <template #default="{ song, index }">
+              <SongItem
+                :song="song"
+                :index="index"
+                @play="playFilteredSong"
+              />
+            </template>
+          </VirtualSongList>
+          <template v-else>
+            <SongItem
+              v-for="(song, index) in player.filteredActivePlaylistSongs"
+              :key="song.id"
+              :song="song"
+              :index="index"
+              @play="playFilteredSong"
+            />
+          </template>
         </template>
         <div v-else class="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-400 text-sm">
           <template v-if="player.searchQuery.trim()">

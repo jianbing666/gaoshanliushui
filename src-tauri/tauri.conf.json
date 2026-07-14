@@ -6,10 +6,11 @@
     "beforeBuildCommand": "npm run build",
     "beforeDevCommand": "npm run dev",
     "frontendDist": "../dist",
-    "devUrl": "http://localhost:1420"
+    "devUrl": "http://localhost:1420",
+    "removeUnusedCommands": true
   },
   "app": {
-    "withGlobalTauri": true,
+    "withGlobalTauri": false,
     "windows": [
       {
         "label": "main",
@@ -21,7 +22,8 @@
         "decorations": false,
         "transparent": true,
         "alwaysOnTop": false,
-        "center": true
+        "center": true,
+        "dragDropEnabled": false
       }
     ],
     "security": {
