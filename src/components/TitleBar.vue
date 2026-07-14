@@ -4,6 +4,7 @@ import { getCurrentWindow } from '@tauri-apps/api/window'
 import { usePlayerStore } from '@/stores/playerStore'
 import SettingsIcon from '@/components/icons/SettingsIcon.vue'
 import BarChart3Icon from '@/components/icons/BarChart3Icon.vue'
+import DownloadIcon from '@/components/icons/DownloadIcon.vue'
 
 const props = defineProps<{
   showSettings: boolean
@@ -56,16 +57,16 @@ const emit = defineEmits<{
 
 <template>
   <div
-    class="flex items-center h-9 px-3 select-none relative z-50 bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border-b border-gray-200/50 dark:border-gray-700/50"
+    class="flex items-center h-12 px-3 select-none relative z-50 bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl border-b border-gray-200/50 dark:border-gray-700/50"
   >
     <!-- 左侧：图标 + 标题 + 侧边栏按钮 + 历史记录按钮 -->
     <div class="flex items-center gap-2 flex-1 h-full">
       <!-- 应用图标 -->
-      <svg class="w-4 h-4 text-gray-700 dark:text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+      <!-- <svg class="w-4 h-4 text-gray-700 dark:text-gray-300" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
         <path d="M9 18V5l12-2v13"></path>
         <circle cx="6" cy="18" r="3"></circle>
         <circle cx="18" cy="16" r="3"></circle>
-      </svg>
+      </svg> -->
       <!-- 标题 -->
       <span class="text-sm text-gray-700 dark:text-gray-300 font-medium">高山流水</span>
       <!-- 侧边栏展开/收起按钮 -->
@@ -122,6 +123,18 @@ const emit = defineEmits<{
             <path d="M3 16h3a2 2 0 0 1 2 2v3"></path>
             <path d="M16 21v-3a2 2 0 0 1 2-2h3"></path>
           </svg>
+        </button>
+
+        <!-- 下载按钮 -->
+        <button
+          class="w-8 h-8 flex items-center justify-center rounded-md transition-colors"
+          :class="player.showDownloadPanel
+            ? 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400'
+            : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-200'"
+          title="下载"
+          @click="player.toggleDownloadPanel()"
+        >
+          <DownloadIcon :size="16" />
         </button>
 
         <!-- 统计按钮 -->

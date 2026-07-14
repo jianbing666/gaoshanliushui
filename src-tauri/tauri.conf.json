@@ -12,13 +12,14 @@
     "withGlobalTauri": true,
     "windows": [
       {
+        "label": "main",
         "title": "高山流水",
         "width": 1200,
         "height": 800,
         "minWidth": 800,
         "minHeight": 600,
         "decorations": false,
-        "transparent": false,
+        "transparent": true,
         "alwaysOnTop": false,
         "center": true
       }
@@ -26,8 +27,10 @@
     "security": {
       "csp": {
         "default-src": "'self'",
+        "connect-src": "'self' ipc: asset: http://asset.localhost http://ipc.localhost",
         "img-src": "'self' asset: http://asset.localhost blob: data:",
-        "media-src": "'self' asset: http://asset.localhost blob: data:"
+        "media-src": "'self' asset: http://asset.localhost blob: data:",
+        "script-src": "'self' 'unsafe-inline'"
       },
       "assetProtocol": {
         "enable": true,
@@ -40,7 +43,8 @@
   },
   "bundle": {
     "active": true,
-    "targets": "all",
+    "targets": ["nsis"],
+    "externalBin": ["binaries/ffmpeg"],
     "icon": [
       "icons/icon.ico",
       "icons/icon.png"

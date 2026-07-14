@@ -3,6 +3,7 @@ import { ref, computed, nextTick, watch } from 'vue'
 import type { Song, LoopMode, ThemeMode, Playlist, BackgroundSettings, FontSettings, FontFamily, PlayHistoryItem } from '@/types/song'
 import { invoke } from '@tauri-apps/api/core'
 import { convertFileSrc } from '@tauri-apps/api/core'
+import { audioPlayer } from '@/utils/audioPlayer'
 
 export interface ContextMenuState {
   visible: boolean
@@ -276,6 +277,13 @@ export const usePlayerStore = defineStore('player', () => {
     showStatsPanel.value = !showStatsPanel.value
   }
 
+  // ========== 下载面板 ==========
+  const showDownloadPanel = ref(false)
+
+  function toggleDownloadPanel() {
+    showDownloadPanel.value = !showDownloadPanel.value
+  }
+
   // ========== 侧边栏 ==========
   const showSidebar = ref(true)
 
@@ -442,7 +450,6 @@ export const usePlayerStore = defineStore('player', () => {
 
       if (filePath) {
         await writeTextFile(filePath, markdown)
-        console.log('[Stats] 统计报告已导出:', filePath)
         return true
       }
       return false
@@ -750,6 +757,9 @@ export const usePlayerStore = defineStore('player', () => {
     invoke('set_minimize_to_tray', { enabled: value }).catch(console.error)
   }
 
+  // 初始化时同步最小化到托盘设置到后端
+  invoke('set_minimize_to_tray', { enabled: minimizeToTray.value }).catch(console.error)
+
   // ========== 定时关闭 ==========
   const sleepTimerEnabled = ref<boolean>(false)
   const sleepTimerMinutes = ref<number>(30)
@@ -830,12 +840,7 @@ export const usePlayerStore = defineStore('player', () => {
     isMiniMode.value = value
     // 调用 Tauri 后端调整实际窗口大小
     invoke('toggle_mini_mode', { isMini: value })
-      .then(() => {
-        console.log('[MiniMode] 迷你模式切换成功:', value)
-      })
-      .catch((err) => {
-        console.error('[MiniMode] 迷你模式切换失败:', err)
-      })
+      .catch(() => {})
     // 低功耗模式下，进入迷你模式时暂停频谱并断开 AnalyserNode
     if (lowPowerMode.value) {
       spectrumPaused.value = value
@@ -882,13 +887,7 @@ export const usePlayerStore = defineStore('player', () => {
   // 恢复 AudioContext 运行状态（页面重新可见/窗口显示时调用）
   function resumeAudioContext() {
     if (audioContext && audioContext.state === 'suspended') {
-      audioContext.resume()
-        .then(() => {
-          console.log('[Audio] AudioContext 已恢复 running')
-        })
-        .catch((e) => {
-          console.error('[Audio] AudioContext 恢复失败:', e)
-        })
+      audioContext.resume().catch(() => {})
     }
   }
 
@@ -917,13 +916,16 @@ export const usePlayerStore = defineStore('player', () => {
 
   // ========== 创建歌单弹窗 ==========
   const showCreatePlaylistModal = ref(false)
+  const createPlaylistAddSongId = ref<string | null>(null)
 
-  function openCreatePlaylistModal() {
+  function openCreatePlaylistModal(songId?: string) {
+    createPlaylistAddSongId.value = songId ?? null
     showCreatePlaylistModal.value = true
   }
 
   function closeCreatePlaylistModal() {
     showCreatePlaylistModal.value = false
+    createPlaylistAddSongId.value = null
   }
 
   // ========== 搜索功能 ==========
@@ -1124,7 +1126,6 @@ export const usePlayerStore = defineStore('player', () => {
 
   // 获取 AudioBuffer（fetch + decodeAudioData，仅保留当前一首）
   async function getAudioBuffer(url: string): Promise<AudioBuffer | null> {
-    // 检查当前缓存是否就是目标 URL
     if (currentAudioBuffer && currentBufferUrl === url) {
       return currentAudioBuffer
     }
@@ -1133,14 +1134,12 @@ export const usePlayerStore = defineStore('player', () => {
 
     try {
       const response = await fetch(url)
+      if (!response.ok) return null
       const arrayBuffer = await response.arrayBuffer()
       const audioBuffer = await audioContext.decodeAudioData(arrayBuffer)
 
-      // 释放旧的 AudioBuffer（立即让 GC 回收）
       currentAudioBuffer = null
       currentBufferUrl = null
-
-      // 仅保留当前歌曲的 AudioBuffer
       currentAudioBuffer = audioBuffer
       currentBufferUrl = url
 
@@ -1188,53 +1187,48 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   // 播放歌曲（从指定偏移量开始）
-  function playFromOffset(offset: number = 0) {
+  async function playFromOffset(offset: number = 0) {
     if (!audioContext || !currentAudioUrl) return
 
-    // 确保 AudioContext 处于 running 状态
     if (audioContext.state === 'suspended') {
-      audioContext.resume()
+      try {
+        await audioContext.resume()
+      } catch {
+        return
+      }
     }
 
-    // 从当前缓存获取 AudioBuffer
     const audioBuffer = currentAudioBuffer
     if (!audioBuffer) return
 
-    // 销毁旧的 AudioBufferSourceNode（防止内存泄漏）
     if (audioSourceNode) {
       try {
         audioSourceNode.onended = null
         audioSourceNode.stop()
         audioSourceNode.disconnect()
         audioSourceNode = null
-      } catch (e) {
+      } catch {
         // 忽略已停止的节点错误
       }
     }
 
-    // 创建新的 AudioBufferSourceNode
     const newSource = audioContext.createBufferSource()
     newSource.buffer = audioBuffer
     newSource.connect(analyserNode!)
 
-    // 添加 onended 事件处理
     newSource.onended = () => {
       if (!isPaused) {
         audioSourceNode = null
-        // 结束记录播放历史
         endHistoryRecord()
         _onAudioEnded?.()
       }
     }
 
     audioSourceNode = newSource
-
-    // 记录播放开始时间
     playbackStartTime = audioContext.currentTime - offset
     isPaused = false
     isPlaying.value = true
 
-    // 开始记录播放历史
     if (currentSong.value) {
       startHistoryRecord(currentSong.value)
     }
@@ -1272,21 +1266,21 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   // 恢复播放（或从头开始播放）
-  function resumePlayback() {
+  async function resumePlayback() {
     if (!currentAudioUrl || !audioContext) return
 
-    // 如果已经在播放，直接返回（防止重复触发导致从头开始）
     if (audioSourceNode && !isPaused) return
 
-    // 确保 AudioContext 处于 running 状态
     if (audioContext.state === 'suspended') {
-      audioContext.resume()
+      try {
+        await audioContext.resume()
+      } catch {
+        return
+      }
     }
 
-    // 如果是从暂停状态恢复，使用 pausedOffset
-    // 如果是首次播放，从 0 开始
     const offset = isPaused ? pausedOffset : 0
-    playFromOffset(offset)
+    await playFromOffset(offset)
   }
 
   // 停止播放（切歌时调用）
@@ -1587,6 +1581,148 @@ export const usePlayerStore = defineStore('player', () => {
   // ========== 初始化字体设置 ==========
   applyFontSettings()
 
+  // ========== 全局播放控制逻辑（不依赖组件，确保迷你模式也能正常播放） ==========
+
+  // 切歌加载锁：防止 async watch 被重复触发导致多首歌同时播放
+  let isLoadingSong = false
+
+  // 播放时间更新定时器
+  let timeUpdateInterval: number | null = null
+
+  function startTimeUpdate() {
+    if (timeUpdateInterval) return
+    timeUpdateInterval = window.setInterval(() => {
+      if (isPlaying.value) {
+        const t = getCurrentPlaybackTime()
+        currentTime.value = t
+      }
+    }, 250)
+  }
+
+  function stopTimeUpdate() {
+    if (timeUpdateInterval) {
+      clearInterval(timeUpdateInterval)
+      timeUpdateInterval = null
+    }
+  }
+
+  // 初始化 audioPlayer 的 store 访问器
+  audioPlayer.bindStoreAccessors({
+    getPendingPlay: () => pendingPlay.value,
+    setPendingPlay: (v: boolean) => { pendingPlay.value = v },
+    setIsSwitchingSong: (v: boolean) => { isSwitchingSong.value = v },
+    setIsPlaying: (v: boolean) => { isPlaying.value = v },
+  })
+
+  // audioPlayer 事件：获取时长（仅用于元数据显示）
+  audioPlayer.onDurationChange((dur) => {
+    duration.value = dur
+  })
+
+  // 确保 HTML5 Audio 始终静音（声音完全由 Web Audio 输出）
+  audioPlayer.setVolume(0)
+
+  // Web Audio 播放结束回调
+  setOnAudioEnded(() => {
+    stopTimeUpdate()
+    next()
+  })
+
+  // 监听当前歌曲变化：加载音频并自动播放
+  watch(
+    () => currentSong.value,
+    async (song) => {
+      if (!song) return
+
+      if (isLoadingSong) return
+      isLoadingSong = true
+
+      try {
+        stopPlayback()
+        stopTimeUpdate()
+        currentTime.value = 0
+
+        // 先确保 HTML5 Audio 静音（防止加载过程中发声）
+        audioPlayer.setVolume(0)
+
+        // 加载 HTML5 Audio（仅用于元数据和 MediaSession）
+        await audioPlayer.load(song.file_path)
+        audioPlayer.setVolume(0)
+        audioPlayer.setMediaSession(
+          song.title,
+          song.artist,
+          song.cover_path ? getCoverUrl(song.cover_path) : undefined
+        )
+
+        // ========== Web Audio 主播放链路 ==========
+        initAudioContext()
+
+        const audioUrl = getAudioUrl(song.file_path)
+        const audioBuffer = await getAudioBuffer(audioUrl)
+
+        if (audioBuffer) {
+          setCurrentAudioUrl(audioUrl)
+
+          if (isPlaying.value || pendingPlay.value) {
+            pendingPlay.value = false
+            isSwitchingSong.value = false
+            await playFromOffset(0)
+            startTimeUpdate()
+          }
+        }
+      } catch (e) {
+        console.error('[playerStore] 加载歌曲失败:', e)
+        isSwitchingSong.value = false
+        pendingPlay.value = false
+      } finally {
+        isLoadingSong = false
+      }
+    }
+  )
+
+  // 监听播放状态变化：实际控制 Web Audio 播放/暂停
+  watch(
+    () => isPlaying.value,
+    async (playing) => {
+      if (playing) {
+        await resumePlayback()
+        startTimeUpdate()
+      } else {
+        pausePlayback()
+        stopTimeUpdate()
+        audioPlayer.pause()
+      }
+    }
+  )
+
+  // 监听音量变化：应用到 Web Audio
+  watch(
+    () => volume.value,
+    (vol) => {
+      setPlaybackVolume(vol)
+      // 保持 HTML5 Audio 静音
+      audioPlayer.setVolume(0)
+    }
+  )
+
+  // 更新页面标题
+  function updateDocumentTitle() {
+    const song = currentSong.value
+    if (song) {
+      document.title = `${song.title} - ${song.artist} · 高山流水`
+    } else {
+      document.title = '高山流水'
+    }
+  }
+  updateDocumentTitle()
+  watch(() => currentSong.value, updateDocumentTitle)
+
+  // 媒体键处理
+  if ('mediaSession' in navigator) {
+    navigator.mediaSession.setActionHandler('previoustrack', () => prev())
+    navigator.mediaSession.setActionHandler('nexttrack', () => next())
+  }
+
   // 监听系统主题变化（仅在 'system' 模式下生效）
   if (window.matchMedia) {
     window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', (_e) => {
@@ -1630,6 +1766,7 @@ export const usePlayerStore = defineStore('player', () => {
     closeContextMenu,
     // 创建歌单弹窗
     showCreatePlaylistModal,
+    createPlaylistAddSongId,
     openCreatePlaylistModal,
     closeCreatePlaylistModal,
     // 搜索
@@ -1740,6 +1877,9 @@ export const usePlayerStore = defineStore('player', () => {
     longestPlayedSong,
     generateStatsMarkdown,
     exportStatsReport,
+    // 下载面板
+    showDownloadPanel,
+    toggleDownloadPanel,
     // 侧边栏
     showSidebar,
     toggleSidebar,

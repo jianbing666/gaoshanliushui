@@ -10,7 +10,10 @@ const isClosing = ref(false)
 function handleSubmit() {
   const name = playlistName.value.trim()
   if (name) {
-    player.createPlaylist(name)
+    const newPlaylist = player.createPlaylist(name)
+    if (player.createPlaylistAddSongId) {
+      player.addSongToPlaylist(player.createPlaylistAddSongId, newPlaylist.id)
+    }
     closeModal()
   }
 }

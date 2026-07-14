@@ -6,7 +6,7 @@ export default { inheritAttrs: false }
 import { usePlayerStore } from '@/stores/playerStore'
 import { audioPlayer } from '@/utils/audioPlayer'
 import { formatTime } from '@/utils/formatTime'
-import { watch, onMounted, onUnmounted, ref } from 'vue'
+import { onMounted, onUnmounted, ref } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useVolumeSlider } from '@/composables/useVolumeSlider'
 import VolumeSlider from '@/components/VolumeSlider.vue'
@@ -24,9 +24,6 @@ const player = usePlayerStore()
 const volumeIconRef = ref<HTMLElement | null>(null)
 // autoplay 被拦截时的轻提示
 const showAutoplayTip = ref(false)
-
-// 切歌加载锁：防止 async watch 被重复触发导致多首歌同时播放
-let isLoadingSong = false
 
 // 快捷键防抖时间戳（防止按键重复触发）
 let lastShortcutTime = 0
@@ -92,156 +89,7 @@ function toggleMute() {
   player.toggleMute()
 }
 
-// 监听当前歌曲变化：仅加载音频，播放由 canplay 回调处理
-watch(
-  () => player.currentSong,
-  async (song) => {
-    if (!song) return
-
-    // 防止重复触发：如果正在加载歌曲，直接返回
-    if (isLoadingSong) return
-
-    isLoadingSong = true
-
-    try {
-      // 切歌时立即停止当前播放，防止多首歌同时播放
-      player.stopPlayback()
-      stopTimeUpdate()
-
-      // 切歌时立即重置进度，避免显示上一首歌的残留时间
-      player.currentTime = 0
-
-      await audioPlayer.load(song.file_path)
-      // load 完成（canplay 已触发），设置音量和 Media Session
-      // 注意：audio 元素音量设为 0，声音由 Web Audio 输出
-      audioPlayer.setVolume(0)
-      audioPlayer.setMediaSession(
-        song.title,
-        song.artist,
-        song.cover_path ? player.getCoverUrl(song.cover_path) : undefined
-      )
-
-      // ========== Web Audio 主播放链路 ==========
-      // 初始化 AudioContext
-      player.initAudioContext()
-
-      // 获取音频 URL
-      const audioUrl = player.getAudioUrl(song.file_path)
-
-      // 获取 AudioBuffer（fetch + decodeAudioData，带缓存）
-      const audioBuffer = await player.getAudioBuffer(audioUrl)
-
-      if (audioBuffer) {
-        // 设置当前音频 URL
-        player.setCurrentAudioUrl(audioUrl)
-
-        // 如果正在播放（切歌或自动播放），立即开始播放
-        if (player.isPlaying || player.pendingPlay) {
-          player.pendingPlay = false
-          player.isSwitchingSong = false
-          player.playFromOffset(0)
-          startTimeUpdate()
-        }
-      }
-    } catch (e) {
-      console.error('[ControlBar] 加载歌曲失败:', e)
-      player.isSwitchingSong = false
-      player.pendingPlay = false
-    } finally {
-      isLoadingSong = false
-    }
-  }
-)
-
-// 监听播放状态变化（用户手动点击播放/暂停按钮）
-watch(
-  () => player.isPlaying,
-  (playing) => {
-    if (playing) {
-      // 恢复 Web Audio 播放
-      player.resumePlayback()
-      startTimeUpdate()
-    } else {
-      // 暂停 Web Audio 播放
-      player.pausePlayback()
-      stopTimeUpdate()
-      // 同时暂停 audio 元素（保持同步）
-      audioPlayer.pause()
-    }
-  }
-)
-
-// 监听音量变化，应用到 Web Audio
-watch(
-  () => player.volume,
-  (vol) => {
-    // 应用到 Web Audio GainNode
-    player.setPlaybackVolume(vol)
-    // audio 元素保持静音
-    audioPlayer.setVolume(0)
-  }
-)
-
-// 播放时间更新定时器
-let timeUpdateInterval: number | null = null
-
-function startTimeUpdate() {
-  if (timeUpdateInterval) return
-  timeUpdateInterval = window.setInterval(() => {
-    if (player.isPlaying) {
-      const currentTime = player.getCurrentPlaybackTime()
-      player.currentTime = currentTime
-    }
-  }, 250)
-}
-
-function stopTimeUpdate() {
-  if (timeUpdateInterval) {
-    clearInterval(timeUpdateInterval)
-    timeUpdateInterval = null
-  }
-}
-
 onMounted(async () => {
-  // 绑定 store 状态访问器，让 canplay 回调能读写 pendingPlay / isSwitchingSong / isPlaying
-  audioPlayer.bindStoreAccessors({
-    getPendingPlay: () => player.pendingPlay,
-    setPendingPlay: (v: boolean) => { player.pendingPlay = v },
-    setIsSwitchingSong: (v: boolean) => { player.isSwitchingSong = v },
-    setIsPlaying: (v: boolean) => { player.isPlaying = v },
-  })
-
-  // 绑定音频播放器事件（audio 元素只用于获取元数据，不参与播放控制）
-  audioPlayer.onDurationChange((dur) => {
-    player.duration = dur
-  })
-
-  // Web Audio 播放结束回调
-  player.setOnAudioEnded(() => {
-    stopTimeUpdate()
-    player.next()
-  })
-
-  // 更新页面标题：歌曲名 - 歌手名
-  const updateTitle = () => {
-    const song = player.currentSong
-    if (song) {
-      document.title = `${song.title} - ${song.artist} · 高山流水`
-    } else {
-      document.title = '高山流水'
-    }
-  }
-  // 立即执行一次
-  updateTitle()
-  // 监听歌曲变化
-  watch(() => player.currentSong, updateTitle)
-
-  // 设置媒体键处理
-  if ('mediaSession' in navigator) {
-    navigator.mediaSession.setActionHandler('previoustrack', () => player.prev())
-    navigator.mediaSession.setActionHandler('nexttrack', () => player.next())
-  }
-
   // 监听全局快捷键事件
   unlistenToggle = await listen('global-shortcut:toggle-play', handleShortcutToggle)
   unlistenPrev = await listen('global-shortcut:prev-track', () => {
@@ -259,7 +107,6 @@ onMounted(async () => {
 })
 
 onUnmounted(() => {
-  stopTimeUpdate()
   unlistenToggle?.()
   unlistenPrev?.()
   unlistenNext?.()

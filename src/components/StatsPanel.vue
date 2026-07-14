@@ -29,10 +29,7 @@ function formatDurationShort(seconds: number): string {
 }
 
 async function handleExport() {
-  const success = await player.exportStatsReport()
-  if (success) {
-    console.log('[Stats] 导出成功')
-  }
+  await player.exportStatsReport()
 }
 </script>
 

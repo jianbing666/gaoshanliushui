@@ -61,13 +61,9 @@ function createAndAddToPlaylist() {
   const songId = player.contextMenu.song?.id
   closeMenu()
   if (songId) {
-    setTimeout(() => {
-      const name = window.prompt('请输入歌单名称：')
-      if (name && name.trim()) {
-        const newPlaylist = player.createPlaylist(name.trim())
-        player.addSongToPlaylist(songId, newPlaylist.id)
-      }
-    }, 200)
+    nextTick(() => {
+      player.openCreatePlaylistModal(songId)
+    })
   }
 }
 

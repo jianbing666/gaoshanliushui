@@ -1,71 +1,52 @@
 import { ref, onMounted } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 
 const STORAGE_KEY = 'gaoshanliushui-auto-launch'
 
-/**
- * 开机自启 Composable
- * 处理开机自启的启用、禁用和状态查询
- */
 export function useAutoLaunch() {
   const autoLaunch = ref(false)
   const loading = ref(false)
 
-  /**
-   * 加载开机自启状态
-   */
-  function loadAutoLaunchStatus() {
+  async function loadAutoLaunchStatus() {
+    loading.value = true
     try {
-      const saved = localStorage.getItem(STORAGE_KEY)
-      autoLaunch.value = saved === 'true'
+      const enabled = await invoke<boolean>('plugin:autostart|is_enabled')
+      autoLaunch.value = enabled
+      localStorage.setItem(STORAGE_KEY, String(enabled))
     } catch (error) {
       console.error('加载开机自启状态失败:', error)
-      autoLaunch.value = false
+      const saved = localStorage.getItem(STORAGE_KEY)
+      autoLaunch.value = saved === 'true'
+    } finally {
+      loading.value = false
     }
   }
 
-  /**
-   * 切换开机自启状态
-   */
   async function toggleAutoLaunch(): Promise<boolean> {
     loading.value = true
     try {
       const newState = !autoLaunch.value
-
-      // 保存状态到 localStorage
-      localStorage.setItem(STORAGE_KEY, String(newState))
+      if (newState) {
+        await invoke('plugin:autostart|enable')
+      } else {
+        await invoke('plugin:autostart|disable')
+      }
       autoLaunch.value = newState
-
-      // TODO: 调用 Tauri API 注册/注销开机自启
-      // 需要在 Cargo.toml 中添加 tauri-plugin-autolaunch 依赖
-      // if (newState) {
-      //   await invoke('enable_auto_launch')
-      // } else {
-      //   await invoke('disable_auto_launch')
-      // }
-
+      localStorage.setItem(STORAGE_KEY, String(newState))
       return true
     } catch (error) {
       console.error('切换开机自启失败:', error)
-      // 恢复原状态
-      const saved = localStorage.getItem(STORAGE_KEY)
-      autoLaunch.value = saved === 'true'
       return false
     } finally {
       loading.value = false
     }
   }
 
-  /**
-   * 启用开机自启
-   */
   async function enableAutoLaunch(): Promise<boolean> {
     if (autoLaunch.value) return true
     return await toggleAutoLaunch()
   }
 
-  /**
-   * 禁用开机自启
-   */
   async function disableAutoLaunch(): Promise<boolean> {
     if (!autoLaunch.value) return true
     return await toggleAutoLaunch()

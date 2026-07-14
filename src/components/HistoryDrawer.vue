@@ -39,7 +39,7 @@ function playHistoryItem(index: number) {
 
 <template>
   <div
-    class="w-80 h-full flex flex-col bg-white/50 dark:bg-gray-900/60 backdrop-blur-2xl border-r border-gray-200/60 dark:border-gray-700/60 shadow-2xl"
+    class="w-80 h-full flex flex-col bg-white/50 dark:bg-gray-900/60 backdrop-blur-2xl border-r border-gray-200/60 dark:border-gray-700/60"
   >
     <!-- 头部 -->
     <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200/50 dark:border-gray-700/50">

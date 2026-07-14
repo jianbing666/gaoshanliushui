@@ -11,6 +11,7 @@
     "dialog:allow-ask",
     "dialog:allow-confirm",
     "global-shortcut:default",
+    "autostart:default",
     "core:window:default",
     "core:window:allow-set-size",
     "core:window:allow-set-always-on-top",
@@ -21,6 +22,16 @@
     "core:window:allow-unmaximize",
     "core:window:allow-toggle-maximize",
     "core:window:allow-start-dragging",
-    "core:window:allow-is-maximized"
+    "core:window:allow-is-maximized",
+    {
+      "identifier": "shell:allow-execute",
+      "allow": [
+        {
+          "name": "ffmpeg",
+          "sidecar": true,
+          "args": true
+        }
+      ]
+    }
   ]
 }

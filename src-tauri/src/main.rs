@@ -9,6 +9,7 @@ use commands::toggle_mini_mode;
 use commands::global_shortcut;
 use commands::scan_images;
 use commands::tray;
+use commands::download_bilibili;
 
 use std::sync::Mutex;
 use tauri::Manager;
@@ -27,8 +28,21 @@ impl Default for AppSettings {
 
 fn main() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
+            // 第二个实例启动时，显示并聚焦主窗口
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+        }))
+        .plugin(tauri_plugin_autostart::init(
+            tauri_plugin_autostart::MacosLauncher::LaunchAgent,
+            Some(vec![]),
+        ))
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
+        .plugin(tauri_plugin_shell::init())
         .manage(global_shortcut::ShortcutStore::default())
         .manage(AppSettings::default())
         .setup(|app| {
@@ -62,6 +76,8 @@ fn main() {
             scan_images::scan_image_folder,
             global_shortcut::update_global_shortcut,
             tray::set_minimize_to_tray,
+            download_bilibili::parse_bilibili_url,
+            download_bilibili::download_bilibili_music,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { usePlayerStore } from '@/stores/playerStore'
-import { ref, watch, onMounted, onUnmounted } from 'vue'
+import { ref, watch, onMounted, onUnmounted, computed } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { getCurrentWindow } from '@tauri-apps/api/window'
 import Sidebar from '@/components/Sidebar.vue'
 import Player from '@/components/Player.vue'
 import ControlBar from '@/components/ControlBar.vue'
@@ -10,19 +11,41 @@ import SongContextMenu from '@/components/SongContextMenu.vue'
 import CreatePlaylistModal from '@/components/CreatePlaylistModal.vue'
 import HistoryDrawer from '@/components/HistoryDrawer.vue'
 import StatsPanel from '@/components/StatsPanel.vue'
+import DownloadPanel from '@/components/DownloadPanel.vue'
 import TitleBar from '@/components/TitleBar.vue'
+import Maximize2Icon from '@/components/icons/Maximize2Icon.vue'
+import PlayIcon from '@/components/icons/PlayIcon.vue'
+import PauseIcon from '@/components/icons/PauseIcon.vue'
+import SkipBackIcon from '@/components/icons/SkipBackIcon.vue'
+import SkipForwardIcon from '@/components/icons/SkipForwardIcon.vue'
+import RepeatIcon from '@/components/icons/RepeatIcon.vue'
+import RepeatOneIcon from '@/components/icons/RepeatOneIcon.vue'
+import ShuffleIcon from '@/components/icons/ShuffleIcon.vue'
+import ArrowRightIcon from '@/components/icons/ArrowRightIcon.vue'
+import MusicIcon from '@/components/icons/MusicIcon.vue'
+import { formatTime } from '@/utils/formatTime'
 
 const player = usePlayerStore()
+const appWindow = getCurrentWindow()
 const showSettings = ref(false)
 const autoLoadError = ref<string | null>(null)
+
+const miniWindowWidth = ref(640)
+const miniWindowHeight = ref(120)
+const isCompactMiniMode = computed(() => miniWindowWidth.value < 480)
 
 let unlistenWindowShow: UnlistenFn | null = null
 
 // 切换设置面板显示/隐藏
 function toggleSettings() {
-  // 同侧互斥：展开设置时收起统计
-  if (!showSettings.value && player.showStatsPanel) {
-    player.toggleStatsPanel()
+  // 同侧互斥：展开设置时收起统计和下载
+  if (!showSettings.value) {
+    if (player.showStatsPanel) {
+      player.toggleStatsPanel()
+    }
+    if (player.showDownloadPanel) {
+      player.toggleDownloadPanel()
+    }
   }
   showSettings.value = !showSettings.value
 }
@@ -33,6 +56,19 @@ watch(() => player.showStatsPanel, (newVal) => {
   if (newVal && showSettings.value) {
     showSettings.value = false
   }
+  // 展开统计时收起下载
+  if (newVal && player.showDownloadPanel) {
+    player.toggleDownloadPanel()
+  }
+})
+
+// 监听下载面板切换，实现右侧互斥
+watch(() => player.showDownloadPanel, (newVal) => {
+  // 展开下载时收起设置和统计
+  if (newVal) {
+    if (showSettings.value) showSettings.value = false
+    if (player.showStatsPanel) player.toggleStatsPanel()
+  }
 })
 
 // 切换迷你模式
@@ -40,11 +76,28 @@ function toggleMiniMode() {
   player.setMiniMode(!player.isMiniMode)
 }
 
+// 迷你模式窗口控制
+function minimizeWindow() {
+  appWindow.minimize().catch(() => {})
+}
+
+function closeWindow() {
+  appWindow.close().catch(() => {})
+}
+
 // 处理窗口显示事件（从托盘恢复时）
 function handleWindowShow() {
-  console.log('[App] 窗口已显示，恢复音频上下文')
   // 恢复 AudioContext 运行状态
   player.resumeAudioContext()
+}
+
+// 迷你模式窗口大小变化监听
+let resizeObserver: ResizeObserver | null = null
+function handleMiniResize() {
+  if (player.isMiniMode) {
+    miniWindowWidth.value = window.innerWidth
+    miniWindowHeight.value = window.innerHeight
+  }
 }
 
 // 启动时自动加载音乐库
@@ -64,12 +117,15 @@ onMounted(async () => {
   } catch (e) {
     console.warn('[App] 监听窗口显示事件失败:', e)
   }
+
+  // 监听窗口大小变化（迷你模式自适应）
+  resizeObserver = new ResizeObserver(handleMiniResize)
+  resizeObserver.observe(document.documentElement)
 })
 
 function handleVisibilityChange() {
   if (!document.hidden) {
     // 页面重新可见时，恢复音频上下文
-    console.log('[App] 页面重新可见')
     player.resumeAudioContext()
   }
 }
@@ -77,6 +133,7 @@ function handleVisibilityChange() {
 onUnmounted(() => {
   document.removeEventListener('visibilitychange', handleVisibilityChange)
   unlistenWindowShow?.()
+  resizeObserver?.disconnect()
 })
 </script>
 
@@ -84,7 +141,7 @@ onUnmounted(() => {
   <!-- 主容器：Flex 垂直布局 -->
   <div 
     class="flex flex-col bg-gradient-to-br from-gray-100 via-gray-50 to-gray-100 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 select-none overflow-hidden relative transition-all duration-300 ease-out"
-    :class="player.isMiniMode ? 'h-20' : 'h-screen'"
+    :class="player.isMiniMode ? 'h-full' : 'h-screen'"
   >
     <!-- 背景图片层 -->
     <div
@@ -157,28 +214,179 @@ onUnmounted(() => {
         <ControlBar class="shrink-0" />
       </main>
 
-      <!-- 右侧面板：设置 / 统计（互斥，挤压式） -->
+      <!-- 右侧面板：设置 / 统计 / 下载（互斥，挤压式） -->
       <Transition name="slide-fade" mode="out-in">
-        <SettingsPanel v-if="showSettings && !player.showStatsPanel" key="settings" class="shrink-0" />
+        <SettingsPanel v-if="showSettings && !player.showStatsPanel && !player.showDownloadPanel" key="settings" class="shrink-0" />
         <StatsPanel v-else-if="player.showStatsPanel" key="stats" class="shrink-0" />
+        <DownloadPanel v-else-if="player.showDownloadPanel" key="download" class="shrink-0" />
       </Transition>
     </div>
 
-    <!-- 迷你模式下的控制栏 -->
-    <div v-if="player.isMiniMode" class="flex-1 flex flex-col w-full">
-      <!-- 迷你模式拖拽区域（顶部一小条，用于拖动窗口） -->
-      <div class="h-6 shrink-0 cursor-grab active:cursor-grabbing" data-tauri-drag-region></div>
-      <!-- ControlBar 区域 -->
-      <div class="flex-1 flex items-center justify-center px-4 gap-4 relative">
-        <ControlBar class="w-full shrink-0" />
-        <!-- 展开按钮（悬浮在右上角） -->
-        <button
-          class="absolute top-2 right-3 w-7 h-7 rounded-lg flex items-center justify-center transition-all duration-200 hover:bg-gray-200/50 dark:hover:bg-gray-700/50 text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 z-50"
-          title="展开"
-          @click="toggleMiniMode"
-        >
-          <Maximize2Icon :size="16" />
-        </button>
+    <!-- 迷你模式 -->
+    <div v-if="player.isMiniMode" class="flex flex-col w-full min-h-screen bg-white/90 dark:bg-gray-900/90 backdrop-blur-xl">
+      <!-- 自定义标题栏：36px -->
+      <div style="height: 36px" class="shrink-0 flex items-center px-3 border-b border-gray-200/50 dark:border-gray-700/50">
+        <!-- 左侧：应用名（可拖拽） -->
+        <div class="flex-1 flex items-center h-full" data-tauri-drag-region>
+          <span class="text-sm text-gray-700 dark:text-gray-300 font-medium">高山流水</span>
+        </div>
+        <!-- 右侧：窗口控制按钮 -->
+        <div class="flex items-center gap-0.5">
+          <!-- 最小化 -->
+          <button
+            class="w-8 h-7 flex items-center justify-center rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 transition-colors"
+            title="最小化"
+            @click="minimizeWindow"
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <path d="M5 12h14"></path>
+            </svg>
+          </button>
+          <!-- 退出迷你模式 -->
+          <button
+            class="w-8 h-7 flex items-center justify-center rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 transition-colors"
+            title="退出迷你模式"
+            @click="toggleMiniMode"
+          >
+            <Maximize2Icon :size="14" />
+          </button>
+          <!-- 关闭 -->
+          <button
+            class="w-8 h-7 flex items-center justify-center rounded-md text-gray-500 dark:text-gray-400 hover:bg-red-500 hover:text-white transition-colors"
+            title="关闭"
+            @click="closeWindow"
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+              <path d="M18 6 6 18"></path>
+              <path d="m6 6 12 12"></path>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- 音乐控制区域：自适应高度 -->
+      <div class="flex-1 flex flex-col min-h-0 overflow-hidden">
+        <!-- 上半部分：左侧封面信息 + 中间控制按钮 + 右侧音量（横向布局） -->
+        <div class="flex-1 flex items-center px-4 gap-4 min-h-0">
+          <!-- 左侧：封面 + 歌曲信息 -->
+          <div class="flex items-center gap-3 shrink-0 min-w-0"
+               :style="isCompactMiniMode ? 'max-width: 180px;' : ''">
+            <!-- 封面 -->
+            <div class="w-12 h-12 rounded-lg bg-gray-200 dark:bg-gray-700 shrink-0 overflow-hidden">
+              <img
+                v-if="player.currentSong?.cover_path"
+                :src="player.getCoverUrl(player.currentSong.cover_path)"
+                :alt="player.currentSong?.title"
+                class="w-full h-full object-cover"
+              />
+              <div v-else class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500">
+                <MusicIcon :size="18" />
+              </div>
+            </div>
+            <!-- 歌曲信息 -->
+            <div class="min-w-0 w-28">
+              <p class="text-gray-900 dark:text-white text-sm font-medium truncate">
+                {{ player.currentSong?.title || '未选择歌曲' }}
+              </p>
+              <p class="text-gray-500 dark:text-gray-400 text-xs truncate">
+                {{ player.currentSong?.artist || '未知艺术家' }}
+              </p>
+            </div>
+          </div>
+
+          <!-- 中间：播放控制按钮 -->
+          <div class="flex items-center gap-1 shrink-0">
+            <!-- 循环模式 -->
+            <button
+              class="w-7 h-7 flex items-center justify-center rounded-md text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+              :class="{ 'text-blue-500 dark:text-blue-400': player.loopMode !== 'none' }"
+              :title="player.loopMode === 'list' ? '列表循环' : player.loopMode === 'single' ? '单曲循环' : player.loopMode === 'shuffle' ? '随机播放' : '顺序播放'"
+              @click="player.toggleLoopMode"
+            >
+              <ShuffleIcon v-if="player.loopMode === 'shuffle'" :size="14" />
+              <RepeatOneIcon v-else-if="player.loopMode === 'single'" :size="14" />
+              <RepeatIcon v-else-if="player.loopMode === 'list'" :size="14" />
+              <ArrowRightIcon v-else :size="14" />
+            </button>
+
+            <!-- 上一首 -->
+            <button
+              class="w-7 h-7 flex items-center justify-center rounded-md text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+              :class="{ 'opacity-30 cursor-not-allowed': !player.hasPrev }"
+              :disabled="!player.hasPrev"
+              @click="player.prev"
+            >
+              <SkipBackIcon :size="16" />
+            </button>
+
+            <!-- 播放/暂停 -->
+            <button
+              class="w-9 h-9 bg-gray-900 dark:bg-white rounded-full flex items-center justify-center hover:bg-gray-700 dark:hover:bg-gray-200 transition-colors shadow-md"
+              @click="player.togglePlay"
+            >
+              <PauseIcon v-if="player.isPlaying" :size="16" class="text-white dark:text-gray-900" />
+              <PlayIcon v-else :size="16" class="text-white dark:text-gray-900 ml-0.5" />
+            </button>
+
+            <!-- 下一首 -->
+            <button
+              class="w-7 h-7 flex items-center justify-center rounded-md text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+              :class="{ 'opacity-30 cursor-not-allowed': !player.hasNext }"
+              :disabled="!player.hasNext"
+              @click="player.next"
+            >
+              <SkipForwardIcon :size="16" />
+            </button>
+          </div>
+
+          <!-- 右侧：音量控制（弹性宽度） -->
+          <div class="flex items-center gap-2 shrink-0 w-40">
+            <svg class="w-4 h-4 text-gray-900 dark:text-gray-100 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+              <template v-if="player.volume === 0">
+                <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.58-1.42 1.07-2.25 1.43v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+              </template>
+              <template v-else-if="player.volume < 0.5">
+                <path d="M18.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM5 9v6h4l5 5V4L9 9H5z"/>
+              </template>
+              <template v-else>
+                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+              </template>
+            </svg>
+            <input
+              type="range"
+              class="flex-1 min-w-0"
+              :min="0"
+              :max="1"
+              step="0.01"
+              :value="player.volume"
+              @input="(e) => { player.volume = parseFloat((e.target as HTMLInputElement).value) }"
+            />
+
+            <!-- 新增：显示具体的音量百分比 -->
+            <span class="text-xs text-gray-500 dark:text-gray-400 w-8 text-right shrink-0">
+              {{ (player.volume * 100).toFixed(0) }}
+            </span>
+          </div>
+        </div>
+
+        <!-- 下半部分：进度条（带时间显示），跨整个宽度 -->
+        <div class="flex items-center px-4 gap-2 shrink-0" :style="'height: 30px;'">
+          <span class="text-gray-500 dark:text-gray-400 text-xs w-9 text-right shrink-0 tabular-nums">{{ formatTime(player.currentTime) }}</span>
+          <input
+            type="range"
+            class="flex-1 min-w-0"
+            :min="0"
+            :max="player.duration || 0"
+            :value="player.currentTime"
+            step="0.1"
+            @input="(e) => {
+              const time = parseFloat((e.target as HTMLInputElement).value)
+              player.seekTo(time)
+              player.currentTime = time
+            }"
+          />
+          <span class="text-gray-500 dark:text-gray-400 text-xs w-9 shrink-0 tabular-nums">{{ formatTime(player.duration) }}</span>
+        </div>
       </div>
     </div>
 

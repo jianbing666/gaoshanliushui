@@ -27,6 +27,8 @@ export class AudioPlayer {
   constructor() {
     this.audio = new Audio()
     this.audio.preload = 'metadata'
+    // 默认静音，声音由 Web Audio 输出
+    this.audio.volume = 0
 
     this.audio.addEventListener('timeupdate', () => {
       this._onTimeUpdate?.(this.audio.currentTime)
