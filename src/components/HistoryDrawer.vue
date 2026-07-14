@@ -1,5 +1,8 @@
 <script setup lang="ts">
-import { usePlayerStore } from '@/stores/playerStore'
+import { useHistoryStore } from '@/stores/historyStore'
+import { useLibraryStore } from '@/stores/libraryStore'
+import { useAudioStore } from '@/stores/audioStore'
+import { useUIStore } from '@/stores/uiStore'
 import { formatTime } from '@/utils/formatTime'
 import MusicIcon from '@/components/icons/MusicIcon.vue'
 import ChevronLeftIcon from '@/components/icons/ChevronLeftIcon.vue'
@@ -9,10 +12,13 @@ import VirtualSongList from '@/components/VirtualSongList.vue'
 import type { PlayHistoryItem } from '@/types/song'
 import { computed } from 'vue'
 
-const player = usePlayerStore()
+const history = useHistoryStore()
+const library = useLibraryStore()
+const audio = useAudioStore()
+const ui = useUIStore()
 
 // 阶段 2.1: 长度 > 200 启用虚拟滚动
-const useVirtualList = computed(() => player.playHistory.length > 200)
+const useVirtualList = computed(() => history.playHistory.length > 200)
 
 function formatDate(timestamp: number): string {
   const date = new Date(timestamp)
@@ -31,14 +37,14 @@ function formatDate(timestamp: number): string {
 }
 
 function playHistoryItem(index: number) {
-  const item = player.playHistory[index]
+  const item = history.playHistory[index]
   if (!item) return
 
-  const song = player.findSongById(item.songId)
+  const song = library.findSongById(item.songId)
   if (song) {
-    const globalIndex = player.playlist.findIndex((s) => s.id === song.id)
+    const globalIndex = library.playlist.findIndex((s) => s.id === song.id)
     if (globalIndex !== -1) {
-      player.playByIndex(globalIndex)
+      audio.playByIndex(globalIndex)
     }
   }
 }
@@ -58,21 +64,21 @@ function onCoverError(e: Event) {
     <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200/50 dark:border-gray-700/50">
       <div class="flex items-center gap-2">
         <h2 class="text-gray-900 dark:text-white text-base font-semibold">播放历史</h2>
-        <span class="text-xs text-gray-500 dark:text-gray-400">{{ player.playHistory.length }} 首</span>
+        <span class="text-xs text-gray-500 dark:text-gray-400">{{ history.playHistory.length }} 首</span>
       </div>
       <div class="flex items-center gap-1">
         <button
-          v-if="player.playHistory.length > 0"
+          v-if="history.playHistory.length > 0"
           class="p-1.5 rounded-md hover:bg-gray-200/60 dark:hover:bg-gray-700/60 text-gray-500 dark:text-gray-400 hover:text-red-500 dark:hover:text-red-400 transition-colors"
           title="清空历史"
-          @click="player.clearPlayHistory()"
+          @click="history.clearPlayHistory()"
         >
           <TrashIcon :size="16" />
         </button>
         <button
           class="p-1.5 rounded-md hover:bg-gray-200/60 dark:hover:bg-gray-700/60 text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white transition-colors"
           title="关闭"
-          @click="player.toggleHistoryDrawer()"
+          @click="ui.toggleHistoryDrawer()"
         >
           <ChevronLeftIcon :size="18" />
         </button>
@@ -81,11 +87,11 @@ function onCoverError(e: Event) {
 
     <!-- 历史记录列表 -->
     <div class="flex-1 overflow-y-auto min-h-0">
-      <template v-if="player.playHistory.length > 0">
+      <template v-if="history.playHistory.length > 0">
         <!-- 阶段 2.1: 大列表走虚拟滚动, 小列表保留 v-for -->
         <VirtualSongList
           v-if="useVirtualList"
-          :songs="player.playHistory"
+          :songs="history.playHistory"
           :item-size="64"
         >
           <template #default="{ song, index }">
@@ -97,7 +103,7 @@ function onCoverError(e: Event) {
               <div class="w-10 h-10 rounded bg-gray-200/70 dark:bg-gray-700/70 shrink-0 overflow-hidden">
                 <img
                   v-if="(song as PlayHistoryItem).cover_path"
-                  :src="player.getCoverUrl((song as PlayHistoryItem).cover_path as string)"
+                  :src="library.getCoverUrl((song as PlayHistoryItem).cover_path as string)"
                   :alt="(song as PlayHistoryItem).title"
                   class="w-full h-full object-cover"
                   loading="lazy"
@@ -124,7 +130,7 @@ function onCoverError(e: Event) {
               <button
                 class="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition-all"
                 title="删除记录"
-                @click.stop="player.removeHistoryItem((song as PlayHistoryItem).id)"
+                @click.stop="history.removeHistoryItem((song as PlayHistoryItem).id)"
               >
                 <TrashIcon :size="14" />
               </button>
@@ -133,7 +139,7 @@ function onCoverError(e: Event) {
         </VirtualSongList>
         <template v-else>
           <div
-            v-for="(item, index) in player.playHistory"
+            v-for="(item, index) in history.playHistory"
             :key="item.id"
             class="flex items-center gap-3 px-3 py-2 hover:bg-gray-100/60 dark:hover:bg-white/10 cursor-pointer transition-colors group"
             @click="playHistoryItem(index)"
@@ -142,7 +148,7 @@ function onCoverError(e: Event) {
             <div class="w-10 h-10 rounded bg-gray-200/70 dark:bg-gray-700/70 shrink-0 overflow-hidden">
               <img
                 v-if="item.cover_path"
-                :src="player.getCoverUrl(item.cover_path)"
+                :src="library.getCoverUrl(item.cover_path)"
                 :alt="item.title"
                 class="w-full h-full object-cover"
                 loading="lazy"
@@ -170,7 +176,7 @@ function onCoverError(e: Event) {
             <button
               class="p-1 rounded opacity-0 group-hover:opacity-100 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition-all"
               title="删除记录"
-              @click.stop="player.removeHistoryItem(item.id)"
+              @click.stop="history.removeHistoryItem(item.id)"
             >
               <TrashIcon :size="14" />
             </button>

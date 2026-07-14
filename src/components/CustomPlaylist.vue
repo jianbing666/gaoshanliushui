@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { usePlayerStore } from '@/stores/playerStore'
+import { useLibraryStore } from '@/stores/libraryStore'
+import { useAudioStore } from '@/stores/audioStore'
 import type { Playlist } from '@/types/song'
 import FolderIcon from '@/components/icons/FolderIcon.vue'
 import ChevronRightIcon from '@/components/icons/ChevronRightIcon.vue'
@@ -13,12 +14,13 @@ const props = defineProps<{
   playlist: Playlist
 }>()
 
-const player = usePlayerStore()
+const library = useLibraryStore()
+const audio = useAudioStore()
 
 // 歌单内的歌曲列表
 const songs = computed(() => {
   return props.playlist.songIds
-    .map((id) => player.findSongById(id))
+    .map((id) => library.findSongById(id))
     .filter((s) => s !== undefined)
 })
 
@@ -26,17 +28,17 @@ const songs = computed(() => {
 const useVirtualList = computed(() => songs.value.length > 200)
 
 // 是否激活
-const isActive = computed(() => player.activePlaylistId === props.playlist.id)
+const isActive = computed(() => library.activePlaylistId === props.playlist.id)
 
 // 点击展开/折叠
 function handleToggleExpand(e: MouseEvent) {
   e.stopPropagation()
-  player.togglePlaylistExpand(props.playlist.id)
+  library.togglePlaylistExpand(props.playlist.id)
 }
 
 // 点击选择歌单
 function handleSelect() {
-  player.selectPlaylist(props.playlist.id)
+  library.selectPlaylist(props.playlist.id)
 }
 
 // 在歌单内播放歌曲
@@ -44,11 +46,11 @@ function playSongInPlaylist(index: number) {
   const song = songs.value[index]
   if (song) {
     // 先切换到该歌单，再播放
-    player.selectPlaylist(props.playlist.id)
+    library.selectPlaylist(props.playlist.id)
     // 使用全局索引播放
-    const globalIndex = player.playlist.findIndex((s) => s.id === song.id)
+    const globalIndex = library.playlist.findIndex((s) => s.id === song.id)
     if (globalIndex !== -1) {
-      player.playByIndex(globalIndex)
+      audio.playByIndex(globalIndex)
     }
   }
 }

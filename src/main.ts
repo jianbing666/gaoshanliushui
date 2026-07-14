@@ -16,5 +16,5 @@ app.use(pinia)
 app.mount('#app')
 
 // 必须在 app.mount 之后、且必须在 Pinia 创建之后调用
-// 内部会等待 usePlayerStore() 获取 store 实例
+// 内部会等待 useAudioStore() 获取 store 实例
 setupGlobalMediaListeners()

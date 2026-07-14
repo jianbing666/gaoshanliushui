@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { usePlayerStore } from '@/stores/playerStore'
+import { useAudioStore } from '@/stores/audioStore'
+import { useSettingsStore } from '@/stores/settingsStore'
 import { ref, onMounted, onUnmounted, watch, computed } from 'vue'
 
-const player = usePlayerStore()
+const audio = useAudioStore()
+const settings = useSettingsStore()
 
 // 频谱数据数组（64个条形）
 const spectrumData = ref<number[]>(Array(64).fill(0))
@@ -14,32 +16,32 @@ let animationTimer: number | null = null
 let dataArray: Uint8Array<ArrayBuffer> | null = null
 
 // 频谱参数直接来自 store 中按"质量档位"计算好的值, 此处只读
-const sampleInterval = computed(() => player.spectrumSampleInterval)
-const fftSize = computed(() => player.spectrumFftSize)
-const smoothing = computed(() => player.spectrumSmoothing)
+const sampleInterval = computed(() => settings.spectrumSampleInterval)
+const fftSize = computed(() => settings.spectrumFftSize)
+const smoothing = computed(() => settings.spectrumSmoothing)
 
 // 计算当前实际主题（用于频谱条形颜色）
 const actualTheme = computed(() => {
-  if (player.theme === 'system') {
+  if (settings.theme === 'system') {
     if (window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches) {
       return 'dark'
     }
     return 'light'
   }
-  return player.theme
+  return settings.theme
 })
 
 // 频谱条形颜色（浅色模式 blue-500，深色模式 blue-400）
 const spectrumBarColor = computed(() => actualTheme.value === 'dark' ? '#60a5fa' : '#3b82f6')
 
 // 频谱动画是否应该运行
-const shouldRun = computed(() => 
-  player.isPlaying && player.showSpectrum && !player.spectrumPaused
+const shouldRun = computed(() =>
+  audio.isPlaying && settings.showSpectrum && !settings.spectrumPaused
 )
 
 // 单次采样函数
 function sampleSpectrum() {
-  const analyserNode = player.getAnalyserNode()
+  const analyserNode = audio.getAnalyserNode()
   if (!analyserNode) return
 
   // 获取频域数据（复用数组，避免频繁分配内存）
@@ -65,7 +67,7 @@ function sampleSpectrum() {
 
 // 启动频谱动画循环（使用 setTimeout 控制帧率）
 function startSpectrumAnimation() {
-  const analyserNode = player.getAnalyserNode()
+  const analyserNode = audio.getAnalyserNode()
 
   if (!analyserNode) return
 
@@ -118,9 +120,9 @@ watch(
 
 // 监听频谱质量档位变化（影响采样间隔、fftSize、平滑系数）
 watch(
-  () => player.spectrumQuality,
+  () => settings.spectrumQuality,
   () => {
-    const analyserNode = player.getAnalyserNode()
+    const analyserNode = audio.getAnalyserNode()
     if (analyserNode && shouldRun.value) {
       analyserNode.fftSize = fftSize.value
       // 重启动画以应用新的采样间隔
@@ -131,7 +133,7 @@ watch(
 
 // 监听切歌（currentSong 变化）
 watch(
-  () => player.currentSong,
+  () => audio.currentSong,
   () => {
     spectrumData.value = Array(64).fill(0)
   }
@@ -150,7 +152,7 @@ onUnmounted(() => {
 
 <template>
   <div
-    v-if="player.showSpectrum"
+    v-if="settings.showSpectrum"
     class="w-[300px] h-[40px] flex items-end justify-center gap-[2px] mx-auto mt-4"
   >
     <div

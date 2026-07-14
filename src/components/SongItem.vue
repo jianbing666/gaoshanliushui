@@ -1,10 +1,14 @@
 <script setup lang="ts">
-import { usePlayerStore } from '@/stores/playerStore'
+import { useLibraryStore } from '@/stores/libraryStore'
+import { useUIStore } from '@/stores/uiStore'
+import { useAudioStore } from '@/stores/audioStore'
 import { formatTime } from '@/utils/formatTime'
 import type { Song } from '@/types/song'
 import { computed } from 'vue'
 
-const player = usePlayerStore()
+const library = useLibraryStore()
+const ui = useUIStore()
+const audio = useAudioStore()
 
 const props = defineProps<{
   song: Song
@@ -18,14 +22,14 @@ const emit = defineEmits<{
 }>()
 
 const isCurrentSong = computed(() => {
-  const currentSong = player.currentSong
+  const currentSong = library.currentSong
   return currentSong?.id === props.song.id
 })
 
 function handleContextMenu(e: MouseEvent) {
   e.preventDefault()
   e.stopPropagation()
-  player.openContextMenu(props.song, props.playlistId || null, e.clientX, e.clientY)
+  ui.openContextMenu(props.song, props.playlistId || null, e.clientX, e.clientY)
 }
 
 // 阶段 3.7: 封面加载失败时静默隐藏
@@ -42,7 +46,7 @@ function onCoverError(e: Event) {
     避免 compact 等无关 prop 变化触发整个列表 diff (5000 首歌场景收益显著)
   -->
   <div
-    v-memo="[song.id, isCurrentSong, player.isPlaying]"
+    v-memo="[song.id, isCurrentSong, audio.isPlaying]"
     class="flex items-center gap-3 px-3 rounded-lg cursor-pointer transition-colors hover:bg-gray-100/50 dark:hover:bg-white/10 group"
     :class="[
       compact ? 'py-1.5' : 'py-2',
@@ -52,7 +56,7 @@ function onCoverError(e: Event) {
     @contextmenu="handleContextMenu"
   >
     <span v-if="!compact" class="w-6 text-center text-sm text-gray-500 dark:text-gray-400 shrink-0">
-      <template v-if="isCurrentSong && player.isPlaying">
+      <template v-if="isCurrentSong && audio.isPlaying">
         <span class="flex items-center justify-center gap-0.5">
           <span class="w-0.5 h-3 bg-blue-400 animate-pulse"></span>
           <span class="w-0.5 h-4 bg-blue-400 animate-pulse" style="animation-delay: 0.15s"></span>
@@ -70,7 +74,7 @@ function onCoverError(e: Event) {
     >
       <img
         v-if="song.cover_path"
-        :src="player.getCoverUrl(song.cover_path)"
+        :src="library.getCoverUrl(song.cover_path)"
         :alt="song.title"
         class="w-full h-full object-cover"
         loading="lazy"

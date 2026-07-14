@@ -1,7 +1,7 @@
 import { convertFileSrc } from '@tauri-apps/api/core'
 
 /**
- * 音频播放器封装类
+ * HTML5 Audio 元素包装(元数据 + MediaSession 专用)
  *
  * 用途: 仅用于获取音频元数据 (duration) 和作为 MediaSession 的媒体源.
  * 实际播放完全由 Web Audio API (AudioBufferSourceNode) 处理.
@@ -10,8 +10,13 @@ import { convertFileSrc } from '@tauri-apps/api/core'
  *   - 永远不调用 audio.play() (避免 WebView2 中 volume=0 失效导致切歌时短暂听到 HTML5 Audio)
  *   - 仅加载 (src=url, load()), 触发 canplay 获取 duration, 立即暂停保持 paused 状态
  *   - MediaSession.playbackState 由 store 直接控制, 不依赖 audio 的实际 play/pause 状态
+ *
+ * 迁移说明 (架构分离 v1):
+ *   - 原位置: src/utils/audioPlayer.ts
+ *   - 新位置: src/audio/HTML5AudioPlayer.ts
+ *   - 内部实现零改动, 仅迁移路径
  */
-export class AudioPlayer {
+export class HTML5AudioPlayer {
   private audio: HTMLAudioElement
   private _onTimeUpdate: ((time: number) => void) | null = null
   private _onEnded: (() => void) | null = null
@@ -228,4 +233,4 @@ export class AudioPlayer {
 }
 
 // 全局单例
-export const audioPlayer = new AudioPlayer()
+export const html5AudioPlayer = new HTML5AudioPlayer()

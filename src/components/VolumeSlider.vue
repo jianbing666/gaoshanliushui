@@ -1,6 +1,6 @@
 <script setup lang="ts">
 import { computed, ref, onMounted, onUnmounted } from 'vue'
-import { usePlayerStore } from '@/stores/playerStore'
+import { useAudioStore } from '@/stores/audioStore'
 
 interface Props {
   visible: boolean
@@ -14,7 +14,7 @@ const emit = defineEmits<{
   mouseLeave: []
 }>()
 
-const player = usePlayerStore()
+const player = useAudioStore()
 const sliderRef = ref<HTMLElement | null>(null)
 const isDragging = ref(false)
 let startVolume = 0

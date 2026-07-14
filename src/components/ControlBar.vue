@@ -3,8 +3,10 @@ export default { inheritAttrs: false }
 </script>
 
 <script setup lang="ts">
-import { usePlayerStore } from '@/stores/playerStore'
-import { audioPlayer } from '@/utils/audioPlayer'
+import { useAudioStore } from '@/stores/audioStore'
+import { useLibraryStore } from '@/stores/libraryStore'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { html5AudioPlayer } from '@/audio/HTML5AudioPlayer'
 import { formatTime } from '@/utils/formatTime'
 import { ref } from 'vue'
 import { useVolumeSlider } from '@/composables/useVolumeSlider'
@@ -19,7 +21,9 @@ import PlayIcon from '@/components/icons/PlayIcon.vue'
 import PauseIcon from '@/components/icons/PauseIcon.vue'
 import MusicIcon from '@/components/icons/MusicIcon.vue'
 
-const player = usePlayerStore()
+const player = useAudioStore()
+const library = useLibraryStore()
+const settings = useSettingsStore()
 const volumeIconRef = ref<HTMLElement | null>(null)
 // autoplay 被拦截时的轻提示
 const showAutoplayTip = ref(false)
@@ -53,7 +57,7 @@ function onProgressInput(event: Event) {
   // Web Audio 主链路：使用 seekTo 跳转
   player.seekTo(time)
   // 同时更新 audio 元素的进度（保持同步，仅用于元数据）
-  audioPlayer.seek(time)
+  html5AudioPlayer.seek(time)
   player.currentTime = time
 }
 
@@ -79,7 +83,7 @@ function toggleMute() {
     <footer 
       class="backdrop-blur border-t border-gray-200/50 dark:border-gray-700/50 flex items-center px-6 gap-6 shrink-0 h-24"
       :class="
-        player.currentBackgroundUrl && player.background.mode !== 'none'
+        settings.currentBackgroundUrl && settings.background.mode !== 'none'
           ? 'bg-white/30 dark:bg-gray-900/30'
           : 'bg-white/80 dark:bg-gray-800/50'
       "
@@ -88,18 +92,18 @@ function toggleMute() {
     <div class="flex items-center gap-4 w-36 shrink-0">
       <div class="w-14 h-14 rounded-lg bg-gray-200 dark:bg-gray-700 shrink-0 overflow-hidden">
         <img
-          v-if="player.currentSong?.cover_path"
-          :src="player.getCoverUrl(player.currentSong.cover_path)"
-          :alt="player.currentSong?.title"
+          v-if="library.currentSong?.cover_path"
+          :src="library.getCoverUrl(library.currentSong.cover_path)"
+          :alt="library.currentSong?.title"
           class="w-full h-full object-cover"
         />
         <div v-else class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500">
           <MusicIcon :size="20" />
         </div>
       </div>
-      <div class="min-w-0" v-if="player.currentSong">
-        <p class="text-gray-900 dark:text-white text-sm font-medium truncate">{{ player.currentSong.title }}</p>
-        <p class="text-gray-600 dark:text-gray-400 text-xs truncate">{{ player.currentSong.artist || '未知艺术家' }}</p>
+      <div class="min-w-0" v-if="library.currentSong">
+        <p class="text-gray-900 dark:text-white text-sm font-medium truncate">{{ library.currentSong.title }}</p>
+        <p class="text-gray-600 dark:text-gray-400 text-xs truncate">{{ library.currentSong.artist || '未知艺术家' }}</p>
       </div>
       <div v-else>
         <p class="text-gray-500 dark:text-gray-500 text-sm">未选择歌曲</p>

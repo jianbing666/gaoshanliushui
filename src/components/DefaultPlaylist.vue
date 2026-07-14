@@ -1,8 +1,8 @@
 <script setup lang="ts">
-import { usePlayerStore } from '@/stores/playerStore'
+import { useLibraryStore } from '@/stores/libraryStore'
 import MusicIcon from '@/components/icons/MusicIcon.vue'
 
-const player = usePlayerStore()
+const player = useLibraryStore()
 
 // 获取默认歌单的歌曲数量
 function getSongCount(): number {

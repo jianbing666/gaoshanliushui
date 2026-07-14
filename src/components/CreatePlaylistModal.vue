@@ -1,8 +1,10 @@
 <script setup lang="ts">
-import { usePlayerStore } from '@/stores/playerStore'
+import { useUIStore } from '@/stores/uiStore'
+import { useLibraryStore } from '@/stores/libraryStore'
 import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 
-const player = usePlayerStore()
+const ui = useUIStore()
+const library = useLibraryStore()
 const inputRef = ref<HTMLInputElement | null>(null)
 const playlistName = ref('')
 const isClosing = ref(false)
@@ -10,9 +12,9 @@ const isClosing = ref(false)
 function handleSubmit() {
   const name = playlistName.value.trim()
   if (name) {
-    const newPlaylist = player.createPlaylist(name)
-    if (player.createPlaylistAddSongId) {
-      player.addSongToPlaylist(player.createPlaylistAddSongId, newPlaylist.id)
+    const newPlaylist = library.createPlaylist(name)
+    if (ui.createPlaylistAddSongId) {
+      library.addSongToPlaylist(ui.createPlaylistAddSongId, newPlaylist.id)
     }
     closeModal()
   }
@@ -21,7 +23,7 @@ function handleSubmit() {
 function closeModal() {
   isClosing.value = true
   setTimeout(() => {
-    player.closeCreatePlaylistModal()
+    ui.closeCreatePlaylistModal()
     playlistName.value = ''
     isClosing.value = false
   }, 150)
@@ -40,7 +42,7 @@ function handleKeydown(e: KeyboardEvent) {
 }
 
 watch(
-  () => player.showCreatePlaylistModal,
+  () => ui.showCreatePlaylistModal,
   (visible) => {
     if (visible) {
       isClosing.value = false
@@ -63,7 +65,7 @@ onUnmounted(() => {
 <template>
   <Teleport to="body">
     <div
-      v-if="player.showCreatePlaylistModal"
+      v-if="ui.showCreatePlaylistModal"
       class="fixed inset-0 z-[200] flex items-center justify-center"
       :class="{ 'animate-fade-in': !isClosing, 'animate-fade-out': isClosing }"
       @click="handleOverlayClick"

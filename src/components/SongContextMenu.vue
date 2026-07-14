@@ -1,5 +1,6 @@
 <script setup lang="ts">
-import { usePlayerStore } from '@/stores/playerStore'
+import { useUIStore } from '@/stores/uiStore'
+import { useLibraryStore } from '@/stores/libraryStore'
 import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
 import ChevronRightIcon from '@/components/icons/ChevronRightIcon.vue'
 import ChevronLeftIcon from '@/components/icons/ChevronLeftIcon.vue'
@@ -7,7 +8,8 @@ import PlusIcon from '@/components/icons/PlusIcon.vue'
 import TrashIcon from '@/components/icons/TrashIcon.vue'
 import FolderIcon from '@/components/icons/FolderIcon.vue'
 
-const player = usePlayerStore()
+const ui = useUIStore()
+const library = useLibraryStore()
 const menuRef = ref<HTMLElement | null>(null)
 
 type MenuMode = 'main' | 'add' | 'move'
@@ -23,7 +25,7 @@ function handleClickOutside(e: MouseEvent) {
 function closeMenu() {
   isClosing.value = true
   setTimeout(() => {
-    player.closeContextMenu()
+    ui.closeContextMenu()
     menuMode.value = 'main'
     isClosing.value = false
   }, 150)
@@ -42,56 +44,56 @@ function backToMain() {
 }
 
 function addToPlaylist(playlistId: string) {
-  if (player.contextMenu.song) {
-    player.addSongToPlaylist(player.contextMenu.song.id, playlistId)
+  if (ui.contextMenu.song) {
+    library.addSongToPlaylist(ui.contextMenu.song.id, playlistId)
   }
 }
 
 function moveToPlaylist(playlistId: string) {
-  if (player.contextMenu.song && player.contextMenu.playlistId !== 'all-songs' && player.contextMenu.playlistId) {
-    const songId = player.contextMenu.song.id
-    const currentPlaylistId = player.contextMenu.playlistId
-    player.addSongToPlaylist(songId, playlistId)
-    player.removeSongFromPlaylist(songId, currentPlaylistId)
+  if (ui.contextMenu.song && ui.contextMenu.playlistId !== 'all-songs' && ui.contextMenu.playlistId) {
+    const songId = ui.contextMenu.song.id
+    const currentPlaylistId = ui.contextMenu.playlistId
+    library.addSongToPlaylist(songId, playlistId)
+    library.removeSongFromPlaylist(songId, currentPlaylistId)
   }
   closeMenu()
 }
 
 function createAndAddToPlaylist() {
-  const songId = player.contextMenu.song?.id
+  const songId = ui.contextMenu.song?.id
   closeMenu()
   if (songId) {
     nextTick(() => {
-      player.openCreatePlaylistModal(songId)
+      ui.openCreatePlaylistModal(songId)
     })
   }
 }
 
 function removeFromCurrentPlaylist() {
-  if (player.contextMenu.playlistId !== 'all-songs' && player.contextMenu.playlistId && player.contextMenu.song) {
-    player.removeSongFromPlaylist(player.contextMenu.song.id, player.contextMenu.playlistId)
+  if (ui.contextMenu.playlistId !== 'all-songs' && ui.contextMenu.playlistId && ui.contextMenu.song) {
+    library.removeSongFromPlaylist(ui.contextMenu.song.id, ui.contextMenu.playlistId)
   }
   closeMenu()
 }
 
 function adjustPosition() {
   nextTick(() => {
-    if (menuRef.value && player.contextMenu.song) {
+    if (menuRef.value && ui.contextMenu.song) {
       const rect = menuRef.value.getBoundingClientRect()
-      let newX = player.contextMenu.x
-      let newY = player.contextMenu.y
-      
+      let newX = ui.contextMenu.x
+      let newY = ui.contextMenu.y
+
       if (rect.right > window.innerWidth) {
-        newX = Math.max(8, player.contextMenu.x - rect.width)
+        newX = Math.max(8, ui.contextMenu.x - rect.width)
       }
       if (rect.bottom > window.innerHeight) {
-        newY = Math.max(8, player.contextMenu.y - rect.height)
+        newY = Math.max(8, ui.contextMenu.y - rect.height)
       }
-      
-      if (newX !== player.contextMenu.x) {
+
+      if (newX !== ui.contextMenu.x) {
         menuRef.value.style.left = `${newX}px`
       }
-      if (newY !== player.contextMenu.y) {
+      if (newY !== ui.contextMenu.y) {
         menuRef.value.style.top = `${newY}px`
       }
     }
@@ -99,7 +101,7 @@ function adjustPosition() {
 }
 
 watch(
-  () => player.contextMenu.visible,
+  () => ui.contextMenu.visible,
   (visible) => {
     if (visible) {
       menuMode.value = 'main'
@@ -120,14 +122,14 @@ onUnmounted(() => {
 
 <template>
   <div
-    v-if="player.contextMenu.visible && player.contextMenu.song"
+    v-if="ui.contextMenu.visible && ui.contextMenu.song"
     ref="menuRef"
     class="fixed z-[100] w-48 bg-white dark:bg-gray-800 rounded-xl shadow-2xl border border-gray-200/60 dark:border-gray-700/60 overflow-hidden"
     :class="{
       'animate-menu-enter': !isClosing,
       'animate-menu-exit': isClosing,
     }"
-    :style="{ left: `${player.contextMenu.x}px`, top: `${player.contextMenu.y}px` }"
+    :style="{ left: `${ui.contextMenu.x}px`, top: `${ui.contextMenu.y}px` }"
     @click.stop
   >
     <!-- 主菜单 -->
@@ -149,7 +151,7 @@ onUnmounted(() => {
         <ChevronRightIcon :size="14" class="text-gray-400" />
       </button>
 
-      <template v-if="player.contextMenu.playlistId !== 'all-songs' && player.contextMenu.playlistId">
+      <template v-if="ui.contextMenu.playlistId !== 'all-songs' && ui.contextMenu.playlistId">
         <button
           class="w-full px-3 py-2 rounded-lg text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 flex items-center justify-between gap-2 transition-colors"
           @click="openMovePanel"
@@ -192,21 +194,21 @@ onUnmounted(() => {
       <div class="h-px bg-gray-200/60 dark:bg-gray-700/60 my-1"></div>
 
       <div class="max-h-56 overflow-y-auto">
-        <template v-if="player.customPlaylists.length > 0">
+        <template v-if="library.customPlaylists.length > 0">
           <button
-            v-for="pl in player.customPlaylists"
+            v-for="pl in library.customPlaylists"
             :key="pl.id"
             class="w-full px-3 py-2 rounded-lg text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700/60 flex items-center justify-between gap-2 transition-colors"
-            :class="player.isSongInPlaylist(player.contextMenu.song!.id, pl.id)
+            :class="library.isSongInPlaylist(ui.contextMenu.song!.id, pl.id)
               ? 'text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-900/10'
               : 'text-gray-700 dark:text-gray-300'"
             @click="addToPlaylist(pl.id)"
           >
             <div class="flex items-center gap-2 min-w-0">
-              <FolderIcon :size="14" :class="player.isSongInPlaylist(player.contextMenu.song!.id, pl.id) ? 'text-blue-500 shrink-0' : 'text-amber-500 shrink-0'" />
+              <FolderIcon :size="14" :class="library.isSongInPlaylist(ui.contextMenu.song!.id, pl.id) ? 'text-blue-500 shrink-0' : 'text-amber-500 shrink-0'" />
               <span class="truncate">{{ pl.name }}</span>
             </div>
-            <span v-if="player.isSongInPlaylist(player.contextMenu.song!.id, pl.id)" class="shrink-0 text-xs">
+            <span v-if="library.isSongInPlaylist(ui.contextMenu.song!.id, pl.id)" class="shrink-0 text-xs">
               已添加
             </span>
           </button>
@@ -247,9 +249,9 @@ onUnmounted(() => {
       <div class="h-px bg-gray-200/60 dark:bg-gray-700/60 my-1"></div>
 
       <div class="max-h-56 overflow-y-auto">
-        <template v-if="player.customPlaylists.filter(pl => pl.id !== player.contextMenu.playlistId).length > 0">
+        <template v-if="library.customPlaylists.filter(pl => pl.id !== ui.contextMenu.playlistId).length > 0">
           <button
-            v-for="pl in player.customPlaylists.filter(pl => pl.id !== player.contextMenu.playlistId)"
+            v-for="pl in library.customPlaylists.filter(pl => pl.id !== ui.contextMenu.playlistId)"
             :key="pl.id"
             class="w-full px-3 py-2 rounded-lg text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 flex items-center gap-2 transition-colors"
             @click="moveToPlaylist(pl.id)"

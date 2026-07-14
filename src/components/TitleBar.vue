@@ -1,7 +1,8 @@
 <script setup lang="ts">
 import { ref, onMounted, onUnmounted } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
-import { usePlayerStore } from '@/stores/playerStore'
+import { useUIStore } from '@/stores/uiStore'
+import { useAudioStore } from '@/stores/audioStore'
 import SettingsIcon from '@/components/icons/SettingsIcon.vue'
 import BarChart3Icon from '@/components/icons/BarChart3Icon.vue'
 import DownloadIcon from '@/components/icons/DownloadIcon.vue'
@@ -12,7 +13,8 @@ const props = defineProps<{
   showSidebarButton?: boolean
 }>()
 
-const player = usePlayerStore()
+const ui = useUIStore()
+const audio = useAudioStore()
 const appWindow = getCurrentWindow()
 const isMaximized = ref(false)
 
@@ -73,11 +75,11 @@ const emit = defineEmits<{
       <button
         v-if="props.showSidebarButton"
         class="w-7 h-7 flex items-center justify-center rounded-md transition-colors text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-200"
-        :title="player.showSidebar ? '收起侧栏' : '展开侧栏'"
+        :title="ui.showSidebar ? '收起侧栏' : '展开侧栏'"
         data-tauri-no-drag
-        @click="player.toggleSidebar()"
+        @click="ui.toggleSidebar()"
       >
-        <svg v-if="player.showSidebar" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg v-if="ui.showSidebar" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <rect x="3" y="4" width="18" height="16" rx="2" ry="2"></rect>
           <line x1="9" y1="4" x2="9" y2="20"></line>
         </svg>
@@ -89,12 +91,12 @@ const emit = defineEmits<{
       <!-- 历史记录按钮 -->
       <button
         class="w-7 h-7 flex items-center justify-center rounded-md transition-colors"
-        :class="player.showHistoryDrawer
+        :class="ui.showHistoryDrawer
           ? 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400'
           : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-200'"
         title="历史记录"
         data-tauri-no-drag
-        @click="player.toggleHistoryDrawer()"
+        @click="ui.toggleHistoryDrawer()"
       >
         <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
           <path d="M3 12a9 9 0 1 0 3-6.7L3 8"></path>
@@ -112,7 +114,7 @@ const emit = defineEmits<{
       <div class="flex items-center gap-0.5 mr-2" data-tauri-no-drag>
         <!-- 迷你模式按钮 -->
         <button
-          v-if="props.showMiniModeButton && player.currentSong"
+          v-if="props.showMiniModeButton && audio.currentSong"
           class="w-8 h-8 flex items-center justify-center rounded-md transition-colors text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-200"
           title="迷你模式"
           @click="emit('toggleMiniMode')"
@@ -128,11 +130,11 @@ const emit = defineEmits<{
         <!-- 下载按钮 -->
         <button
           class="w-8 h-8 flex items-center justify-center rounded-md transition-colors"
-          :class="player.showDownloadPanel
+          :class="ui.showDownloadPanel
             ? 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400'
             : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-200'"
           title="下载"
-          @click="player.toggleDownloadPanel()"
+          @click="ui.toggleDownloadPanel()"
         >
           <DownloadIcon :size="16" />
         </button>
@@ -140,11 +142,11 @@ const emit = defineEmits<{
         <!-- 统计按钮 -->
         <button
           class="w-8 h-8 flex items-center justify-center rounded-md transition-colors"
-          :class="player.showStatsPanel
+          :class="ui.showStatsPanel
             ? 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400'
             : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-200'"
           title="统计"
-          @click="player.toggleStatsPanel()"
+          @click="ui.toggleStatsPanel()"
         >
           <BarChart3Icon :size="16" />
         </button>

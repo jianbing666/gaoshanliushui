@@ -1,5 +1,7 @@
 <script setup lang="ts">
-import { usePlayerStore } from '@/stores/playerStore'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { useLibraryStore } from '@/stores/libraryStore'
+import { useAudioStore } from '@/stores/audioStore'
 import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import type { ThemeMode, BackgroundSettings } from '@/types/song'
@@ -7,7 +9,9 @@ import { useShortcutConfig } from '@/composables/useShortcutConfig'
 import { useAutoLaunch } from '@/composables/useAutoLaunch'
 import { ref, onMounted, onUnmounted } from 'vue'
 
-const player = usePlayerStore()
+const settings = useSettingsStore()
+const library = useLibraryStore()
+const audio = useAudioStore()
 
 const themeOptions: { value: ThemeMode; label: string }[] = [
   { value: 'light', label: '浅色' },
@@ -55,7 +59,7 @@ async function selectFolder() {
       title: '选择音乐文件夹',
     })
     if (selected) {
-      await player.scanMusicFolder(selected)
+      await library.scanMusicFolder(selected)
     }
   } catch (error) {
     console.error('选择文件夹失败:', error)
@@ -68,7 +72,7 @@ async function handleRefreshMetadata() {
 
 async function confirmRefreshMetadata() {
   showRefreshConfirm.value = false
-  await player.refreshMetadata()
+  await library.refreshMetadata()
 }
 
 function cancelRefresh() {
@@ -76,11 +80,11 @@ function cancelRefresh() {
 }
 
 function handleMetadataSourceChange(source: 'auto' | 'filename') {
-  player.setMetadataSource(source)
+  library.setMetadataSource(source)
 }
 
 function handleThemeChange(theme: ThemeMode) {
-  player.setTheme(theme)
+  settings.setTheme(theme)
 }
 
 function handleShortcutKeyDown(event: KeyboardEvent, shortcutId: string) {
@@ -97,7 +101,7 @@ function handleClickOutside(_event: MouseEvent) {
 }
 
 function handleBackgroundModeChange(mode: BackgroundSettings['mode']) {
-  player.setBackgroundMode(mode)
+  settings.setBackgroundMode(mode)
 }
 
 async function selectBackgroundImage() {
@@ -113,7 +117,7 @@ async function selectBackgroundImage() {
       ],
     })
     if (selected) {
-      player.setBackgroundImage(selected as string)
+      settings.setBackgroundImage(selected as string)
     }
   } catch (error) {
     console.error('选择背景图片失败:', error)
@@ -130,7 +134,7 @@ async function selectBackgroundFolder() {
     if (selected) {
       isScanningBgFolder.value = true
       try {
-        await player.scanBackgroundFolder(selected)
+        await settings.scanBackgroundFolder(selected)
       } finally {
         isScanningBgFolder.value = false
       }
@@ -141,19 +145,19 @@ async function selectBackgroundFolder() {
 }
 
 function updateBgSetting<K extends keyof BackgroundSettings>(key: K, value: BackgroundSettings[K]) {
-  player.updateBackgroundSetting(key, value)
+  settings.updateBackgroundSetting(key, value)
 }
 
 function handleMinimizeToTrayToggle() {
-  player.setMinimizeToTray(!player.minimizeToTray)
+  settings.setMinimizeToTray(!settings.minimizeToTray)
 }
 
 function handleShowSpectrumToggle() {
-  player.setShowSpectrum(!player.showSpectrum)
+  settings.setShowSpectrum(!settings.showSpectrum)
 }
 
 function handleSpectrumQualityChange(quality: 'high' | 'balanced' | 'low') {
-  player.setSpectrumQuality(quality)
+  settings.setSpectrumQuality(quality)
 }
 
 const isClearingCache = ref(false)
@@ -165,7 +169,7 @@ async function handleClearCache() {
   cacheCleared.value = false
   try {
     // 清除音频缓存（前端内存）
-    player.clearAudioBufferCache()
+    audio.clearAudioBufferCache()
     // 清除封面缓存（后端文件）
     await invoke('clear_cover_cache')
     cacheCleared.value = true
@@ -196,7 +200,7 @@ onUnmounted(() => {
 
 <template>
   <aside class="w-80 backdrop-blur border-l border-gray-200/60 dark:border-gray-700/60 shadow-2xl flex flex-col h-full will-change-auto" :class="
-    player.currentBackgroundUrl && player.background.mode !== 'none'
+    settings.currentBackgroundUrl && settings.background.mode !== 'none'
       ? 'bg-white/50 dark:bg-gray-900/50'
       : 'bg-white/90 dark:bg-gray-900/90'
   ">
@@ -221,7 +225,7 @@ onUnmounted(() => {
                 :key="option.value"
                 class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
                 :class="
-                  player.theme === option.value
+                  settings.theme === option.value
                     ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
                     : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
                 "
@@ -245,7 +249,7 @@ onUnmounted(() => {
               :key="option.value"
               class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
               :class="
-                player.background.mode === option.value
+                settings.background.mode === option.value
                   ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
                   : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
               "
@@ -255,44 +259,44 @@ onUnmounted(() => {
             </button>
           </div>
 
-          <div v-if="player.background.mode === 'image'" class="space-y-2">
+          <div v-if="settings.background.mode === 'image'" class="space-y-2">
             <button
               class="w-full px-4 py-2.5 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-all flex items-center justify-center gap-2"
               @click="selectBackgroundImage"
             >
-              {{ player.background.imagePath ? '更换图片' : '选择图片' }}
+              {{ settings.background.imagePath ? '更换图片' : '选择图片' }}
             </button>
-            <p v-if="player.background.imagePath" class="text-xs text-gray-500 dark:text-gray-400 truncate px-1">
-              {{ player.background.imagePath }}
+            <p v-if="settings.background.imagePath" class="text-xs text-gray-500 dark:text-gray-400 truncate px-1">
+              {{ settings.background.imagePath }}
             </p>
           </div>
 
-          <div v-if="player.background.mode === 'folder'" class="space-y-3">
+          <div v-if="settings.background.mode === 'folder'" class="space-y-3">
             <button
               class="w-full px-4 py-2.5 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-all flex items-center justify-center gap-2"
               :disabled="isScanningBgFolder"
               @click="selectBackgroundFolder"
             >
-              {{ isScanningBgFolder ? '扫描中...' : player.background.folderPath ? '更换文件夹' : '选择文件夹' }}
+              {{ isScanningBgFolder ? '扫描中...' : settings.background.folderPath ? '更换文件夹' : '选择文件夹' }}
             </button>
-            <p v-if="player.background.folderPath" class="text-xs text-gray-500 dark:text-gray-400 truncate px-1">
-              {{ player.background.folderPath }}
+            <p v-if="settings.background.folderPath" class="text-xs text-gray-500 dark:text-gray-400 truncate px-1">
+              {{ settings.background.folderPath }}
             </p>
-            <p v-if="player.background.imageList?.length" class="text-xs text-gray-500 dark:text-gray-400 px-1">
-              共 {{ player.background.imageList.length }} 张图片
+            <p v-if="settings.background.imageList?.length" class="text-xs text-gray-500 dark:text-gray-400 px-1">
+              共 {{ settings.background.imageList.length }} 张图片
             </p>
 
             <div>
               <div class="flex items-center justify-between mb-2">
                 <p class="text-xs text-gray-500 dark:text-gray-400">轮播间隔</p>
-                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ player.background.interval }} 秒</span>
+                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ settings.background.interval }} 秒</span>
               </div>
               <input
                 type="range"
                 class="w-full"
                 :min="5"
                 :max="300"
-                :value="player.background.interval"
+                :value="settings.background.interval"
                 step="5"
                 @input="(e) => updateBgSetting('interval', parseInt((e.target as HTMLInputElement).value))"
               />
@@ -301,22 +305,22 @@ onUnmounted(() => {
             <div class="flex items-center gap-2">
               <button
                 class="flex-1 px-3 py-2 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-md text-xs text-gray-600 dark:text-gray-300 transition-colors"
-                @click="player.prevBackgroundImage()"
-                :disabled="!player.background.imageList?.length"
+                @click="settings.prevBackgroundImage()"
+                :disabled="!settings.background.imageList?.length"
               >
                 上一张
               </button>
               <button
                 class="flex-1 px-3 py-2 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-md text-xs text-gray-600 dark:text-gray-300 transition-colors"
-                @click="player.nextBackgroundImage()"
-                :disabled="!player.background.imageList?.length"
+                @click="settings.nextBackgroundImage()"
+                :disabled="!settings.background.imageList?.length"
               >
                 下一张
               </button>
             </div>
           </div>
 
-          <div v-if="player.background.mode !== 'none'" class="space-y-4 pt-2 border-t border-gray-200/50 dark:border-gray-700/50">
+          <div v-if="settings.background.mode !== 'none'" class="space-y-4 pt-2 border-t border-gray-200/50 dark:border-gray-700/50">
             <div>
               <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">填充方式</p>
               <div class="flex gap-1">
@@ -325,7 +329,7 @@ onUnmounted(() => {
                   :key="opt.value"
                   class="flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-all bg-gray-100/60 dark:bg-gray-800/60"
                   :class="
-                    player.background.fit === opt.value
+                    settings.background.fit === opt.value
                       ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
                       : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200/60 dark:hover:bg-gray-700/60'
                   "
@@ -339,14 +343,14 @@ onUnmounted(() => {
             <div>
               <div class="flex items-center justify-between mb-2">
                 <p class="text-xs text-gray-500 dark:text-gray-400">遮罩透明度</p>
-                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ Math.round(player.background.overlay * 100) }}%</span>
+                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ Math.round(settings.background.overlay * 100) }}%</span>
               </div>
               <input
                 type="range"
                 class="w-full"
                 :min="0"
                 :max="100"
-                :value="player.background.overlay * 100"
+                :value="settings.background.overlay * 100"
                 @input="(e) => updateBgSetting('overlay', parseInt((e.target as HTMLInputElement).value) / 100)"
               />
             </div>
@@ -354,14 +358,14 @@ onUnmounted(() => {
             <div>
               <div class="flex items-center justify-between mb-2">
                 <p class="text-xs text-gray-500 dark:text-gray-400">模糊程度</p>
-                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ player.background.blur }}px</span>
+                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ settings.background.blur }}px</span>
               </div>
               <input
                 type="range"
                 class="w-full"
                 :min="0"
                 :max="30"
-                :value="player.background.blur"
+                :value="settings.background.blur"
                 @input="(e) => updateBgSetting('blur', parseInt((e.target as HTMLInputElement).value))"
               />
             </div>
@@ -369,14 +373,14 @@ onUnmounted(() => {
             <div>
               <div class="flex items-center justify-between mb-2">
                 <p class="text-xs text-gray-500 dark:text-gray-400">缩放比例</p>
-                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ player.background.scale }}%</span>
+                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ settings.background.scale }}%</span>
               </div>
               <input
                 type="range"
                 class="w-full"
                 :min="50"
                 :max="200"
-                :value="player.background.scale"
+                :value="settings.background.scale"
                 @input="(e) => updateBgSetting('scale', parseInt((e.target as HTMLInputElement).value))"
               />
             </div>
@@ -392,15 +396,15 @@ onUnmounted(() => {
           <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
             <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">当前文件夹</p>
             <p class="text-sm text-gray-900 dark:text-white truncate">
-              {{ player.folderPath || '未选择' }}
+              {{ library.folderPath || '未选择' }}
             </p>
           </div>
           <button
             class="w-full px-4 py-2 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-all"
-            :disabled="player.isLoading"
+            :disabled="library.isLoading"
             @click="selectFolder"
           >
-            {{ player.isLoading ? '扫描中...' : '更改目录' }}
+            {{ library.isLoading ? '扫描中...' : '更改目录' }}
           </button>
 
           <!-- 元数据来源 -->
@@ -410,7 +414,7 @@ onUnmounted(() => {
               <button
                 class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
                 :class="
-                  player.metadataSource === 'auto'
+                  library.metadataSource === 'auto'
                     ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
                     : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
                 "
@@ -421,7 +425,7 @@ onUnmounted(() => {
               <button
                 class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
                 :class="
-                  player.metadataSource === 'filename'
+                  library.metadataSource === 'filename'
                     ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
                     : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
                 "
@@ -431,16 +435,16 @@ onUnmounted(() => {
               </button>
             </div>
             <p class="text-xs text-gray-400 dark:text-gray-500 leading-relaxed">
-              {{ player.metadataSource === 'auto' ? '优先使用 ID3 标签，缺失时从文件名解析' : '忽略 ID3 标签，完全从文件名解析（歌手 - 歌名）' }}
+              {{ library.metadataSource === 'auto' ? '优先使用 ID3 标签，缺失时从文件名解析' : '忽略 ID3 标签，完全从文件名解析（歌手 - 歌名）' }}
             </p>
           </div>
 
           <!-- 刷新元数据 -->
-          <div v-if="player.folderPath" class="pt-2 border-t border-gray-200/50 dark:border-gray-700/50">
+          <div v-if="library.folderPath" class="pt-2 border-t border-gray-200/50 dark:border-gray-700/50">
             <template v-if="!showRefreshConfirm">
               <button
                 class="w-full px-4 py-2 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-all"
-                :disabled="player.isLoading"
+                :disabled="library.isLoading"
                 @click="handleRefreshMetadata"
               >
                 刷新元数据
@@ -460,7 +464,7 @@ onUnmounted(() => {
                   </button>
                   <button
                     class="flex-1 px-3 py-1.5 bg-yellow-500 hover:bg-yellow-600 text-white rounded-md text-xs font-medium transition-colors"
-                    :disabled="player.isLoading"
+                    :disabled="library.isLoading"
                     @click="confirmRefreshMetadata"
                   >
                     确认刷新
@@ -471,7 +475,7 @@ onUnmounted(() => {
           </div>
 
           <p class="text-xs text-gray-500 dark:text-gray-400 text-center">
-            共 {{ player.playlist.length }} 首歌曲
+            共 {{ library.playlist.length }} 首歌曲
           </p>
         </div>
       </div>
@@ -568,12 +572,12 @@ onUnmounted(() => {
               </div>
               <button
                 class="relative w-10 h-5 rounded-full transition-colors shrink-0"
-                :class="player.minimizeToTray ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
+                :class="settings.minimizeToTray ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
                 @click="handleMinimizeToTrayToggle"
               >
                 <div
                   class="absolute top-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform"
-                  :class="player.minimizeToTray ? 'translate-x-5' : 'translate-x-0.5'"
+                  :class="settings.minimizeToTray ? 'translate-x-5' : 'translate-x-0.5'"
                 ></div>
               </button>
             </div>
@@ -587,19 +591,19 @@ onUnmounted(() => {
               </div>
               <button
                 class="relative w-10 h-5 rounded-full transition-colors shrink-0"
-                :class="player.showSpectrum ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
+                :class="settings.showSpectrum ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
                 @click="handleShowSpectrumToggle"
               >
                 <div
                   class="absolute top-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform"
-                  :class="player.showSpectrum ? 'translate-x-5' : 'translate-x-0.5'"
+                  :class="settings.showSpectrum ? 'translate-x-5' : 'translate-x-0.5'"
                 ></div>
               </button>
             </div>
           </div>
 
           <!-- 频谱质量: 三档单选 (主开关开启时生效) -->
-          <div v-if="player.showSpectrum" class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3 space-y-2">
+          <div v-if="settings.showSpectrum" class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3 space-y-2">
             <div>
               <p class="text-gray-900 dark:text-white text-sm font-medium">频谱质量</p>
               <p class="text-gray-500 dark:text-gray-400 text-xs">高 = 60fps + 2048 fft, 低 = 20fps + 512 fft, 越低越省 CPU</p>
@@ -614,7 +618,7 @@ onUnmounted(() => {
                 :key="opt.value"
                 class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
                 :class="
-                  player.spectrumQuality === opt.value
+                  settings.spectrumQuality === opt.value
                     ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
                     : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
                 "
@@ -651,32 +655,32 @@ onUnmounted(() => {
               <div>
                 <p class="text-gray-900 dark:text-white text-sm font-medium">定时关闭</p>
                 <p class="text-gray-500 dark:text-gray-400 text-xs">
-                  {{ player.sleepTimerEnabled
-                    ? `剩余 ${formatTime(player.sleepTimerRemaining)}`
+                  {{ settings.sleepTimerEnabled
+                    ? `剩余 ${formatTime(settings.sleepTimerRemaining)}`
                     : '设定时间后自动暂停播放' }}
                 </p>
               </div>
               <button
                 class="relative w-10 h-5 rounded-full transition-colors shrink-0"
-                :class="player.sleepTimerEnabled ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
-                @click="player.toggleSleepTimer"
+                :class="settings.sleepTimerEnabled ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
+                @click="settings.toggleSleepTimer"
               >
                 <div
                   class="absolute top-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform"
-                  :class="player.sleepTimerEnabled ? 'translate-x-5' : 'translate-x-0.5'"
+                  :class="settings.sleepTimerEnabled ? 'translate-x-5' : 'translate-x-0.5'"
                 ></div>
               </button>
             </div>
-            <div v-if="player.sleepTimerEnabled" class="space-y-2">
+            <div v-if="settings.sleepTimerEnabled" class="space-y-2">
               <div class="flex gap-1">
                 <button
                   v-for="m in [15, 30, 60, 90]"
                   :key="m"
                   class="flex-1 py-1 text-xs rounded-md transition-colors"
-                  :class="player.sleepTimerMinutes === m
+                  :class="settings.sleepTimerMinutes === m
                     ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
                     : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'"
-                  @click="player.setSleepTimerMinutes(m)"
+                  @click="settings.setSleepTimerMinutes(m)"
                 >
                   {{ m }}分
                 </button>
@@ -687,12 +691,12 @@ onUnmounted(() => {
                   class="flex-1"
                   :min="5"
                   :max="180"
-                  :value="player.sleepTimerMinutes"
+                  :value="settings.sleepTimerMinutes"
                   step="5"
-                  @input="(e) => player.setSleepTimerMinutes(parseInt((e.target as HTMLInputElement).value))"
+                  @input="(e) => settings.setSleepTimerMinutes(parseInt((e.target as HTMLInputElement).value))"
                 />
                 <span class="text-xs text-gray-500 dark:text-gray-400 w-10 text-right">
-                  {{ player.sleepTimerMinutes }}分
+                  {{ settings.sleepTimerMinutes }}分
                 </span>
               </div>
             </div>

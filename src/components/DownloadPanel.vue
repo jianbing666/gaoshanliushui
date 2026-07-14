@@ -3,20 +3,22 @@ import { ref, computed, onMounted, onUnmounted } from 'vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { usePlayerStore } from '@/stores/playerStore'
+import { useSettingsStore } from '@/stores/settingsStore'
+import { useUIStore } from '@/stores/uiStore'
 import FolderIcon from '@/components/icons/FolderIcon.vue'
 import ChevronRightIcon from '@/components/icons/ChevronRightIcon.vue'
 import DownloadIcon from '@/components/icons/DownloadIcon.vue'
 import XIcon from '@/components/icons/XIcon.vue'
 import CheckIcon from '@/components/icons/CheckIcon.vue'
 
-const player = usePlayerStore()
+const settings = useSettingsStore()
+const ui = useUIStore()
 
 // ============== 表单字段 (单条模式) ==============
 const url = ref('')
 const singer = ref('')
 const song = ref('')
-const outputDir = ref(player.downloadOutputDir)  // 从持久化中恢复
+const outputDir = ref(settings.downloadOutputDir)  // 从持久化中恢复
 
 // ============== 单条状态 ==============
 const isDownloading = ref(false)
@@ -129,7 +131,7 @@ async function selectOutputDir() {
       const path = selected as string
       outputDir.value = path
       // 持久化: 下次进入自动填充
-      player.setDownloadOutputDir(path)
+      settings.setDownloadOutputDir(path)
     }
   } catch (e) {
     console.error('[Download] 选择文件夹失败:', e)
@@ -411,7 +413,7 @@ onUnmounted(() => {
         <button
           class="p-1.5 rounded-md hover:bg-gray-200/60 dark:hover:bg-gray-700/60 text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white transition-colors"
           title="关闭"
-          @click="player.toggleDownloadPanel()"
+          @click="ui.toggleDownloadPanel()"
         >
           <ChevronRightIcon :size="18" />
         </button>

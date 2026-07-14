@@ -1,9 +1,13 @@
 <script setup lang="ts">
-import { usePlayerStore } from '@/stores/playerStore'
+import { useHistoryStore } from '@/stores/historyStore'
+import { useLibraryStore } from '@/stores/libraryStore'
+import { useUIStore } from '@/stores/uiStore'
 import MusicIcon from '@/components/icons/MusicIcon.vue'
 import ChevronRightIcon from '@/components/icons/ChevronRightIcon.vue'
 
-const player = usePlayerStore()
+const history = useHistoryStore()
+const library = useLibraryStore()
+const ui = useUIStore()
 
 function formatDuration(seconds: number): string {
   const hours = Math.floor(seconds / 3600)
@@ -29,7 +33,7 @@ function formatDurationShort(seconds: number): string {
 }
 
 async function handleExport() {
-  await player.exportStatsReport()
+  await history.exportStatsReport()
 }
 
 // 阶段 3.7: 封面加载失败时静默隐藏
@@ -52,7 +56,7 @@ function onCoverError(e: Event) {
       <button
         class="p-1.5 rounded-md hover:bg-gray-200/60 dark:hover:bg-gray-700/60 text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white transition-colors"
         title="关闭"
-        @click="player.toggleStatsPanel()"
+        @click="ui.toggleStatsPanel()"
       >
         <ChevronRightIcon :size="18" />
       </button>
@@ -68,11 +72,11 @@ function onCoverError(e: Event) {
           <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
             <div class="flex items-center justify-between mb-2">
               <span class="text-gray-700 dark:text-gray-200 text-sm">今天</span>
-              <span class="text-gray-900 dark:text-white text-sm font-medium">{{ formatDuration(player.todayStats.totalDuration) }}</span>
+              <span class="text-gray-900 dark:text-white text-sm font-medium">{{ formatDuration(history.todayStats.totalDuration) }}</span>
             </div>
             <div class="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-              <span>{{ player.todayStats.count }} 首</span>
-              <span>完整播放 {{ player.todayStats.completedCount }} 首</span>
+              <span>{{ history.todayStats.count }} 首</span>
+              <span>完整播放 {{ history.todayStats.completedCount }} 首</span>
             </div>
           </div>
 
@@ -80,11 +84,11 @@ function onCoverError(e: Event) {
           <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
             <div class="flex items-center justify-between mb-2">
               <span class="text-gray-700 dark:text-gray-200 text-sm">本月</span>
-              <span class="text-gray-900 dark:text-white text-sm font-medium">{{ formatDuration(player.monthStats.totalDuration) }}</span>
+              <span class="text-gray-900 dark:text-white text-sm font-medium">{{ formatDuration(history.monthStats.totalDuration) }}</span>
             </div>
             <div class="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-              <span>{{ player.monthStats.count }} 首</span>
-              <span>完整播放 {{ player.monthStats.completedCount }} 首</span>
+              <span>{{ history.monthStats.count }} 首</span>
+              <span>完整播放 {{ history.monthStats.completedCount }} 首</span>
             </div>
           </div>
 
@@ -92,11 +96,11 @@ function onCoverError(e: Event) {
           <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
             <div class="flex items-center justify-between mb-2">
               <span class="text-gray-700 dark:text-gray-200 text-sm">本年</span>
-              <span class="text-gray-900 dark:text-white text-sm font-medium">{{ formatDuration(player.yearStats.totalDuration) }}</span>
+              <span class="text-gray-900 dark:text-white text-sm font-medium">{{ formatDuration(history.yearStats.totalDuration) }}</span>
             </div>
             <div class="flex items-center gap-4 text-xs text-gray-500 dark:text-gray-400">
-              <span>{{ player.yearStats.count }} 首</span>
-              <span>完整播放 {{ player.yearStats.completedCount }} 首</span>
+              <span>{{ history.yearStats.count }} 首</span>
+              <span>完整播放 {{ history.yearStats.completedCount }} 首</span>
             </div>
           </div>
 
@@ -104,11 +108,11 @@ function onCoverError(e: Event) {
           <div class="bg-blue-500/15 dark:bg-blue-500/20 rounded-lg p-3 border border-blue-200/30 dark:border-blue-500/30">
             <div class="flex items-center justify-between mb-2">
               <span class="text-blue-600 dark:text-blue-300 text-sm font-medium">累计总时长</span>
-              <span class="text-blue-700 dark:text-blue-200 text-sm font-bold">{{ formatDuration(player.allTimeStats.totalDuration) }}</span>
+              <span class="text-blue-700 dark:text-blue-200 text-sm font-bold">{{ formatDuration(history.allTimeStats.totalDuration) }}</span>
             </div>
             <div class="flex items-center gap-4 text-xs text-blue-500 dark:text-blue-300">
-              <span>{{ player.allTimeStats.count }} 次播放</span>
-              <span>{{ player.allTimeStats.uniqueSongs }} 首不同歌曲</span>
+              <span>{{ history.allTimeStats.count }} 次播放</span>
+              <span>{{ history.allTimeStats.uniqueSongs }} 首不同歌曲</span>
             </div>
           </div>
         </div>
@@ -119,13 +123,13 @@ function onCoverError(e: Event) {
         <h3 class="text-gray-900 dark:text-white text-sm font-medium mb-3 font-semibold">听歌之最</h3>
         <div class="space-y-3">
           <!-- 播放次数最多 -->
-          <div v-if="player.mostLoopedSong" class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
+          <div v-if="history.mostLoopedSong" class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
             <div class="flex items-center gap-3">
               <div class="w-12 h-12 rounded bg-gray-200/70 dark:bg-gray-700/70 shrink-0 overflow-hidden">
                 <img
-                  v-if="player.mostLoopedSong.song.cover_path"
-                  :src="player.getCoverUrl(player.mostLoopedSong.song.cover_path)"
-                  :alt="player.mostLoopedSong.song.title"
+                  v-if="history.mostLoopedSong.song.cover_path"
+                  :src="library.getCoverUrl(history.mostLoopedSong.song.cover_path)"
+                  :alt="history.mostLoopedSong.song.title"
                   class="w-full h-full object-cover"
                   loading="lazy"
                   decoding="async"
@@ -135,21 +139,21 @@ function onCoverError(e: Event) {
                 </div>
               </div>
               <div class="flex-1 min-w-0">
-                <p class="text-gray-900 dark:text-white text-sm font-medium truncate">{{ player.mostLoopedSong.song.title }}</p>
-                <p class="text-gray-500 dark:text-gray-400 text-xs truncate">{{ player.mostLoopedSong.song.artist || '未知艺术家' }}</p>
-                <p class="text-blue-500 dark:text-blue-400 text-xs mt-0.5">播放次数最多 · {{ player.mostLoopedSong.count }} 次</p>
+                <p class="text-gray-900 dark:text-white text-sm font-medium truncate">{{ history.mostLoopedSong.song.title }}</p>
+                <p class="text-gray-500 dark:text-gray-400 text-xs truncate">{{ history.mostLoopedSong.song.artist || '未知艺术家' }}</p>
+                <p class="text-blue-500 dark:text-blue-400 text-xs mt-0.5">播放次数最多 · {{ history.mostLoopedSong.count }} 次</p>
               </div>
             </div>
           </div>
 
           <!-- 总时长最久 -->
-          <div v-if="player.longestPlayedSong" class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
+          <div v-if="history.longestPlayedSong" class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
             <div class="flex items-center gap-3">
               <div class="w-12 h-12 rounded bg-gray-200/70 dark:bg-gray-700/70 shrink-0 overflow-hidden">
                 <img
-                  v-if="player.longestPlayedSong.song.cover_path"
-                  :src="player.getCoverUrl(player.longestPlayedSong.song.cover_path)"
-                  :alt="player.longestPlayedSong.song.title"
+                  v-if="history.longestPlayedSong.song.cover_path"
+                  :src="library.getCoverUrl(history.longestPlayedSong.song.cover_path)"
+                  :alt="history.longestPlayedSong.song.title"
                   class="w-full h-full object-cover"
                   loading="lazy"
                   decoding="async"
@@ -160,15 +164,15 @@ function onCoverError(e: Event) {
                 </div>
               </div>
               <div class="flex-1 min-w-0">
-                <p class="text-gray-900 dark:text-white text-sm font-medium truncate">{{ player.longestPlayedSong.song.title }}</p>
-                <p class="text-gray-500 dark:text-gray-400 text-xs truncate">{{ player.longestPlayedSong.song.artist || '未知艺术家' }}</p>
-                <p class="text-green-500 dark:text-green-400 text-xs mt-0.5">累计时长最久 · {{ formatDurationShort(player.longestPlayedSong.duration) }}</p>
+                <p class="text-gray-900 dark:text-white text-sm font-medium truncate">{{ history.longestPlayedSong.song.title }}</p>
+                <p class="text-gray-500 dark:text-gray-400 text-xs truncate">{{ history.longestPlayedSong.song.artist || '未知艺术家' }}</p>
+                <p class="text-green-500 dark:text-green-400 text-xs mt-0.5">累计时长最久 · {{ formatDurationShort(history.longestPlayedSong.duration) }}</p>
               </div>
             </div>
           </div>
 
           <!-- 暂无数据 -->
-          <div v-if="!player.mostLoopedSong && !player.longestPlayedSong" class="text-center py-8 text-gray-500 dark:text-gray-400">
+          <div v-if="!history.mostLoopedSong && !history.longestPlayedSong" class="text-center py-8 text-gray-500 dark:text-gray-400">
             <MusicIcon :size="40" class="mx-auto mb-2 opacity-30" />
             <p class="text-sm">暂无统计数据</p>
             <p class="text-xs mt-1">多听几首歌再来看看吧</p>
@@ -181,7 +185,7 @@ function onCoverError(e: Event) {
     <div class="p-4 border-t border-gray-200/50 dark:border-gray-700/50">
       <button
         class="w-full py-2.5 px-4 bg-gray-900 dark:bg-white text-white dark:text-gray-900 rounded-lg text-sm font-medium hover:bg-gray-700 dark:hover:bg-gray-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        :disabled="player.playHistory.length === 0"
+        :disabled="history.playHistory.length === 0"
         @click="handleExport"
       >
         导出 Markdown 报告
