@@ -3,7 +3,7 @@ import { useAudioStore } from '@/stores/audioStore'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
-import { ref, watch, onMounted, onUnmounted, computed, nextTick, defineAsyncComponent } from 'vue'
+import { ref, watch, onMounted, onUnmounted, computed, nextTick, defineAsyncComponent, markRaw } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import Sidebar from '@/components/Sidebar.vue'
@@ -29,10 +29,12 @@ import { syncShortcutsToBackend } from '@/utils/syncShortcuts'
 // ========== 阶段 3.6: 异步组件（首屏 JS 减 20-30KB）============
 // 同步: 首屏必现
 // 异步: 仅在用户首次打开对应面板/弹窗时下载独立 chunk
-const SettingsPanel = defineAsyncComponent(() => import('@/components/SettingsPanel.vue'))
-const StatsPanel = defineAsyncComponent(() => import('@/components/StatsPanel.vue'))
-const DownloadPanel = defineAsyncComponent(() => import('@/components/DownloadPanel.vue'))
-const CreatePlaylistModal = defineAsyncComponent(() => import('@/components/CreatePlaylistModal.vue'))
+// BUG 2 修复: 用 markRaw 包装避免 reactive proxy, 提升 :is 渲染性能
+const SettingsPanel = markRaw(defineAsyncComponent(() => import('@/components/SettingsPanel.vue')))
+const StatsPanel = markRaw(defineAsyncComponent(() => import('@/components/StatsPanel.vue')))
+const DownloadPanel = markRaw(defineAsyncComponent(() => import('@/components/DownloadPanel.vue')))
+const MemoryDrawer = markRaw(defineAsyncComponent(() => import('@/components/MemoryDrawer.vue')))
+const CreatePlaylistModal = markRaw(defineAsyncComponent(() => import('@/components/CreatePlaylistModal.vue')))
 
 const audio = useAudioStore()
 const library = useLibraryStore()
@@ -51,40 +53,63 @@ const miniWindowWidth = ref(640)
 const miniWindowHeight = ref(120)
 const isCompactMiniMode = computed(() => miniWindowWidth.value < 480)
 
+// BUG 2 修复: 右侧面板用单一 component :is 渲染
+//   替代 v-if/v-else-if 链, 保证 Transition 动画 + 同侧互斥正确触发
+type RightPanelKey = 'settings' | 'stats' | 'download' | 'memory' | null
+const activeRightPanel = computed<RightPanelKey>(() => {
+  if (showSettings.value) return 'settings'
+  if (ui.showStatsPanel) return 'stats'
+  if (ui.showDownloadPanel) return 'download'
+  if (ui.showMemoryDrawer) return 'memory'
+  return null
+})
+
 let unlistenWindowShow: UnlistenFn | null = null
 
 // 切换设置面板显示/隐藏
+// BUG 1 修复: 用直接赋值关闭其他面板, 不再用 toggle (避免状态锁定)
 function toggleSettings() {
-  // 同侧互斥：展开设置时收起统计和下载
   if (!showSettings.value) {
-    if (ui.showStatsPanel) {
-      ui.toggleStatsPanel()
-    }
-    if (ui.showDownloadPanel) {
-      ui.toggleDownloadPanel()
-    }
+    showSettings.value = true
+    // 收起其他右侧面板 (用 closeAllRightPanels 直接置 false)
+    ui.closeAllRightPanels()
+  } else {
+    showSettings.value = false
   }
-  showSettings.value = !showSettings.value
 }
 
-// 监听统计面板切换，实现右侧互斥
+// Memory feature - 高山流水 v1.1: 切换记忆抽屉
+// BUG 1 修复: 同上, 改用 closeAllRightPanels
+function toggleMemory() {
+  if (!ui.showMemoryDrawer) {
+    showSettings.value = false
+    ui.closeAllRightPanels()
+    ui.showMemoryDrawer = true
+    // 通知 App.vue 已经处理, 防止 watch 重复触发
+    window.dispatchEvent(new CustomEvent('ui:memory-opened'))
+  } else {
+    ui.showMemoryDrawer = false
+  }
+}
+
+// 监听统计面板展开: 收起设置
 watch(() => ui.showStatsPanel, (newVal) => {
-  // 展开统计时收起设置
   if (newVal && showSettings.value) {
     showSettings.value = false
   }
-  // 展开统计时收起下载
-  if (newVal && ui.showDownloadPanel) {
-    ui.toggleDownloadPanel()
+})
+
+// 监听下载面板展开: 收起设置
+watch(() => ui.showDownloadPanel, (newVal) => {
+  if (newVal && showSettings.value) {
+    showSettings.value = false
   }
 })
 
-// 监听下载面板切换，实现右侧互斥
-watch(() => ui.showDownloadPanel, (newVal) => {
-  // 展开下载时收起设置和统计
-  if (newVal) {
-    if (showSettings.value) showSettings.value = false
-    if (ui.showStatsPanel) ui.toggleStatsPanel()
+// Memory feature - 高山流水 v1.1: 监听记忆抽屉展开, 收起设置
+watch(() => ui.showMemoryDrawer, (newVal) => {
+  if (newVal && showSettings.value) {
+    showSettings.value = false
   }
 })
 
@@ -226,6 +251,7 @@ onUnmounted(() => {
       :show-sidebar-button="true"
       @toggle-settings="toggleSettings"
       @toggle-mini-mode="toggleMiniMode"
+      @toggle-memory="toggleMemory"
     />
 
     <!-- 主内容区域：Flex 水平三栏布局（非迷你模式） -->
@@ -269,13 +295,20 @@ onUnmounted(() => {
         <ControlBar class="shrink-0" />
       </main>
 
-      <!-- 右侧面板：设置 / 统计 / 下载（互斥，挤压式） -->
-      <!-- 阶段 1.6: keep-alive 包裹, 切换面板时不销毁组件, 避免重复 setup + 重渲染 -->
+      <!-- 右侧面板：设置 / 统计 / 下载 / 回忆（互斥，挤压式） -->
+      <!-- BUG 2 修复: 用 component :is + Transition 单根节点, 保证 slide-fade 动画 + 同侧互斥
+           keep-alive 包裹, 切换面板时不销毁组件, 避免重复 setup + 重渲染 -->
       <Transition name="slide-fade" mode="out-in">
         <keep-alive>
-          <SettingsPanel v-if="showSettings && !ui.showStatsPanel && !ui.showDownloadPanel" key="settings" class="shrink-0" />
-          <StatsPanel v-else-if="ui.showStatsPanel" key="stats" class="shrink-0" />
-          <DownloadPanel v-else-if="ui.showDownloadPanel" key="download" class="shrink-0" />
+          <component
+            :is="activeRightPanel === 'settings' ? SettingsPanel
+                : activeRightPanel === 'stats' ? StatsPanel
+                : activeRightPanel === 'download' ? DownloadPanel
+                : activeRightPanel === 'memory' ? MemoryDrawer
+                : 'div'"
+            :key="activeRightPanel || 'none'"
+            class="shrink-0"
+          />
         </keep-alive>
       </Transition>
     </div>

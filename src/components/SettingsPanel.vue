@@ -2,6 +2,7 @@
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useAudioStore } from '@/stores/audioStore'
+// BUG 7 修复: 导出功能已迁移到回忆抽屉, 不再需要 useMemoryStore
 import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import type { ThemeMode, BackgroundSettings } from '@/types/song'
@@ -155,6 +156,14 @@ function handleMinimizeToTrayToggle() {
 function handleShowSpectrumToggle() {
   settings.setShowSpectrum(!settings.showSpectrum)
 }
+
+// BUG 3 修复: 设置页面的「显示记忆标签」开关已移除
+//   原因: 回忆抽屉内已有相同开关, 重复入口会增加 UI 复杂度
+//   开关功能: 由回忆抽屉头部的「显示弹幕」开关统一控制
+
+// BUG 7 修复: 设置页面的「导出备注」按钮已移除
+//   原因: 回忆抽屉内已有相同功能, 重复入口会增加 UI 复杂度
+//   提示文字: "导出备注请在右侧「回忆」抽屉操作"
 
 function handleSpectrumQualityChange(quality: 'high' | 'balanced' | 'low') {
   settings.setSpectrumQuality(quality)
@@ -602,6 +611,7 @@ onUnmounted(() => {
             </div>
           </div>
 
+
           <!-- 频谱质量: 三档单选 (主开关开启时生效) -->
           <div v-if="settings.showSpectrum" class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3 space-y-2">
             <div>
@@ -732,4 +742,5 @@ input:focus {
 :deep(.scrollbar-hide::-webkit-scrollbar) {
   display: none;
 }
+
 </style>

@@ -10,6 +10,7 @@ use lofty::tag::Accessor;
 use regex::Regex;
 use walkdir::WalkDir;
 
+use crate::commands::song_hash::compute_content_hash;
 use crate::models::Song;
 
 /// 支持的音频文件扩展名
@@ -85,6 +86,13 @@ fn parse_audio_file(file_path: &Path, use_filename_only: bool, force_refresh: bo
     // 生成唯一 ID（基于文件路径的哈希）
     let id = generate_id(&file_path_str);
 
+    // Memory feature - 高山流水 v1.1: 计算文件内容指纹 (头尾 64KB SHA-1)
+    // 失败不影响扫描主流程, 仅打印警告
+    let content_hash = compute_content_hash(file_path);
+    if content_hash.is_none() {
+        eprintln!("[scan] 计算内容指纹失败 {:?}, 该歌曲无法关联历史回忆", file_path);
+    }
+
     // 强制刷新时，先删除旧的封面缓存
     if force_refresh {
         let cover_dir = std::env::temp_dir().join("gaoshanliushui-covers");
@@ -129,6 +137,7 @@ fn parse_audio_file(file_path: &Path, use_filename_only: bool, force_refresh: bo
             duration,
             cover_path: cover_path.clone(),
             cover_thumb_path: cover_path,
+            content_hash,
         });
     }
 
@@ -226,6 +235,7 @@ fn parse_audio_file(file_path: &Path, use_filename_only: bool, force_refresh: bo
         duration,
         cover_path,
         cover_thumb_path,
+        content_hash,
     })
 }
 

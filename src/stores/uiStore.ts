@@ -43,6 +43,8 @@ export const useUIStore = defineStore('ui', () => {
   const showHistoryDrawer = ref(false)
   const showStatsPanel = ref(false)
   const showDownloadPanel = ref(false)
+  // Memory feature - 高山流水 v1.1: 回忆抽屉 (右侧, w-80, 与设置/统计/下载同侧互斥)
+  const showMemoryDrawer = ref(false)
 
   // ========== 侧边栏 toggle(同侧互斥:与历史记录) ==========
   function toggleSidebar() {
@@ -60,17 +62,27 @@ export const useUIStore = defineStore('ui', () => {
     showHistoryDrawer.value = !showHistoryDrawer.value
   }
 
+  // ========== 记忆抽屉 toggle(同侧互斥:与设置/统计/下载, 右侧 w-80) ==========
+  // 记忆抽屉与设置/统计/下载都在右侧, 一次只能开一个
+  // 展开记忆抽屉时, 通过自定义事件通知 App.vue 收起 showSettings
+  function toggleMemoryDrawer() {
+    const newVal = !showMemoryDrawer.value
+    showMemoryDrawer.value = newVal
+    if (newVal) {
+      // 通知 App.vue: 展开记忆抽屉时收起 showSettings
+      window.dispatchEvent(new CustomEvent('ui:memory-opened'))
+    }
+  }
+
   // ========== 统计面板 toggle ==========
-  // 注意: 与 showSettings(showSettings 是 App.vue 本地 ref)的互斥由 App.vue watch 处理
-  // 通过自定义事件通知 App.vue
   function toggleStatsPanel() {
     const newVal = !showStatsPanel.value
     showStatsPanel.value = newVal
-    if (newVal && showDownloadPanel.value) {
-      showDownloadPanel.value = false
-    }
-    // 通知 App.vue: 展开统计时收起 showSettings
     if (newVal) {
+      // BUG 5 修复: 展开统计时关闭所有其他右侧面板
+      showDownloadPanel.value = false
+      showMemoryDrawer.value = false
+      // 通知 App.vue: 展开统计时收起 showSettings
       window.dispatchEvent(new CustomEvent('ui:stats-opened'))
     }
   }
@@ -80,10 +92,20 @@ export const useUIStore = defineStore('ui', () => {
     const newVal = !showDownloadPanel.value
     showDownloadPanel.value = newVal
     if (newVal) {
-      if (showStatsPanel.value) showStatsPanel.value = false
+      // BUG 5 修复: 展开下载时关闭所有其他右侧面板
+      showStatsPanel.value = false
+      showMemoryDrawer.value = false
       // 通知 App.vue: 展开下载时收起 showSettings
       window.dispatchEvent(new CustomEvent('ui:download-opened'))
     }
+  }
+
+  // ========== 强制关闭右侧所有面板(供 App.vue 同侧互斥使用) ==========
+  // 用直接赋值而非 toggle, 避免 "关闭已关闭的面板" 时反而打开的 BUG
+  function closeAllRightPanels() {
+    showStatsPanel.value = false
+    showDownloadPanel.value = false
+    showMemoryDrawer.value = false
   }
 
   // ========== 全局右键菜单 ==========
@@ -226,10 +248,13 @@ export const useUIStore = defineStore('ui', () => {
     showHistoryDrawer,
     showStatsPanel,
     showDownloadPanel,
+    showMemoryDrawer,
     toggleSidebar,
     toggleHistoryDrawer,
     toggleStatsPanel,
     toggleDownloadPanel,
+    toggleMemoryDrawer,
+    closeAllRightPanels,
     // 右键菜单
     contextMenu,
     openContextMenu,

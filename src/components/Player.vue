@@ -3,6 +3,8 @@ import { useAudioStore } from '@/stores/audioStore'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import AudioSpectrum from '@/components/AudioSpectrum.vue'
+// Memory feature - 高山流水 v1.1: 弹幕式 tag 展示
+import MemoryMarquee from '@/components/MemoryMarquee.vue'
 
 const audio = useAudioStore()
 const library = useLibraryStore()
@@ -12,7 +14,21 @@ const settings = useSettingsStore()
 <template>
   <div class="flex-1 flex items-center justify-center p-8">
     <template v-if="library.currentSong">
-      <div class="text-center">
+      <div class="text-center relative">
+        <!--
+          弹幕容器 (相对唱片绝对定位在顶部)
+          BUG 4 修复: 容器高度扩展到 108px, 6 行
+          top: 调整到 -120px, 确保多行弹幕不遮挡唱片
+          z-index: 10 (高于唱片默认 0, 低于 ControlBar / 抽屉)
+        -->
+        <div
+          v-if="library.currentSong"
+          class="absolute left-1/2 -translate-x-1/2 z-10"
+          style="top: -120px;"
+        >
+          <MemoryMarquee />
+        </div>
+
         <!-- 专辑封面（旋转动画） -->
         <!-- .paused 触发条件: 未播放 / 低功耗模式开启 / 窗口隐藏 / 迷你模式
              极致性能: 后 3 种场景下让 CPU/GPU 进入空闲, 避免空转 -->

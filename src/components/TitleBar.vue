@@ -6,6 +6,7 @@ import { useAudioStore } from '@/stores/audioStore'
 import SettingsIcon from '@/components/icons/SettingsIcon.vue'
 import BarChart3Icon from '@/components/icons/BarChart3Icon.vue'
 import DownloadIcon from '@/components/icons/DownloadIcon.vue'
+import MemoryIcon from '@/components/icons/MemoryIcon.vue'
 
 const props = defineProps<{
   showSettings: boolean
@@ -54,6 +55,7 @@ function closeWindow() {
 const emit = defineEmits<{
   (e: 'toggleSettings'): void
   (e: 'toggleMiniMode'): void
+  (e: 'toggleMemory'): void
 }>()
 </script>
 
@@ -149,6 +151,18 @@ const emit = defineEmits<{
           @click="ui.toggleStatsPanel()"
         >
           <BarChart3Icon :size="16" />
+        </button>
+
+        <!-- Memory feature - 高山流水 v1.1: 记忆按钮 (统计左、设置右) -->
+        <button
+          class="w-8 h-8 flex items-center justify-center rounded-md transition-colors"
+          :class="ui.showMemoryDrawer
+            ? 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400'
+            : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-200'"
+          title="回忆"
+          @click="emit('toggleMemory')"
+        >
+          <MemoryIcon :size="16" />
         </button>
 
         <!-- 设置按钮 -->

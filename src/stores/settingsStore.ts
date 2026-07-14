@@ -161,6 +161,8 @@ export const useSettingsStore = defineStore('settings', () => {
 
   // ========== 频谱设置 ==========
   const showSpectrum = ref<boolean>(Boolean(saved.showSpectrum ?? true))
+  // Memory feature - 高山流水 v1.1: 是否在唱片上方显示 tag 弹幕 (默认开启)
+  const showMemoryTags = ref<boolean>(Boolean(saved.showMemoryTags ?? true))
   type SpectrumQuality = 'high' | 'balanced' | 'low'
   // 旧数据兼容: 之前若保存过 spectrumLowPower, 平滑迁移到 'low' / 'balanced'
   const migratedQuality: SpectrumQuality =
@@ -171,6 +173,11 @@ export const useSettingsStore = defineStore('settings', () => {
 
   function setShowSpectrum(value: boolean) {
     showSpectrum.value = value
+  }
+
+  // Memory feature - 高山流水 v1.1: 切换弹幕显示
+  function setShowMemoryTags(value: boolean) {
+    showMemoryTags.value = value
   }
 
   function setSpectrumQuality(value: SpectrumQuality) {
@@ -285,6 +292,16 @@ export const useSettingsStore = defineStore('settings', () => {
     downloadOutputDir.value = path
   }
 
+  // ========== 记忆导出目录 ==========
+  // BUG 6: 记忆备注导出文件夹, 持久化存储
+  //   - 默认与音乐库文件夹一致 (library.folderPath)
+  //   - 用户可在回忆抽屉中单独设置
+  const memoryExportDir = ref<string>(String(saved.memoryExportDir ?? ''))
+
+  function setMemoryExportDir(path: string) {
+    memoryExportDir.value = path
+  }
+
   // ========== 字体设置 ==========
   const fontSettings = ref<FontSettings>({
     ...defaultFontSettings,
@@ -346,8 +363,8 @@ export const useSettingsStore = defineStore('settings', () => {
   // ========== 持久化(防抖) ==========
   let settingsSaveTimer: ReturnType<typeof setTimeout> | null = null
   watch(
-    [theme, background, minimizeToTray, fontSettings, showSpectrum, spectrumQuality, downloadOutputDir],
-    ([th, bg, mt, fs, spectrum, spectrumQualityVal, dlDir]) => {
+    [theme, background, minimizeToTray, fontSettings, showSpectrum, spectrumQuality, downloadOutputDir, showMemoryTags, memoryExportDir],
+    ([th, bg, mt, fs, spectrum, spectrumQualityVal, dlDir, showMemTags, memDir]) => {
       if (settingsSaveTimer) {
         clearTimeout(settingsSaveTimer)
       }
@@ -359,7 +376,9 @@ export const useSettingsStore = defineStore('settings', () => {
           fontSettings: fs,
           showSpectrum: spectrum,
           spectrumQuality: spectrumQualityVal,
-          downloadOutputDir: dlDir
+          downloadOutputDir: dlDir,
+          showMemoryTags: showMemTags,
+          memoryExportDir: memDir,
         })
       }, 300)
     },
@@ -414,6 +433,9 @@ export const useSettingsStore = defineStore('settings', () => {
     resumeSpectrum,
     pauseAllBackgroundAnimations,
     resumeAllBackgroundAnimations,
+    // Memory feature - 高山流水 v1.1: 弹幕显示开关
+    showMemoryTags,
+    setShowMemoryTags,
     // 托盘
     minimizeToTray,
     setMinimizeToTray,
@@ -428,5 +450,8 @@ export const useSettingsStore = defineStore('settings', () => {
     // 下载
     downloadOutputDir,
     setDownloadOutputDir,
+    // 记忆导出
+    memoryExportDir,
+    setMemoryExportDir,
   }
 })

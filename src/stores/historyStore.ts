@@ -1,5 +1,6 @@
 import { defineStore } from 'pinia'
 import { ref, computed, shallowRef } from 'vue'
+import { invoke } from '@tauri-apps/api/core'
 import type { Song, PlayHistoryItem } from '@/types/song'
 import {
   loadPlayHistory,
@@ -424,7 +425,6 @@ export const useHistoryStore = defineStore('history', () => {
       const filename = `听歌统计报告_${dateStr}.md`
 
       const { save } = await import('@tauri-apps/plugin-dialog')
-      const { writeTextFile } = await import('@tauri-apps/plugin-fs')
 
       const filePath = await save({
         defaultPath: filename,
@@ -432,7 +432,13 @@ export const useHistoryStore = defineStore('history', () => {
       })
 
       if (filePath) {
-        await writeTextFile(filePath, markdown)
+        // BUG 7 修复: 改用 Rust 命令写文件
+        //   - tauri-plugin-fs 未在 capabilities 中授权, writeTextFile 会静默失败
+        //   - 通过 invoke('write_text_file') 绕过 fs plugin 权限限制
+        await invoke('write_text_file', {
+          path: filePath,
+          content: markdown,
+        })
         return true
       }
       return false

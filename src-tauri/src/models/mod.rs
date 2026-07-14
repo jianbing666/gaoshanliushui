@@ -20,6 +20,11 @@ pub struct Song {
     /// 缩略图路径（128px 宽, 保存到 temp_dir/gaoshanliushui-covers-thumb/, 旧数据为 None）
     #[serde(default)]
     pub cover_thumb_path: Option<String>,
+    /// Memory feature - 高山流水 v1.1: 文件内容指纹（头尾各 64KB 的 SHA-1, 16 进制字符串）
+    /// 与路径解耦, 用户移动/重命名文件后能继续匹配历史回忆
+    /// 旧数据为 None, 前端需做容错
+    #[serde(default)]
+    pub content_hash: Option<String>,
 }
 
 /// 循环模式

@@ -5,3 +5,6 @@ pub mod scan_images;
 pub mod tray;
 pub mod download_bilibili;
 pub mod webview_memory;
+pub mod song_hash;
+pub mod memories;
+pub mod export;

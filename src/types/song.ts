@@ -1,6 +1,6 @@
 /// 歌曲数据类型（与 Rust 后端 Song 模型对应）
 export interface Song {
-  /** 唯一标识 */
+  /** 唯一标识（基于文件路径的哈希） */
   id: string
   /** 文件绝对路径 */
   file_path: string
@@ -16,6 +16,34 @@ export interface Song {
   cover_path: string | null
   /** 缩略图路径（Rust 端生成, 128px 宽, 旧数据可能为 null） */
   cover_thumb_path?: string | null
+  /**
+   * Memory feature - 高山流水 v1.1: 文件内容指纹（头尾 64KB SHA-1 十六进制）
+   * 与文件路径解耦, 用于跨文件移动时稳定匹配历史回忆
+   * 旧数据可能为 undefined, 前端需做容错
+   */
+  content_hash?: string | null
+}
+
+/**
+ * Memory feature - 高山流水 v1.1: 回忆记录
+ *
+ * 存储在 SQLite (app_data_dir/memories.db) 中, 与音乐文件完全解耦
+ */
+export interface MemoryRecord {
+  /** 自增主键 */
+  id: number
+  /** 文件内容指纹 (Song.content_hash) */
+  song_hash: string
+  /** 当前文件绝对路径 (用户移动文件后会被更新) */
+  song_path: string
+  /** 短标签 JSON 数组字符串, 如 '["通宵的小曲儿~","2019的那年夏天"]' */
+  short_tags: string
+  /** Markdown 长文 */
+  long_text: string
+  /** 创建时间 (Unix 毫秒) */
+  created_at: number
+  /** 更新时间 (Unix 毫秒) */
+  updated_at: number
 }
 
 /// 歌单数据类型

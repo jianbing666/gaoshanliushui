@@ -1,6 +1,6 @@
 [package]
 name = "gaoshanliushui"
-version = "1.0.0"
+version = "1.1.0"
 description = "A music player inspired by the classical Chinese melody 'High Mountain and Flowing Water'"
 authors = ["GaoShanLiuShui"]
 edition = "2021"
@@ -16,6 +16,7 @@ tauri-plugin-global-shortcut = "2"
 tauri-plugin-single-instance = "2"
 tauri-plugin-autostart = "2"
 tauri-plugin-shell = "2"
+# Memory feature - 高山流水 v1.1: 弃用 tauri-plugin-sql (内部 sqlx 编译开销巨大, 且 v2 API 不便), 改用 rusqlite
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 lofty = "0.21"
@@ -30,6 +31,12 @@ reqwest = { version = "0.12", default-features = false, features = ["rustls-tls"
 # 关闭 default-features 避免拉入 png/gif/webp/tiff 等解码器
 # 阶段 2.1.6: 关闭 rayon (代码审计零 rayon / par_iter 调用, 节省编译 -3s + 二进制 -800KB)
 image = { version = "0.25", default-features = false, features = ["jpeg"] }
+# Memory feature: SHA-1 头尾指纹 + 十六进制编码
+sha1 = "0.10"
+hex = "0.4"
+# Memory feature: 同步 SQLite 库 (bundled 静态链接, 无系统依赖)
+# 编译时间比 tauri-plugin-sql (拉入 sqlx) 短 ~3-5 倍
+rusqlite = { version = "0.32", features = ["bundled"] }
 
 [features]
 default = ["custom-protocol"]

@@ -11,6 +11,8 @@ use commands::scan_images;
 use commands::tray;
 use commands::download_bilibili;
 use commands::webview_memory;
+use commands::memories;
+use commands::export;
 
 use std::sync::Mutex;
 use tauri::Manager;
@@ -57,6 +59,12 @@ fn main() {
                 eprintln!("注册全局快捷键失败: {}", e);
             }
 
+            // Memory feature: 初始化回忆数据库 (建表 + 索引)
+            // 失败仅打印警告, 不阻塞应用启动 (前端功能降级为不可用)
+            if let Err(e) = memories::init_db(&app.handle()) {
+                eprintln!("[memories] 初始化数据库失败, 回忆功能将不可用: {}", e);
+            }
+
             Ok(())
         })
         .on_window_event(|window, event| {
@@ -87,6 +95,13 @@ fn main() {
             webview_memory::try_suspend_renderer,
             webview_memory::try_resume_renderer,
             webview_memory::is_renderer_suspended,
+            // Memory feature - 高山流水 v1.1: 回忆 CRUD + 导出
+            memories::get_memory,
+            memories::save_memory,
+            memories::delete_memory,
+            memories::export_memory,
+            // BUG 7: 通用文件导出 (绕过 fs plugin 权限限制)
+            export::write_text_file,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

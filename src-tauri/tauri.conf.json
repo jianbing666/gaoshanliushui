@@ -1,6 +1,6 @@
 {
   "productName": "高山流水",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "identifier": "com.gaoshanliushui.player",
   "build": {
     "beforeBuildCommand": "npm run build",
