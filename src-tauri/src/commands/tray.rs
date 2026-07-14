@@ -34,7 +34,11 @@ pub fn init_tray(app: &AppHandle) -> Result<(), String> {
     let _tray = builder
         .tooltip("高山流水音乐播放器")
         .menu(&tray_menu)
-        .show_menu_on_left_click(true)
+        // 修复 2026-07-14: Windows 上 show_menu_on_left_click(true) 会让左键点击图标
+        //   也触发菜单弹出, 用户感知混乱. 改为 false 后左键单击变成无操作,
+        //   右键才能打开菜单 —— 与用户预期一致.
+        //   macOS 上保留 true (符合 macOS 习惯).
+        .show_menu_on_left_click(cfg!(target_os = "macos"))
         .on_menu_event(|app, event| {
             match event.id.as_ref() {
                 "show" => {
@@ -44,12 +48,21 @@ pub fn init_tray(app: &AppHandle) -> Result<(), String> {
                     }
                 }
                 "play-pause" => {
+                    if let Some(win) = app.get_webview_window("main") {
+                        let _ = win.set_focus();
+                    }
                     let _ = app.emit("global-shortcut:toggle-play", ());
                 }
                 "prev" => {
+                    if let Some(win) = app.get_webview_window("main") {
+                        let _ = win.set_focus();
+                    }
                     let _ = app.emit("global-shortcut:prev-track", ());
                 }
                 "next" => {
+                    if let Some(win) = app.get_webview_window("main") {
+                        let _ = win.set_focus();
+                    }
                     let _ = app.emit("global-shortcut:next-track", ());
                 }
                 "quit" => {

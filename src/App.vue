@@ -20,6 +20,8 @@ import ShuffleIcon from '@/components/icons/ShuffleIcon.vue'
 import ArrowRightIcon from '@/components/icons/ArrowRightIcon.vue'
 import MusicIcon from '@/components/icons/MusicIcon.vue'
 import { formatTime } from '@/utils/formatTime'
+import { useMediaControls } from '@/composables/useMediaControls'
+import { syncShortcutsToBackend } from '@/utils/syncShortcuts'
 
 // ========== 阶段 3.6: 异步组件（首屏 JS 减 20-30KB）============
 // 同步: 首屏必现
@@ -33,6 +35,11 @@ const player = usePlayerStore()
 const appWindow = getCurrentWindow()
 const showSettings = ref(false)
 const autoLoadError = ref<string | null>(null)
+
+// 极致性能 + 多入口统一: 托盘菜单/全局快捷键/媒体键/迷你模式控制
+//   全部走 useMediaControls 统一在 App 级别注册, 避免迷你模式 ControlBar
+//   卸载后事件丢失 (导致托盘按钮和媒体键失效)
+useMediaControls()
 
 const miniWindowWidth = ref(640)
 const miniWindowHeight = ref(120)
@@ -122,14 +129,23 @@ onMounted(async () => {
   // timeout: 2000ms 保证即使不支持 requestIdleCallback 也能在 2s 内执行
   requestIdleCallback(
     async () => {
-      // 1. 自动加载音乐库 (潜在 IPC + 扫描磁盘, 可能数百 ms)
+      // 1. 同步快捷键到后端
+      //    原因: 后端 ShortcutStore 启动时用默认值, 如果用户在之前会话中修改过快捷键
+      //    且未保存, 就会使用默认值. 同步步骤确保后端使用用户实际配置的快捷键.
+      try {
+        await syncShortcutsToBackend()
+      } catch (e) {
+        console.warn('[App] 同步快捷键失败:', e)
+      }
+
+      // 2. 自动加载音乐库 (潜在 IPC + 扫描磁盘, 可能数百 ms)
       const result = await player.autoLoadMusicLibrary()
       if (!result.success && result.error) {
         autoLoadError.value = `音乐库路径已失效：${result.error}\n请在设置面板中重新选择目录`
         showSettings.value = true
       }
 
-      // 2. 注册 Tauri 窗口显示事件 (IPC 通道建立, ~50ms)
+      // 3. 注册 Tauri 窗口显示事件 (IPC 通道建立, ~50ms)
       try {
         unlistenWindowShow = await listen('tauri://window-show', handleWindowShow)
       } catch (e) {
@@ -140,10 +156,20 @@ onMounted(async () => {
   )
 })
 
+// 极致性能: 窗口隐藏(最小化/切到后台/最小化到托盘)时
+//   1. 恢复 AudioContext (浏览器自动挂起, 必须手动 resume)
+//   2. 暂停所有非必要后台动画 (频谱 setTimeout / 背景轮播 / 封面旋转)
+// 重新可见时, 1+2 反向恢复
 function handleVisibilityChange() {
-  if (!document.hidden) {
-    // 页面重新可见时，恢复音频上下文
+  if (document.hidden) {
+    // 窗口隐藏: 暂停频谱采样循环、背景轮播定时器, 让 CPU/GPU 进入空闲
+    player.pauseAllBackgroundAnimations()
+  } else {
+    // 页面重新可见时:
+    //   1. 恢复音频上下文 (浏览器在 hidden 时自动挂起)
+    //   2. 恢复所有后台动画
     player.resumeAudioContext()
+    player.resumeAllBackgroundAnimations()
   }
 }
 
@@ -389,7 +415,7 @@ onUnmounted(() => {
               @input="(e) => { player.volume = parseFloat((e.target as HTMLInputElement).value) }"
             />
 
-            <!-- 新增：显示具体的音量百分比 -->
+            <!-- 新增：显示具体的音量值 -->
             <span class="text-xs text-gray-500 dark:text-gray-400 w-8 text-right shrink-0">
               {{ (player.volume * 100).toFixed(0) }}
             </span>

@@ -122,6 +122,9 @@ pub fn register_global_shortcuts(app: &AppHandle) -> Result<(), String> {
                 let event_name = event_name.to_string();
                 app.global_shortcut()
                     .on_shortcut(shortcut, move |app_handle, _shortcut, _event| {
+                        if let Some(win) = app_handle.get_webview_window("main") {
+                            let _ = win.set_focus();
+                        }
                         let _ = app_handle.emit(&event_name, ());
                     })
                     .map_err(|e| format!("注册快捷键 {} 失败: {}", shortcut_str, e))?;
@@ -164,6 +167,10 @@ pub async fn update_global_shortcut(
 
     app.global_shortcut()
         .on_shortcut(new_sc, move |app_handle, _shortcut, _event| {
+            // 修复 2026-07-14: 同 register_global_shortcuts, 唤醒 webview
+            if let Some(win) = app_handle.get_webview_window("main") {
+                let _ = win.set_focus();
+            }
             let _ = app_handle.emit(&event_name, ());
         })
         .map_err(|e| format!("注册新快捷键失败: {}", e))?;

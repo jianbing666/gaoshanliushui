@@ -10,9 +10,11 @@ const player = usePlayerStore()
     <template v-if="player.currentSong">
       <div class="text-center">
         <!-- 专辑封面（旋转动画） -->
+        <!-- .paused 触发条件: 未播放 / 低功耗模式开启 / 窗口隐藏 / 迷你模式
+             极致性能: 后 3 种场景下让 CPU/GPU 进入空闲, 避免空转 -->
         <div
           class="relative mx-auto w-64 h-64 rounded-full shadow-2xl overflow-hidden cover-rotating"
-          :class="{ 'paused': !player.isPlaying }"
+          :class="{ 'paused': !player.isPlaying || player.spectrumPaused }"
         >
           <img
             v-if="player.currentSong.cover_path"

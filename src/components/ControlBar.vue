@@ -6,8 +6,7 @@ export default { inheritAttrs: false }
 import { usePlayerStore } from '@/stores/playerStore'
 import { audioPlayer } from '@/utils/audioPlayer'
 import { formatTime } from '@/utils/formatTime'
-import { onMounted, onUnmounted, ref } from 'vue'
-import { listen, type UnlistenFn } from '@tauri-apps/api/event'
+import { ref } from 'vue'
 import { useVolumeSlider } from '@/composables/useVolumeSlider'
 import VolumeSlider from '@/components/VolumeSlider.vue'
 import RepeatIcon from '@/components/icons/RepeatIcon.vue'
@@ -25,16 +24,8 @@ const volumeIconRef = ref<HTMLElement | null>(null)
 // autoplay 被拦截时的轻提示
 const showAutoplayTip = ref(false)
 
-// 快捷键防抖时间戳（防止按键重复触发）
-let lastShortcutTime = 0
-const SHORTCUT_DEBOUNCE_MS = 300
-
-function handleShortcutToggle() {
-  const now = Date.now()
-  if (now - lastShortcutTime < SHORTCUT_DEBOUNCE_MS) return
-  lastShortcutTime = now
-  player.togglePlay()
-}
+// 注意: 全局快捷键/托盘/媒体键的事件监听已迁移至 App.vue 的 useMediaControls
+// 原因: 迷你模式下 ControlBar 不挂载, 原监听器丢失导致托盘按钮和媒体键失效
 
 // 使用音量滑块 composable
 const {
@@ -46,13 +37,6 @@ const {
   handleMouseEnterSlider,
   handleMouseLeaveSlider,
 } = useVolumeSlider()
-
-// 全局快捷键监听器引用
-let unlistenToggle: UnlistenFn | null = null
-let unlistenPrev: UnlistenFn | null = null
-let unlistenNext: UnlistenFn | null = null
-let unlistenVolumeUp: UnlistenFn | null = null
-let unlistenVolumeDown: UnlistenFn | null = null
 
 // 循环模式标签
 const loopModeLabels: Record<string, string> = {
@@ -88,31 +72,6 @@ function handleVolumeIconLeave() {
 function toggleMute() {
   player.toggleMute()
 }
-
-onMounted(async () => {
-  // 监听全局快捷键事件
-  unlistenToggle = await listen('global-shortcut:toggle-play', handleShortcutToggle)
-  unlistenPrev = await listen('global-shortcut:prev-track', () => {
-    player.prev()
-  })
-  unlistenNext = await listen('global-shortcut:next-track', () => {
-    player.next()
-  })
-  unlistenVolumeUp = await listen('global-shortcut:volume-up', () => {
-    player.volume = Math.min(1, player.volume + 0.05)
-  })
-  unlistenVolumeDown = await listen('global-shortcut:volume-down', () => {
-    player.volume = Math.max(0, player.volume - 0.05)
-  })
-})
-
-onUnmounted(() => {
-  unlistenToggle?.()
-  unlistenPrev?.()
-  unlistenNext?.()
-  unlistenVolumeUp?.()
-  unlistenVolumeDown?.()
-})
 </script>
 
 <template>

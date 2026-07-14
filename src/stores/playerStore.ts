@@ -878,6 +878,30 @@ export const usePlayerStore = defineStore('player', () => {
     }
   }
 
+  // ========== 阶段 5: 极致性能模式 - 窗口隐藏/迷你模式时暂停所有非必要后台任务 ==========
+  // 触发场景:
+  //   - 窗口最小化/最小化到托盘/切到后台 tab
+  //   - 进入迷你模式 (640x120 仅显示控制条, 封面/背景/列表均不渲染)
+  // 暂停对象:
+  //   - 频谱采样 (setTimeout 循环)
+  //   - 背景轮播定时器
+  //   - 封面旋转 CSS 动画 (通过 spectrumPaused 统一驱动 .paused class)
+  // 不暂停: AudioContext 本身 (由 visibilitychange 在 App.vue 统一 resumeAudioContext 处理)
+  //         迷你模式切换 rAF 动画 (由用户主动触发, 完成后自停)
+  //         AudioBuffer LRU 缓存 (切回上一首需要)
+  function pauseAllBackgroundAnimations() {
+    spectrumPaused.value = true
+    stopBackgroundSlideshow()
+  }
+
+  function resumeAllBackgroundAnimations() {
+    // 动画暂停/恢复完全由 setMiniMode / document.hidden 事件统一驱动
+    // 这里直接恢复 spectrumPaused, 行为清晰无歧义
+    spectrumPaused.value = false
+    // 重新启动背景轮播 (仅在 folder 模式且有图片时实际启动)
+    startBackgroundSlideshow()
+  }
+
   // 更新背景设置项
   function updateBackgroundSetting<K extends keyof BackgroundSettings>(
     key: K,
@@ -949,20 +973,49 @@ export const usePlayerStore = defineStore('player', () => {
     }
   }
 
-  // ========== 频谱显示设置 ==========
+  // ========== 频谱显示设置（重构：合并开关 + 质量等级）============
+  // 此前存在 3 个独立开关 (lowPowerMode / showSpectrum / spectrumLowPower) 互相重叠:
+  //   - lowPowerMode 涉及"迷你模式自动暂停频谱", 与 spectrumPaused 重复
+  //   - spectrumLowPower 二选一, 粒度太粗
+  // 新方案: 一个主开关 (showSpectrum) + 一个三档质量 (spectrumQuality)
   const showSpectrum = ref<boolean>(saved.showSpectrum ?? true)
-  const spectrumLowPower = ref<boolean>(saved.spectrumLowPower ?? false)
+  type SpectrumQuality = 'high' | 'balanced' | 'low'
+  // 旧数据兼容: 之前若保存过 spectrumLowPower, 平滑迁移到 'low' / 'balanced'
+  const migratedQuality: SpectrumQuality =
+    typeof saved.spectrumQuality === 'string'
+      ? (saved.spectrumQuality as SpectrumQuality)
+      : (saved.spectrumLowPower ? 'low' : 'balanced')
+  const spectrumQuality = ref<SpectrumQuality>(migratedQuality)
 
   function setShowSpectrum(value: boolean) {
     showSpectrum.value = value
   }
 
-  function setSpectrumLowPower(value: boolean) {
-    spectrumLowPower.value = value
+  function setSpectrumQuality(value: SpectrumQuality) {
+    spectrumQuality.value = value
   }
 
-  // ========== 性能/低功耗模式 ==========
-  const lowPowerMode = ref<boolean>(saved.lowPowerMode ?? false)
+  // 频谱相关计算属性
+  // - high:     60fps (16ms), fftSize 2048, smoothing 0.8  → 视觉最佳, CPU 占用高
+  // - balanced: 30fps (33ms), fftSize 1024, smoothing 0.75 → 流畅与性能兼顾 (默认)
+  // - low:      20fps (50ms), fftSize 512,  smoothing 0.5  → 极低 CPU, 适合迷你模式/低配
+  const spectrumSampleInterval = computed(() => {
+    if (spectrumQuality.value === 'high') return 16
+    if (spectrumQuality.value === 'low') return 50
+    return 33
+  })
+  const spectrumFftSize = computed(() => {
+    if (spectrumQuality.value === 'high') return 2048
+    if (spectrumQuality.value === 'low') return 512
+    return 1024
+  })
+  const spectrumSmoothing = computed(() => {
+    if (spectrumQuality.value === 'high') return 0.8
+    if (spectrumQuality.value === 'low') return 0.5
+    return 0.75
+  })
+
+  // ========== 迷你模式状态（不含低功耗开关, 该行为已由 setMiniMode 自动驱动）============
   const isMiniMode = ref<boolean>(false)
   const spectrumPaused = ref<boolean>(false)
 
@@ -971,17 +1024,6 @@ export const usePlayerStore = defineStore('player', () => {
 
   function setDownloadOutputDir(path: string) {
     downloadOutputDir.value = path
-  }
-
-  function setLowPowerMode(value: boolean) {
-    lowPowerMode.value = value
-    // 开启低功耗模式时，如果当前在播放且显示频谱，则暂停频谱动画
-    if (value && isPlaying.value && showSpectrum.value) {
-      spectrumPaused.value = true
-    } else if (!value) {
-      // 关闭低功耗模式时恢复频谱
-      spectrumPaused.value = false
-    }
   }
 
   // ========== 迷你模式切换：rAF 插值窗口尺寸 (320ms easeOutCubic) ==========
@@ -1018,14 +1060,13 @@ export const usePlayerStore = defineStore('player', () => {
     invoke('toggle_mini_mode', { isMini: value })
       .catch((e) => console.warn('[miniMode] toggle_mini_mode 失败:', e))
 
-    // 3. 低功耗模式下, 进入迷你模式时暂停频谱并断开 AnalyserNode
-    if (lowPowerMode.value) {
-      spectrumPaused.value = value
-      if (value) {
-        disconnectAnalyser()
-      } else {
-        reconnectAnalyser()
-      }
+    // 3. 阶段 5: 进入迷你模式时自动暂停所有非必要后台任务
+    // 迷你模式 640x120 仅显示控制条, 封面/背景/列表均不渲染, 频谱 + 背景轮播都是纯浪费
+    // 退出迷你模式时恢复
+    if (value) {
+      pauseAllBackgroundAnimations()
+    } else {
+      resumeAllBackgroundAnimations()
     }
 
     // 4. 异步启动 rAF 动画插值窗口尺寸
@@ -1125,6 +1166,28 @@ export const usePlayerStore = defineStore('player', () => {
   function resumeAudioContext() {
     if (audioContext && audioContext.state === 'suspended') {
       audioContext.resume().catch(() => {})
+    }
+  }
+
+  /**
+   * 强制唤醒 AudioContext（命令式，幂等）
+   *
+   * 用途: 托盘菜单/全局快捷键/媒体键触发时, WebView 刚从冻结态恢复,
+   *       audioContext 经常仍处于 suspended. 此函数显式 await resume(),
+   *       调用方 await 它之后 audioContext.state 必定是 'running'.
+   *
+   * 设计: 即使 state !== 'suspended' 也调一次, 防止竞争.
+   * 幂等: 多次调用安全.
+   */
+  async function forceWakeAudioContext() {
+    if (!audioContext) return
+    // WebView2 在 hidden 状态会自动 suspend context
+    if (audioContext.state === 'suspended' || audioContext.state === 'closed') {
+      try {
+        await audioContext.resume()
+      } catch {
+        // 忽略唤醒失败, 后续 resumePlayback 仍会重试
+      }
     }
   }
 
@@ -1354,8 +1417,8 @@ export const usePlayerStore = defineStore('player', () => {
       analyserNode.fftSize = 2048
       analyserNode.smoothingTimeConstant = 0.8
       gainNode = audioContext.createGain()
+      gainNode.gain.value = volume.value
 
-      // 链路：AnalyserNode -> GainNode -> Destination
       analyserNode.connect(gainNode)
       gainNode.connect(audioContext.destination)
     }
@@ -1492,6 +1555,12 @@ export const usePlayerStore = defineStore('player', () => {
     isPaused = false
     isPlaying.value = true
 
+    // 修复 2026-07-14: stopPlayback() 中将 gain 临时置 0 以切断旧 source 残音,
+    //   此处恢复音量. 必须在 source.start() 之前, 否则新 source 第一帧无声音.
+    if (gainNode) {
+      gainNode.gain.setValueAtTime(volume.value, audioContext.currentTime)
+    }
+
     if (currentSong.value) {
       startHistoryRecord(currentSong.value)
     }
@@ -1552,8 +1621,18 @@ export const usePlayerStore = defineStore('player', () => {
       try {
         // 先清空 onended，防止手动 stop 触发播放结束回调
         audioSourceNode.onended = null
-        audioSourceNode.stop()
-        audioSourceNode.disconnect()
+        // 修复 2026-07-14: Web Audio 的 stop() 是异步的,
+        //   旧 source 仍会在音频量子 (~3ms) 内继续输出旧 buffer.
+        //   为避免 1-2s 内新歌的 BGM 跟旧歌尾部叠加 (用户感知的"重复播放"),
+        //   先将 gain.gain 临时设为 0, 立刻静音,
+        //   等新 source 创建后再恢复音量.
+        if (gainNode && audioContext) {
+          gainNode.gain.setValueAtTime(0, audioContext.currentTime)
+        }
+        const oldSource = audioSourceNode
+        oldSource.buffer = null
+        oldSource.stop()
+        oldSource.disconnect()
         audioSourceNode = null
       } catch (e) {
         // 忽略已停止的节点错误
@@ -1626,16 +1705,77 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   // ========== 播放控制 ==========
+  // 修复 2026-07-14: 之前只翻转 isPlaying.value, 依赖 watcher 触发实际播放/暂停
+  //   问题: 托盘菜单/全局快捷键/媒体键调用时, 由于 watcher 是异步的 (微任务),
+  //         在高频点击或极短间隔时可能丢失; 且 audioContext 处于 suspended 时
+  //         resumePlayback 会早退, 导致 isPlaying=true 但无声音 (UI 与状态脱钩)
+  // 修复: 直接同步调用 pausePlayback/resumePlayback, 立即控制 Web Audio,
+  //       同时更新 isPlaying.value 让 UI 同步, watcher 只负责"由 isPlaying 触发的副作用"
   function play() {
+    if (isPlaying.value) return
     isPlaying.value = true
+    void resumePlayback()
+    startTimeUpdate()
   }
 
   function pause() {
+    if (!isPlaying.value) return
     isPlaying.value = false
+    pausePlayback()
+    stopTimeUpdate()
+    audioPlayer.pause()
   }
 
   function togglePlay() {
-    isPlaying.value = !isPlaying.value
+    if (isPlaying.value) {
+      pause()
+    } else {
+      play()
+    }
+  }
+
+  // ========== 命令式 Force 控制层 (绕过状态延迟, 用于托盘/快捷键/媒体键) ==========
+  // 设计:
+  //   1. 命令式: 内部不依赖 Vue watcher, 直接同步控制 audioContext/sourceNode,
+  //      避免微任务/冻结场景下 watcher 触发失败
+  //   2. 强制唤醒: 调用前先 forceWakeAudioContext() 确保 audioContext 是 'running',
+  //      这是 hidden/最小化到托盘场景下能正常发声的关键
+  //   3. 强制释放: forcePause 内部先 disconnect+stop 旧节点, 防止内存泄漏
+  //   4. 状态同步: 操作完成后立即更新 isPlaying.value 等 ref, UI 同步
+  //
+  // 调用入口: useMediaControls 监听器、MediaSession handler、托盘菜单等外部入口
+  async function forcePlay() {
+    if (isPlaying.value && audioSourceNode && !isPaused) return
+    await forceWakeAudioContext()
+    isPlaying.value = true
+    await resumePlayback()
+    startTimeUpdate()
+  }
+
+  async function forcePause() {
+    if (!isPlaying.value) return
+    isPlaying.value = false
+    pausePlayback()
+    stopTimeUpdate()
+    audioPlayer.pause()
+  }
+
+  async function forceTogglePlay() {
+    if (isPlaying.value) {
+      await forcePause()
+    } else {
+      await forcePlay()
+    }
+  }
+
+  async function forceNext() {
+    await forceWakeAudioContext()
+    next()
+  }
+
+  async function forcePrevious() {
+    await forceWakeAudioContext()
+    prev()
   }
 
   // 随机播放历史记录（用于上一首功能）
@@ -1796,8 +1936,8 @@ export const usePlayerStore = defineStore('player', () => {
   // 持久化设置（防抖）
   let settingsSaveTimer: ReturnType<typeof setTimeout> | null = null
   watch(
-    [volume, loopMode, folderPath, theme, background, minimizeToTray, fontSettings, metadataSource, showSpectrum, spectrumLowPower, lowPowerMode, downloadOutputDir],
-    ([vol, mode, path, th, bg, mt, fs, metaSrc, spectrum, lowPower, lpm, dlDir]) => {
+    [volume, loopMode, folderPath, theme, background, minimizeToTray, fontSettings, metadataSource, showSpectrum, spectrumQuality, downloadOutputDir],
+    ([vol, mode, path, th, bg, mt, fs, metaSrc, spectrum, spectrumQualityVal, dlDir]) => {
       if (settingsSaveTimer) {
         clearTimeout(settingsSaveTimer)
       }
@@ -1812,8 +1952,7 @@ export const usePlayerStore = defineStore('player', () => {
           fontSettings: fs,
           metadataSource: metaSrc,
           showSpectrum: spectrum,
-          spectrumLowPower: lowPower,
-          lowPowerMode: lpm,
+          spectrumQuality: spectrumQualityVal,
           downloadOutputDir: dlDir
         })
       }, 300)
@@ -1890,11 +2029,9 @@ export const usePlayerStore = defineStore('player', () => {
   }
 
   // 初始化 audioPlayer 的 store 访问器
+  // 修复 2026-07-14: audioPlayer 不再调用 play/pause, 仅保留 setIsSwitchingSong 用于清锁
   audioPlayer.bindStoreAccessors({
-    getPendingPlay: () => pendingPlay.value,
-    setPendingPlay: (v: boolean) => { pendingPlay.value = v },
     setIsSwitchingSong: (v: boolean) => { isSwitchingSong.value = v },
-    setIsPlaying: (v: boolean) => { isPlaying.value = v },
   })
 
   // audioPlayer 事件：获取时长（仅用于元数据显示）
@@ -1906,8 +2043,29 @@ export const usePlayerStore = defineStore('player', () => {
   audioPlayer.setVolume(0)
 
   // Web Audio 播放结束回调
+  // 修复 2026-07-14: 之前直接 next() 会导致:
+  //   1. single 模式: next() 设 currentTime=0 + currentIndex=-1/恢复, 触发 watch 二次,
+  //      第一次(currentIndex=-1)中间状态 1-2s 静默, 用户感受到"重复播放"
+  //   2. 顺序模式末尾: next() 什么也不做, 但 audioSourceNode=null + isPlaying 仍 true,
+  //      UI 显示在播但没声音
+  // 修复: single 模式复用已解码的 AudioBuffer 直接重建 source (<50ms),
+  //       顺序模式末尾自动停止播放
   setOnAudioEnded(() => {
     stopTimeUpdate()
+
+    // 单曲循环: 复用 AudioBuffer, 跳过 fetch + decodeAudioData (节省 1-2s)
+    if (loopMode.value === 'single' && currentAudioBuffer && audioContext) {
+      playFromOffset(0)
+      return
+    }
+
+    // 顺序模式末尾: 停止播放 (符合用户预期, 避免 UI 卡在末尾"假播放")
+    if (loopMode.value === 'none' && currentIndex.value >= playlist.value.length - 1) {
+      isPlaying.value = false
+      return
+    }
+
+    // 列表循环末尾 / shuffle: 走 next()
     next()
   })
 
@@ -1964,9 +2122,14 @@ export const usePlayerStore = defineStore('player', () => {
   )
 
   // 监听播放状态变化：实际控制 Web Audio 播放/暂停
+  // 修复 2026-07-14: 切歌过程中 isSwitchingSong=true 时跳过 watch 触发,
+  // 防止与 watch(currentSong) 竞争导致旧歌 AudioBuffer 被重复播放
   watch(
     () => isPlaying.value,
     async (playing) => {
+      // 切歌过程中由 watch(currentSong) 统一控制播放, 此处跳过
+      if (isSwitchingSong.value) return
+
       if (playing) {
         await resumePlayback()
         startTimeUpdate()
@@ -2000,11 +2163,39 @@ export const usePlayerStore = defineStore('player', () => {
   updateDocumentTitle()
   watch(() => currentSong.value, updateDocumentTitle)
 
-  // 媒体键处理
-  if ('mediaSession' in navigator) {
-    navigator.mediaSession.setActionHandler('previoustrack', () => prev())
-    navigator.mediaSession.setActionHandler('nexttrack', () => next())
+  // 媒体键 / 锁屏 / 外设（蓝牙耳机/键盘媒体键）控制
+  // 修复 2026-07-14: 之前仅绑定 prev/next, play/pause 由 audioPlayer.setMediaSession
+  //   设置但实际调用被静音的 HTML5 Audio (volume=0), 外设 play/pause 失效
+  // 现在统一在 store 绑定 4 个 action 到真正的播放控制函数
+  function setupMediaSessionHandlers() {
+    if (!('mediaSession' in navigator)) return
+    try {
+      // 命令式 force 函数: 内部强制唤醒 audioContext, 不依赖 watcher,
+      // 确保蓝牙耳机/键盘媒体键在 hidden/最小化到托盘场景下也能控制播放
+      navigator.mediaSession.setActionHandler('play', () => { void forcePlay() })
+      navigator.mediaSession.setActionHandler('pause', () => { void forcePause() })
+      navigator.mediaSession.setActionHandler('previoustrack', () => { void forcePrevious() })
+      navigator.mediaSession.setActionHandler('nexttrack', () => { void forceNext() })
+      // 停止键 (部分蓝牙耳机长按) - 等同于 pause
+      navigator.mediaSession.setActionHandler('stop', () => { void forcePause() })
+    } catch (e) {
+      console.warn('[MediaSession] 设置 action handler 失败:', e)
+    }
   }
+  setupMediaSessionHandlers()
+
+  // 同步播放状态到 MediaSession (用于锁屏/通知中心的播放/暂停图标)
+  // 立即同步: 不依赖 watch, 避免在 forceTogglePlay 后 UI 与 MediaSession 状态不同步
+  function syncMediaSessionPlaybackState() {
+    if (!('mediaSession' in navigator)) return
+    try {
+      navigator.mediaSession.playbackState = isPlaying.value ? 'playing' : 'paused'
+    } catch {
+      // 忽略不支持的浏览器
+    }
+  }
+  syncMediaSessionPlaybackState()
+  watch(() => isPlaying.value, syncMediaSessionPlaybackState)
 
   // 监听系统主题变化（仅在 'system' 模式下生效）
   if (window.matchMedia) {
@@ -2092,14 +2283,15 @@ export const usePlayerStore = defineStore('player', () => {
     setMinimizeToTray,
     // 频谱设置
     showSpectrum,
-    spectrumLowPower,
+    spectrumQuality,
+    spectrumSampleInterval,
+    spectrumFftSize,
+    spectrumSmoothing,
     setShowSpectrum,
-    setSpectrumLowPower,
-    // 性能/低功耗模式
-    lowPowerMode,
+    setSpectrumQuality,
+    // 迷你模式状态
     isMiniMode,
     spectrumPaused,
-    setLowPowerMode,
     setMiniMode,
     // 下载页
     downloadOutputDir,
@@ -2109,6 +2301,16 @@ export const usePlayerStore = defineStore('player', () => {
     disconnectAnalyser,
     reconnectAnalyser,
     resumeAudioContext,
+    // 命令式 force 层: 托盘/快捷键/媒体键使用, 强制唤醒 audioContext
+    forceWakeAudioContext,
+    forcePlay,
+    forcePause,
+    forceTogglePlay,
+    forceNext,
+    forcePrevious,
+    // 极致性能: 后台动画批量暂停/恢复 (迷你模式/窗口隐藏时调用)
+    pauseAllBackgroundAnimations,
+    resumeAllBackgroundAnimations,
     // Web Audio API 主播放链路
     initAudioContext,
     getAudioBuffer,

@@ -13,11 +13,10 @@ let animationTimer: number | null = null
 // 复用的频域数据数组（避免每次创建新的 Uint8Array）
 let dataArray: Uint8Array<ArrayBuffer> | null = null
 
-// 计算采样间隔（低功耗模式 20fps = 50ms，正常模式 30fps = 33ms）
-const sampleInterval = computed(() => player.spectrumLowPower ? 50 : 33)
-
-// 计算 fftSize（低功耗模式 1024，正常模式 2048）
-const fftSize = computed(() => player.spectrumLowPower ? 1024 : 2048)
+// 频谱参数直接来自 store 中按"质量档位"计算好的值, 此处只读
+const sampleInterval = computed(() => player.spectrumSampleInterval)
+const fftSize = computed(() => player.spectrumFftSize)
+const smoothing = computed(() => player.spectrumSmoothing)
 
 // 计算当前实际主题（用于频谱条形颜色）
 const actualTheme = computed(() => {
@@ -75,12 +74,12 @@ function startSpectrumAnimation() {
     analyserNode.fftSize = fftSize.value
   }
 
-  // 阶段 2.7: smoothingTimeConstant 低功耗时降低抖动
-  // 正常模式 0.8: 视觉平滑, 减少高频抖动
-  // 低功耗 0.5: 更快的频谱响应（用户能更明显看到低功耗模式的差异）
-  const targetSmoothing = player.spectrumLowPower ? 0.5 : 0.8
-  if (analyserNode.smoothingTimeConstant !== targetSmoothing) {
-    analyserNode.smoothingTimeConstant = targetSmoothing
+  // 阶段 2.7: smoothingTimeConstant 跟随频谱质量档位
+  //   high     0.8: 视觉平滑, 减少高频抖动
+  //   balanced 0.75: 平滑与响应兼顾
+  //   low      0.5:  更快的频谱响应
+  if (analyserNode.smoothingTimeConstant !== smoothing.value) {
+    analyserNode.smoothingTimeConstant = smoothing.value
   }
 
   // 停止之前的定时器
@@ -117,9 +116,9 @@ watch(
   }
 )
 
-// 监听低功耗模式变化（会影响采样间隔和 fftSize）
+// 监听频谱质量档位变化（影响采样间隔、fftSize、平滑系数）
 watch(
-  () => player.spectrumLowPower,
+  () => player.spectrumQuality,
   () => {
     const analyserNode = player.getAnalyserNode()
     if (analyserNode && shouldRun.value) {

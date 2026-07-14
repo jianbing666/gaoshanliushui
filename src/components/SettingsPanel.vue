@@ -152,12 +152,8 @@ function handleShowSpectrumToggle() {
   player.setShowSpectrum(!player.showSpectrum)
 }
 
-function handleSpectrumLowPowerToggle() {
-  player.setSpectrumLowPower(!player.spectrumLowPower)
-}
-
-function handleLowPowerModeToggle() {
-  player.setLowPowerMode(!player.lowPowerMode)
+function handleSpectrumQualityChange(quality: 'high' | 'balanced' | 'low') {
+  player.setSpectrumQuality(quality)
 }
 
 const isClearingCache = ref(false)
@@ -586,25 +582,6 @@ onUnmounted(() => {
           <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
             <div class="flex items-center justify-between">
               <div>
-                <p class="text-gray-900 dark:text-white text-sm font-medium">性能/低功耗模式</p>
-                <p class="text-gray-500 dark:text-gray-400 text-xs">迷你模式或后台时自动暂停频谱，降低CPU占用</p>
-              </div>
-              <button
-                class="relative w-10 h-5 rounded-full transition-colors shrink-0"
-                :class="player.lowPowerMode ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
-                @click="handleLowPowerModeToggle"
-              >
-                <div
-                  class="absolute top-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform"
-                  :class="player.lowPowerMode ? 'translate-x-5' : 'translate-x-0.5'"
-                ></div>
-              </button>
-            </div>
-          </div>
-
-          <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
-            <div class="flex items-center justify-between">
-              <div>
                 <p class="text-gray-900 dark:text-white text-sm font-medium">显示频谱</p>
                 <p class="text-gray-500 dark:text-gray-400 text-xs">播放时显示音频频谱动画</p>
               </div>
@@ -621,21 +598,29 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <div v-if="player.showSpectrum" class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
-            <div class="flex items-center justify-between">
-              <div>
-                <p class="text-gray-900 dark:text-white text-sm font-medium">低功耗频谱</p>
-                <p class="text-gray-500 dark:text-gray-400 text-xs">降低采样频率，节省内存和CPU</p>
-              </div>
+          <!-- 频谱质量: 三档单选 (主开关开启时生效) -->
+          <div v-if="player.showSpectrum" class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3 space-y-2">
+            <div>
+              <p class="text-gray-900 dark:text-white text-sm font-medium">频谱质量</p>
+              <p class="text-gray-500 dark:text-gray-400 text-xs">高 = 60fps + 2048 fft, 低 = 20fps + 512 fft, 越低越省 CPU</p>
+            </div>
+            <div class="bg-white/60 dark:bg-gray-900/40 rounded-lg p-1 flex gap-1">
               <button
-                class="relative w-10 h-5 rounded-full transition-colors shrink-0"
-                :class="player.spectrumLowPower ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
-                @click="handleSpectrumLowPowerToggle"
+                v-for="opt in [
+                  { value: 'high', label: '高性能' },
+                  { value: 'balanced', label: '平衡' },
+                  { value: 'low', label: '低功耗' }
+                ]"
+                :key="opt.value"
+                class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                :class="
+                  player.spectrumQuality === opt.value
+                    ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                "
+                @click="handleSpectrumQualityChange(opt.value as 'high' | 'balanced' | 'low')"
               >
-                <div
-                  class="absolute top-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform"
-                  :class="player.spectrumLowPower ? 'translate-x-5' : 'translate-x-0.5'"
-                ></div>
+                {{ opt.label }}
               </button>
             </div>
           </div>

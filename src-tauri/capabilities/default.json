@@ -7,6 +7,8 @@
     "dialog:allow-save",
     "global-shortcut:default",
     "autostart:default",
+    "core:default",
+    "core:event:default",
     "core:window:allow-minimize",
     "core:window:allow-unminimize",
     "core:window:allow-maximize",
@@ -18,6 +20,8 @@
     "core:window:allow-set-always-on-top",
     "core:window:allow-set-decorations",
     "core:window:allow-close",
+    "core:window:allow-set-focus",
+    "core:webview:allow-internal-toggle-devtools",
     {
       "identifier": "shell:allow-execute",
       "allow": [
