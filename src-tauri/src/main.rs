@@ -4,6 +4,7 @@
 mod commands;
 mod models;
 
+use commands::db;
 use commands::scan_folder;
 use commands::toggle_mini_mode;
 use commands::global_shortcut;
@@ -12,6 +13,8 @@ use commands::tray;
 use commands::download_bilibili;
 use commands::webview_memory;
 use commands::memories;
+use commands::migrate;
+use commands::playlist;
 use commands::export;
 
 use std::sync::Mutex;
@@ -59,10 +62,14 @@ fn main() {
                 eprintln!("注册全局快捷键失败: {}", e);
             }
 
-            // Memory feature: 初始化回忆数据库 (建表 + 索引)
-            // 失败仅打印警告, 不阻塞应用启动 (前端功能降级为不可用)
-            if let Err(e) = memories::init_db(&app.handle()) {
-                eprintln!("[memories] 初始化数据库失败, 回忆功能将不可用: {}", e);
+            // 初始化数据库 (所有表统一在一个连接中创建)
+            if let Err(e) = db::init_db(&app.handle(), |conn| {
+                memories::init_schema(conn)?;
+                migrate::init_schema(conn)?;
+                playlist::init_schema(conn)?;
+                Ok(())
+            }) {
+                eprintln!("[db] 初始化数据库失败, 相关功能将不可用: {}", e);
             }
 
             Ok(())
@@ -100,6 +107,21 @@ fn main() {
             memories::save_memory,
             memories::delete_memory,
             memories::export_memory,
+            memories::list_all_memories,
+            // 迁移 + 元数据修正
+            migrate::reset_migration,
+            migrate::update_song_metadata,
+            // 虚拟歌单
+            playlist::get_all_playlists,
+            playlist::create_playlist,
+            playlist::delete_playlist,
+            playlist::rename_playlist,
+            playlist::add_song_to_playlist,
+            playlist::remove_song_from_playlist,
+            playlist::get_playlist_songs,
+            playlist::load_default_playlist_songs,
+            playlist::import_playlist_from_paths,
+            playlist::export_playlist,
             // BUG 7: 通用文件导出 (绕过 fs plugin 权限限制)
             export::write_text_file,
         ])

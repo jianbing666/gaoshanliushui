@@ -67,14 +67,14 @@ const settings = useSettingsStore()
           <ScrollingText
             :text="library.currentSong.title"
             text-class="text-2xl font-semibold text-gray-900 dark:text-white"
-            :duration="12"
+            :speed="40"
           />
         </div>
         <div class="w-80 mx-auto mt-2">
           <ScrollingText
             :text="library.currentSong.artist || '未知艺术家'"
             text-class="text-lg text-gray-600 dark:text-gray-400"
-            :duration="10"
+            :speed="30"
           />
         </div>
         <p v-if="library.currentSong.album" class="text-gray-500 dark:text-gray-500 text-sm mt-1 max-w-xs mx-auto truncate">

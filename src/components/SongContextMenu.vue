@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { useUIStore } from '@/stores/uiStore'
 import { useLibraryStore } from '@/stores/libraryStore'
-import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
+import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
 import ChevronRightIcon from '@/components/icons/ChevronRightIcon.vue'
 import ChevronLeftIcon from '@/components/icons/ChevronLeftIcon.vue'
 import PlusIcon from '@/components/icons/PlusIcon.vue'
@@ -15,6 +15,26 @@ const menuRef = ref<HTMLElement | null>(null)
 type MenuMode = 'main' | 'add' | 'move'
 const menuMode = ref<MenuMode>('main')
 const isClosing = ref(false)
+const playlistMembership = ref<Record<string, boolean>>({})
+const membershipLoading = ref(false)
+
+const isDefaultPlaylist = computed(() => {
+  const pid = ui.contextMenu.playlistId
+  if (!pid) return true
+  return library.defaultPlaylist?.id === pid
+})
+
+// 检查歌曲在各歌单中的状态
+async function refreshPlaylistMembership() {
+  if (!ui.contextMenu.song) return
+  membershipLoading.value = true
+  const result: Record<string, boolean> = {}
+  for (const pl of library.customPlaylists) {
+    result[pl.id] = await library.isSongInPlaylist(ui.contextMenu.song!.id, pl.id)
+  }
+  playlistMembership.value = result
+  membershipLoading.value = false
+}
 
 function handleClickOutside(e: MouseEvent) {
   if (menuRef.value && !menuRef.value.contains(e.target as Node)) {
@@ -28,11 +48,13 @@ function closeMenu() {
     ui.closeContextMenu()
     menuMode.value = 'main'
     isClosing.value = false
+    playlistMembership.value = {}
   }, 150)
 }
 
 function openAddPanel() {
   menuMode.value = 'add'
+  void refreshPlaylistMembership()
 }
 
 function openMovePanel() {
@@ -45,16 +67,18 @@ function backToMain() {
 
 function addToPlaylist(playlistId: string) {
   if (ui.contextMenu.song) {
-    library.addSongToPlaylist(ui.contextMenu.song.id, playlistId)
+    void library.addSongToPlaylist(ui.contextMenu.song.id, playlistId)
+    // 立即更新本地状态
+    playlistMembership.value[playlistId] = true
   }
 }
 
 function moveToPlaylist(playlistId: string) {
-  if (ui.contextMenu.song && ui.contextMenu.playlistId !== 'all-songs' && ui.contextMenu.playlistId) {
+  if (ui.contextMenu.song && !isDefaultPlaylist.value && ui.contextMenu.playlistId) {
     const songId = ui.contextMenu.song.id
     const currentPlaylistId = ui.contextMenu.playlistId
-    library.addSongToPlaylist(songId, playlistId)
-    library.removeSongFromPlaylist(songId, currentPlaylistId)
+    void library.addSongToPlaylist(songId, playlistId)
+    void library.removeSongFromPlaylist(songId, currentPlaylistId)
   }
   closeMenu()
 }
@@ -70,8 +94,8 @@ function createAndAddToPlaylist() {
 }
 
 function removeFromCurrentPlaylist() {
-  if (ui.contextMenu.playlistId !== 'all-songs' && ui.contextMenu.playlistId && ui.contextMenu.song) {
-    library.removeSongFromPlaylist(ui.contextMenu.song.id, ui.contextMenu.playlistId)
+  if (!isDefaultPlaylist.value && ui.contextMenu.playlistId && ui.contextMenu.song) {
+    void library.removeSongFromPlaylist(ui.contextMenu.song.id, ui.contextMenu.playlistId)
   }
   closeMenu()
 }
@@ -151,7 +175,7 @@ onUnmounted(() => {
         <ChevronRightIcon :size="14" class="text-gray-400" />
       </button>
 
-      <template v-if="ui.contextMenu.playlistId !== 'all-songs' && ui.contextMenu.playlistId">
+      <template v-if="!isDefaultPlaylist && ui.contextMenu.playlistId">
         <button
           class="w-full px-3 py-2 rounded-lg text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 flex items-center justify-between gap-2 transition-colors"
           @click="openMovePanel"
@@ -199,16 +223,16 @@ onUnmounted(() => {
             v-for="pl in library.customPlaylists"
             :key="pl.id"
             class="w-full px-3 py-2 rounded-lg text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700/60 flex items-center justify-between gap-2 transition-colors"
-            :class="library.isSongInPlaylist(ui.contextMenu.song!.id, pl.id)
+            :class="playlistMembership[pl.id]
               ? 'text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-900/10'
               : 'text-gray-700 dark:text-gray-300'"
             @click="addToPlaylist(pl.id)"
           >
             <div class="flex items-center gap-2 min-w-0">
-              <FolderIcon :size="14" :class="library.isSongInPlaylist(ui.contextMenu.song!.id, pl.id) ? 'text-blue-500 shrink-0' : 'text-amber-500 shrink-0'" />
+              <FolderIcon :size="14" :class="playlistMembership[pl.id] ? 'text-blue-500 shrink-0' : 'text-amber-500 shrink-0'" />
               <span class="truncate">{{ pl.name }}</span>
             </div>
-            <span v-if="library.isSongInPlaylist(ui.contextMenu.song!.id, pl.id)" class="shrink-0 text-xs">
+            <span v-if="playlistMembership[pl.id]" class="shrink-0 text-xs">
               已添加
             </span>
           </button>

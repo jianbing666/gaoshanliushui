@@ -9,14 +9,18 @@ const inputRef = ref<HTMLInputElement | null>(null)
 const playlistName = ref('')
 const isClosing = ref(false)
 
-function handleSubmit() {
+async function handleSubmit() {
   const name = playlistName.value.trim()
   if (name) {
-    const newPlaylist = library.createPlaylist(name)
-    if (ui.createPlaylistAddSongId) {
-      library.addSongToPlaylist(ui.createPlaylistAddSongId, newPlaylist.id)
+    try {
+      const newPlaylist = await library.createPlaylist(name)
+      if (ui.createPlaylistAddSongId) {
+        await library.addSongToPlaylist(ui.createPlaylistAddSongId, newPlaylist.id)
+      }
+      closeModal()
+    } catch (error) {
+      console.error('创建歌单失败:', error)
     }
-    closeModal()
   }
 }
 

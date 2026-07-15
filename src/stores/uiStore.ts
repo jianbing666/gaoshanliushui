@@ -29,6 +29,13 @@ export interface ContextMenuState {
   y: number
 }
 
+export interface EditMetadataState {
+  visible: boolean
+  song: Song | null
+  x: number
+  y: number
+}
+
 // ========== 迷你模式动画常量(与 toggle_mini_mode.rs 保持一致) ==========
 const MINI_TARGET_W = 472
 const MINI_TARGET_H = 112
@@ -129,6 +136,27 @@ export const useUIStore = defineStore('ui', () => {
 
   function closeContextMenu() {
     contextMenu.value.visible = false
+  }
+
+  // ========== 编辑元数据浮窗 ==========
+  const editMetadata = ref<EditMetadataState>({
+    visible: false,
+    song: null,
+    x: 0,
+    y: 0,
+  })
+
+  function openEditMetadata(song: Song, x: number, y: number) {
+    editMetadata.value = {
+      visible: true,
+      song,
+      x,
+      y,
+    }
+  }
+
+  function closeEditMetadata() {
+    editMetadata.value.visible = false
   }
 
   // ========== 创建歌单弹窗 ==========
@@ -259,6 +287,10 @@ export const useUIStore = defineStore('ui', () => {
     contextMenu,
     openContextMenu,
     closeContextMenu,
+    // 编辑元数据
+    editMetadata,
+    openEditMetadata,
+    closeEditMetadata,
     // 创建歌单弹窗
     showCreatePlaylistModal,
     createPlaylistAddSongId,

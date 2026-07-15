@@ -12,6 +12,7 @@ use regex::Regex;
 use walkdir::WalkDir;
 
 use crate::commands::song_hash::compute_content_hash;
+use crate::commands::db;
 use crate::models::Song;
 use tauri::{AppHandle, Emitter};
 
@@ -88,15 +89,171 @@ pub async fn scan_music_folder(
 
     songs.sort_by(|a, b| a.title.cmp(&b.title));
 
+    // ========== 写入 songs 表 + 合并用户修正数据 ==========
+    // 设计原则:
+    //   - 新歌曲: 插入文件解析的元数据 (INSERT OR IGNORE)
+    //   - 已有歌曲: 只更新 file_path / duration / cover_path 等原始属性
+    //              绝不覆盖 title / artist / album (用户可能手动修正过)
+    //   - 最终返回给前端的数据: 以数据库为准 (包含用户修正)
+    // 失败仅打印警告，不阻断扫描结果返回
+    let mut merged_songs = songs.clone();
+    {
+        let songs_for_db = songs.clone();
+        let now = db::now_ms();
+        let app_clone = app.clone();
+
+        // 同步写入数据库并读取合并结果
+        match db::run_db(&app_clone, move |conn| {
+            let tx = conn
+                .transaction()
+                .map_err(|e| format!("开启事务失败: {}", e))?;
+
+            let mut hashes: Vec<String> = Vec::new();
+
+            for song in &songs_for_db {
+                let hash = match &song.content_hash {
+                    Some(h) => h.clone(),
+                    None => continue,
+                };
+                hashes.push(hash.clone());
+
+                // 先尝试插入 (新歌曲)
+                let inserted = tx.execute(
+                    "INSERT OR IGNORE INTO songs 
+                        (song_hash, song_path, title, artist, album, duration, cover_path, source, created_at, updated_at)
+                     VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
+                    rusqlite::params![
+                        hash,
+                        song.file_path,
+                        song.title,
+                        song.artist,
+                        song.album,
+                        song.duration as i64,
+                        song.cover_path.clone().unwrap_or_default(),
+                        "scan",
+                        now,
+                        now,
+                    ],
+                )
+                .map_err(|e| format!("插入 song 失败: {}", e))?;
+
+                // 如果歌曲已存在 (inserted == 0), 只更新原始属性, 不碰 title/artist/album
+                if inserted == 0 {
+                    tx.execute(
+                        "UPDATE songs SET 
+                            song_path = ?1,
+                            duration = ?2,
+                            cover_path = CASE WHEN ?3 != '' THEN ?3 ELSE cover_path END,
+                            updated_at = ?4
+                         WHERE song_hash = ?5",
+                        rusqlite::params![
+                            song.file_path,
+                            song.duration as i64,
+                            song.cover_path.clone().unwrap_or_default(),
+                            now,
+                            hash,
+                        ],
+                    )
+                    .map_err(|e| format!("更新 song 原始属性失败: {}", e))?;
+                }
+            }
+
+            // 从数据库读取所有扫描到的歌曲 (包含用户修正)
+            let placeholders = hashes
+                .iter()
+                .map(|_| "?")
+                .collect::<Vec<_>>()
+                .join(",");
+            let query = format!(
+                "SELECT song_hash, song_path, title, artist, album, duration, cover_path 
+                 FROM songs 
+                 WHERE song_hash IN ({})
+                 ORDER BY title ASC",
+                placeholders
+            );
+
+            let db_songs = {
+                let mut stmt = tx
+                    .prepare(&query)
+                    .map_err(|e| format!("查询 songs 失败: {}", e))?;
+
+                let mut params: Vec<&dyn rusqlite::ToSql> = Vec::new();
+                for h in &hashes {
+                    params.push(h);
+                }
+
+                let mut rows = stmt
+                    .query(rusqlite::params_from_iter(params))
+                    .map_err(|e| format!("查询 songs 失败: {}", e))?;
+
+                let mut result = Vec::new();
+                while let Some(row) = rows
+                    .next()
+                    .map_err(|e| format!("读取行失败: {}", e))?
+                {
+                    result.push((
+                        row.get::<_, String>(0).map_err(|e| format!("读取 song_hash 失败: {}", e))?,
+                        row.get::<_, String>(1).map_err(|e| format!("读取 song_path 失败: {}", e))?,
+                        row.get::<_, String>(2).map_err(|e| format!("读取 title 失败: {}", e))?,
+                        row.get::<_, String>(3).map_err(|e| format!("读取 artist 失败: {}", e))?,
+                        row.get::<_, String>(4).map_err(|e| format!("读取 album 失败: {}", e))?,
+                        row.get::<_, i64>(5).map_err(|e| format!("读取 duration 失败: {}", e))?,
+                        row.get::<_, String>(6).map_err(|e| format!("读取 cover_path 失败: {}", e))?,
+                    ));
+                }
+                result
+            };
+
+            tx.commit()
+                .map_err(|e| format!("提交事务失败: {}", e))?;
+
+            Ok(db_songs)
+        })
+        .await
+        {
+            Ok(db_songs) => {
+
+                // 用数据库中的数据 (含用户修正) 合并到返回结果
+                use std::collections::HashMap;
+                let db_map: HashMap<String, (String, String, String, String, i64, String)> = db_songs
+                    .into_iter()
+                    .map(|(hash, path, title, artist, album, dur, cover)| {
+                        (hash, (path, title, artist, album, dur, cover))
+                    })
+                    .collect();
+
+                for song in &mut merged_songs {
+                    if let Some(ref hash) = song.content_hash {
+                        if let Some((_, title, artist, album, _, cover)) = db_map.get(hash) {
+                            song.title = title.clone();
+                            song.artist = artist.clone();
+                            song.album = album.clone();
+                            if !cover.is_empty() {
+                                song.cover_path = Some(cover.clone());
+                                song.cover_thumb_path = Some(cover.clone());
+                            }
+                        }
+                    }
+                }
+
+                // 重新排序 (用户修正的 title 可能改变了排序)
+                merged_songs.sort_by(|a, b| a.title.cmp(&b.title));
+            }
+            Err(e) => {
+                eprintln!("[scan] 同步 songs 表失败: {}", e);
+            }
+        }
+    }
+
     // ========== 阶段 2: 后台异步补全封面 + 缩略图 ==========
     // 文件名模式下也可能有同级封面图片，所以也需要阶段2
     let app_handle = app.clone();
-    let songs_arc = Arc::new(songs.clone());
+    let songs_arc = Arc::new(merged_songs.clone());
     std::thread::spawn(move || {
         enrich_covers_async(app_handle, audio_files, songs_arc, force, use_filename_only);
     });
 
-    Ok(songs)
+    Ok(merged_songs)
 }
 
 /// 阶段 1 解析: 快速返回基础元数据
@@ -235,7 +392,7 @@ fn parse_audio_file_phase1(
 
 /// 阶段 2 后台异步: 补全封面 + 缩略图
 /// - 内嵌封面提取 + 缩略图生成
-/// - 每完成一首 emit 一次增量事件
+/// - 每完成一首 emit 一次增量事件 + 更新 songs 表
 fn enrich_covers_async(
     app: AppHandle,
     audio_files: Vec<std::path::PathBuf>,
@@ -244,6 +401,10 @@ fn enrich_covers_async(
     use_filename_only: bool,
 ) {
     let total = audio_files.len();
+    let now = db::now_ms();
+
+    // 获取数据库连接 (后台线程同步操作)
+    let conn = db::get_conn().ok().and_then(|m| m.lock().ok());
 
     for (idx, file_path) in audio_files.iter().enumerate() {
         let file_path_str = match file_path.to_str() {
@@ -284,6 +445,16 @@ fn enrich_covers_async(
                 (cover_path, cover_thumb_path)
             }
         };
+
+        // 更新 songs 表的 cover_path
+        if let Some(ref conn) = conn {
+            if let Some(ref cp) = cover_path {
+                let _ = conn.execute(
+                    "UPDATE songs SET cover_path = ?1, updated_at = ?2 WHERE song_path = ?3",
+                    rusqlite::params![cp, now, file_path_str],
+                );
+            }
+        }
 
         // emit 增量更新
         let _ = app.emit(

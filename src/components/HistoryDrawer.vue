@@ -9,7 +9,6 @@ import ChevronLeftIcon from '@/components/icons/ChevronLeftIcon.vue'
 import TrashIcon from '@/components/icons/TrashIcon.vue'
 // 阶段 2.1: 虚拟列表
 import VirtualSongList from '@/components/VirtualSongList.vue'
-import ScrollingText from '@/components/ScrollingText.vue'
 import type { PlayHistoryItem } from '@/types/song'
 import { computed } from 'vue'
 
@@ -117,16 +116,12 @@ function onCoverError(e: Event) {
 
               <!-- 歌曲信息 -->
               <div class="flex-1 min-w-0">
-                <ScrollingText
-                  :text="(song as PlayHistoryItem).title"
-                  text-class="text-sm font-medium text-gray-900 dark:text-white"
-                  :duration="8"
-                />
-                <ScrollingText
-                  :text="(song as PlayHistoryItem).artist"
-                  text-class="text-xs text-gray-600 dark:text-gray-300"
-                  :duration="10"
-                />
+                <p class="text-sm font-medium text-gray-900 dark:text-white truncate">
+                  {{ (song as PlayHistoryItem).title }}
+                </p>
+                <p class="text-xs text-gray-600 dark:text-gray-300 truncate">
+                  {{ (song as PlayHistoryItem).artist }}
+                </p>
                 <div class="flex items-center gap-2 mt-0.5">
                   <span class="text-xs text-gray-500 dark:text-gray-400">{{ formatDate((song as PlayHistoryItem).playedAt) }}</span>
                   <span class="text-xs" :class="(song as PlayHistoryItem).completed ? 'text-green-500 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'">
@@ -171,16 +166,12 @@ function onCoverError(e: Event) {
 
             <!-- 歌曲信息 -->
             <div class="flex-1 min-w-0">
-              <ScrollingText
-                :text="item.title"
-                text-class="text-sm font-medium text-gray-900 dark:text-white"
-                :duration="8"
-              />
-              <ScrollingText
-                :text="item.artist"
-                text-class="text-xs text-gray-600 dark:text-gray-300"
-                :duration="10"
-              />
+              <p class="text-sm font-medium text-gray-900 dark:text-white truncate">
+                {{ item.title }}
+              </p>
+              <p class="text-xs text-gray-600 dark:text-gray-300 truncate">
+                {{ item.artist }}
+              </p>
               <div class="flex items-center gap-2 mt-0.5">
                 <span class="text-xs text-gray-500 dark:text-gray-400">{{ formatDate(item.playedAt) }}</span>
                 <span class="text-xs" :class="item.completed ? 'text-green-500 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'">

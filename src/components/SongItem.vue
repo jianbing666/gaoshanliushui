@@ -5,7 +5,6 @@ import { useAudioStore } from '@/stores/audioStore'
 import { formatTime } from '@/utils/formatTime'
 import type { Song } from '@/types/song'
 import { computed } from 'vue'
-import ScrollingText from '@/components/ScrollingText.vue'
 
 const library = useLibraryStore()
 const ui = useUIStore()
@@ -49,10 +48,9 @@ function onCoverError(e: Event) {
     阶段 2 阶段 2.x 优化: 避免 compact 等无关 prop 变化触发整个列表 diff (5000 首歌场景收益显著)
   -->
   <div
-    v-memo="[isCurrentSong, audio.isPlaying, !!song.cover_path, song.duration]"
     class="flex items-center gap-3 px-3 rounded-lg cursor-pointer transition-colors hover:bg-gray-100/50 dark:hover:bg-white/10 group"
     :class="[
-      compact ? 'py-1.5' : 'py-2',
+      compact ? 'h-9' : 'h-14',
       isCurrentSong ? 'bg-gray-100/50 dark:bg-white/10' : '',
     ]"
     @click="emit('play', index)"
@@ -90,20 +88,21 @@ function onCoverError(e: Event) {
     </div>
 
     <div class="flex-1 min-w-0 h-10 flex flex-col justify-center gap-0.5">
-      <ScrollingText
-        :text="song.title"
-        :text-class="[
+      <p
+        :class="[
           compact ? 'text-xs' : 'text-sm',
           isCurrentSong ? 'text-blue-500 dark:text-blue-400' : 'text-gray-900 dark:text-white'
-        ].join(' ')"
-        :duration="8"
-      />
-      <ScrollingText
+        ]"
+        class="truncate font-medium"
+      >
+        {{ song.title }}
+      </p>
+      <p
         v-if="!compact"
-        :text="song.artist || '未知艺术家'"
-        text-class="text-xs text-gray-600 dark:text-gray-400"
-        :duration="10"
-      />
+        class="text-xs text-gray-600 dark:text-gray-400 truncate"
+      >
+        {{ song.artist || '未知艺术家' }}
+      </p>
     </div>
 
     <span v-if="!compact" class="text-xs text-gray-500 dark:text-gray-500 shrink-0">

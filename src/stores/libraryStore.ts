@@ -3,16 +3,14 @@ import { ref, computed, watch, shallowRef } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
-import type { Song, Playlist } from '@/types/song'
+import type { Song, Playlist, PlaylistRecord, PlaylistSong } from '@/types/song'
 import {
   loadSettings,
   saveSettings,
   loadPlaylists,
-  savePlaylists,
   getMusicLibraryPath,
   setMusicLibraryPath,
   clearMusicLibraryPath,
-  generateId,
 } from '@/utils/storage'
 import { useSettingsStore } from './settingsStore'
 
@@ -55,11 +53,26 @@ export const useLibraryStore = defineStore('library', () => {
   const metadataSource = ref<'auto' | 'filename'>((saved.metadataSource as 'auto' | 'filename') ?? 'auto')
 
   // ========== 歌单分组管理 ==========
-  const playlists = ref<Playlist[]>(loadPlaylists())
-  const activePlaylistId = ref<string>('all-songs')
+  const playlists = ref<Playlist[]>([])
+  const activePlaylistId = ref<string>('1')
+  const playlistsLoaded = ref(false)
+  const playlistSongCache = new Map<string, PlaylistSong[]>()
+
+  // song.id -> content_hash 映射
+  const idToHashMap = computed(() => {
+    const map = new Map<string, string>()
+    for (const song of playlist.value) {
+      if (song.content_hash) {
+        map.set(song.id, song.content_hash)
+      }
+    }
+    return map
+  })
 
   // ========== 搜索 ==========
   const searchQuery = ref('')
+  const activeSongsLoading = ref(false)
+  const activePlaylistSongList = shallowRef<Song[]>([])
 
   // ========== 计算属性 ==========
   const currentSong = computed(() =>
@@ -85,10 +98,39 @@ export const useLibraryStore = defineStore('library', () => {
   const activePlaylistSongs = computed(() => {
     const active = playlists.value.find((p) => p.id === activePlaylistId.value)
     if (!active) return []
-    return active.songIds
-      .map((id) => findSongById(id))
-      .filter((s): s is Song => s !== undefined)
+    if (active.type === 'default') {
+      return playlist.value
+    }
+    // 自定义歌单: 返回已加载的歌曲列表
+    return activePlaylistSongList.value
   })
+
+  // 加载当前歌单的歌曲
+  async function loadActivePlaylistSongs() {
+    const active = playlists.value.find((p) => p.id === activePlaylistId.value)
+    if (!active) return
+
+    if (active.type === 'default') {
+      activePlaylistSongList.value = playlist.value
+      return
+    }
+
+    activeSongsLoading.value = true
+    try {
+      const plSongs = await loadPlaylistSongs(activePlaylistId.value)
+      // 通过 song_hash 映射到完整的 Song 对象
+      const songs: Song[] = []
+      for (const ps of plSongs) {
+        const song = playlist.value.find((s) => s.content_hash === ps.song_hash)
+        if (song) {
+          songs.push(song)
+        }
+      }
+      activePlaylistSongList.value = songs
+    } finally {
+      activeSongsLoading.value = false
+    }
+  }
 
   const filteredActivePlaylistSongs = computed(() => {
     const query = searchQuery.value.trim().toLowerCase()
@@ -131,32 +173,159 @@ export const useLibraryStore = defineStore('library', () => {
   }
 
   // ========== 歌单管理 ==========
-  function createPlaylist(name: string): Playlist {
-    const newPlaylist: Playlist = {
-      id: generateId('playlist'),
-      name,
-      type: 'custom',
-      songIds: [],
-      expanded: true,
+  // 从后端加载歌单列表
+  async function loadPlaylistsFromDb() {
+    try {
+      const records = await invoke<PlaylistRecord[]>('get_all_playlists')
+      const result: Playlist[] = records.map((r) => ({
+        id: String(r.id),
+        name: r.name,
+        type: r.is_default ? 'default' : 'custom',
+        songIds: [],
+        expanded: r.is_default ? true : false,
+      }))
+      playlists.value = result
+      playlistsLoaded.value = true
+
+      // 如果只有默认歌单, 尝试从 localStorage 迁移
+      const customPlaylists = result.filter((p) => p.type === 'custom')
+      if (customPlaylists.length === 0) {
+        await migrateLocalPlaylists()
+      }
+    } catch (error) {
+      console.warn('从数据库加载歌单失败, 使用空列表:', error)
+      playlists.value = [
+        {
+          id: 'all-songs',
+          name: '全部歌曲',
+          type: 'default',
+          songIds: [],
+          expanded: true,
+        },
+      ]
+      playlistsLoaded.value = true
     }
-    playlists.value.push(newPlaylist)
-    return newPlaylist
   }
 
-  function deletePlaylist(playlistId: string) {
+  // 从 localStorage 迁移自定义歌单到 SQLite
+  async function migrateLocalPlaylists() {
+    try {
+      const localPls = loadPlaylists()
+      const customPls = localPls.filter((p) => p.type === 'custom')
+      if (customPls.length === 0) return
+
+      console.log(`[playlist] 发现 ${customPls.length} 个本地歌单，开始迁移...`)
+
+      for (const pl of customPls) {
+        // 根据 songIds 找到对应的 file_path
+        const songPaths: string[] = []
+        for (const songId of pl.songIds) {
+          const song = playlist.value.find((s) => s.id === songId)
+          if (song) {
+            songPaths.push(song.file_path)
+          }
+        }
+
+        if (songPaths.length > 0) {
+          const newId = await invoke<number>('import_playlist_from_paths', {
+            name: pl.name,
+            songPaths,
+          })
+          console.log(`[playlist] 歌单"${pl.name}"迁移完成，新 id: ${newId}`)
+        }
+      }
+
+      // 重新加载歌单列表
+      await loadPlaylistsFromDb()
+    } catch (error) {
+      console.warn('迁移本地歌单失败:', error)
+    }
+  }
+
+  // 加载指定歌单的歌曲
+  async function loadPlaylistSongs(playlistId: string): Promise<PlaylistSong[]> {
+    const cached = playlistSongCache.get(playlistId)
+    if (cached) return cached
+
+    try {
+      const id = parseInt(playlistId, 10)
+      if (isNaN(id)) return []
+
+      const songs = await invoke<PlaylistSong[]>('get_playlist_songs', {
+        playlistId: id,
+      })
+      playlistSongCache.set(playlistId, songs)
+      return songs
+    } catch (error) {
+      console.warn('加载歌单歌曲失败:', error)
+      return []
+    }
+  }
+
+  // 刷新歌单歌曲缓存
+  function invalidatePlaylistCache(playlistId?: string) {
+    if (playlistId) {
+      playlistSongCache.delete(playlistId)
+    } else {
+      playlistSongCache.clear()
+    }
+  }
+
+  async function createPlaylist(name: string): Promise<Playlist> {
+    try {
+      const id = await invoke<number>('create_playlist', {
+        name,
+        description: '',
+      })
+      const newPlaylist: Playlist = {
+        id: String(id),
+        name,
+        type: 'custom',
+        songIds: [],
+        expanded: true,
+      }
+      playlists.value.push(newPlaylist)
+      return newPlaylist
+    } catch (error) {
+      console.error('创建歌单失败:', error)
+      throw error
+    }
+  }
+
+  async function deletePlaylist(playlistId: string) {
     const idx = playlists.value.findIndex((p) => p.id === playlistId)
-    if (idx !== -1 && playlists.value[idx].type === 'custom') {
+    if (idx === -1) return
+    if (playlists.value[idx].type !== 'custom') return
+
+    try {
+      const id = parseInt(playlistId, 10)
+      if (!isNaN(id)) {
+        await invoke('delete_playlist', { id })
+      }
       if (activePlaylistId.value === playlistId) {
-        activePlaylistId.value = 'all-songs'
+        activePlaylistId.value = '1'
       }
       playlists.value.splice(idx, 1)
+      invalidatePlaylistCache(playlistId)
+    } catch (error) {
+      console.error('删除歌单失败:', error)
+      throw error
     }
   }
 
-  function renamePlaylist(playlistId: string, newName: string) {
+  async function renamePlaylist(playlistId: string, newName: string) {
     const pl = playlists.value.find((p) => p.id === playlistId)
-    if (pl && pl.type === 'custom') {
+    if (!pl || pl.type !== 'custom') return
+
+    try {
+      const id = parseInt(playlistId, 10)
+      if (!isNaN(id)) {
+        await invoke('rename_playlist', { id, newName })
+      }
       pl.name = newName
+    } catch (error) {
+      console.error('重命名歌单失败:', error)
+      throw error
     }
   }
 
@@ -169,51 +338,107 @@ export const useLibraryStore = defineStore('library', () => {
 
   function selectPlaylist(playlistId: string) {
     activePlaylistId.value = playlistId
+    // 切换歌单时，加载该歌单的歌曲
+    void loadActivePlaylistSongs()
   }
 
-  function addSongToPlaylist(songId: string, playlistId: string): boolean {
+  async function addSongToPlaylist(songId: string, playlistId: string): Promise<boolean> {
     const pl = playlists.value.find((p) => p.id === playlistId)
     if (!pl) return false
-    if (!pl.songIds.includes(songId)) {
-      pl.songIds.push(songId)
-      return true
-    }
-    return false
-  }
 
-  function toggleSongInPlaylist(songId: string, playlistId: string): boolean {
-    const pl = playlists.value.find((p) => p.id === playlistId)
-    if (!pl) return false
-    const idx = pl.songIds.indexOf(songId)
-    if (idx === -1) {
-      pl.songIds.push(songId)
+    try {
+      const hash = idToHashMap.value.get(songId)
+      if (!hash) return false
+
+      const id = parseInt(playlistId, 10)
+      if (isNaN(id)) return false
+
+      await invoke('add_song_to_playlist', {
+        playlistId: id,
+        songHash: hash,
+      })
+      invalidatePlaylistCache(playlistId)
       return true
-    } else {
-      pl.songIds.splice(idx, 1)
+    } catch (error) {
+      console.error('添加歌曲到歌单失败:', error)
       return false
     }
   }
 
-  function removeSongFromPlaylist(songId: string, playlistId: string) {
+  async function toggleSongInPlaylist(songId: string, playlistId: string): Promise<boolean> {
     const pl = playlists.value.find((p) => p.id === playlistId)
-    if (pl && pl.type === 'custom') {
-      const idx = pl.songIds.indexOf(songId)
-      if (idx !== -1) {
-        pl.songIds.splice(idx, 1)
+    if (!pl) return false
+
+    try {
+      const hash = idToHashMap.value.get(songId)
+      if (!hash) return false
+
+      const id = parseInt(playlistId, 10)
+      if (isNaN(id)) return false
+
+      // 先检查是否已在歌单中
+      const songs = await loadPlaylistSongs(playlistId)
+      const exists = songs.some((s) => s.song_hash === hash)
+
+      if (exists) {
+        await invoke('remove_song_from_playlist', {
+          playlistId: id,
+          songHash: hash,
+        })
+        invalidatePlaylistCache(playlistId)
+        return false
+      } else {
+        await invoke('add_song_to_playlist', {
+          playlistId: id,
+          songHash: hash,
+        })
+        invalidatePlaylistCache(playlistId)
+        return true
       }
+    } catch (error) {
+      console.error('切换歌曲在歌单中的状态失败:', error)
+      return false
     }
   }
 
-  function isSongInPlaylist(songId: string, playlistId: string): boolean {
+  async function removeSongFromPlaylist(songId: string, playlistId: string) {
     const pl = playlists.value.find((p) => p.id === playlistId)
-    return pl ? pl.songIds.includes(songId) : false
+    if (!pl || pl.type !== 'custom') return
+
+    try {
+      const hash = idToHashMap.value.get(songId)
+      if (!hash) return
+
+      const id = parseInt(playlistId, 10)
+      if (isNaN(id)) return
+
+      await invoke('remove_song_from_playlist', {
+        playlistId: id,
+        songHash: hash,
+      })
+      invalidatePlaylistCache(playlistId)
+    } catch (error) {
+      console.error('从歌单移除歌曲失败:', error)
+    }
+  }
+
+  async function isSongInPlaylist(songId: string, playlistId: string): Promise<boolean> {
+    const hash = idToHashMap.value.get(songId)
+    if (!hash) return false
+
+    const songs = await loadPlaylistSongs(playlistId)
+    return songs.some((s) => s.song_hash === hash)
   }
 
   function syncDefaultPlaylist(songs: Song[]) {
+    // 默认歌单就是全部歌曲，不需要单独维护 songIds
+    // 这里只是为了保持接口兼容
     const defaultPl = playlists.value.find((p) => p.type === 'default')
     if (defaultPl) {
       defaultPl.songIds = songs.map((s) => s.id)
     }
+    // 清除歌单歌曲缓存
+    invalidatePlaylistCache()
   }
 
   // ========== 文件夹扫描 ==========
@@ -241,6 +466,9 @@ async function scanMusicFolder(path: string, forceRefresh = false) {
     folderPath.value = path
     setMusicLibraryPath(path)
     syncDefaultPlaylist(songs)
+
+    // 加载当前歌单的歌曲
+    void loadActivePlaylistSongs()
 
     // 下载输出目录默认联动音乐库
     // 仅当用户从未显式设置过 (downloadOutputDir 为空) 时自动同步
@@ -316,6 +544,34 @@ async function scanMusicFolder(path: string, forceRefresh = false) {
     }
   }
 
+  /**
+   * 更新本地缓存中某首歌的元数据 (title/artist/album)
+   * 会同步更新 playlist 和 activePlaylistSongList
+   */
+  function updateSongLocalMetadata(songId: string, updates: { title?: string; artist?: string; album?: string }) {
+    // 更新默认歌单播放列表
+    const idx = playlist.value.findIndex((s) => s.id === songId)
+    if (idx !== -1) {
+      const updated = [...playlist.value]
+      updated[idx] = {
+        ...updated[idx],
+        ...updates,
+      }
+      playlist.value = updated
+    }
+
+    // 更新当前激活的自定义歌单列表
+    const activeIdx = activePlaylistSongList.value.findIndex((s) => s.id === songId)
+    if (activeIdx !== -1) {
+      const updated = [...activePlaylistSongList.value]
+      updated[activeIdx] = {
+        ...updated[activeIdx],
+        ...updates,
+      }
+      activePlaylistSongList.value = updated
+    }
+  }
+
   async function autoLoadMusicLibrary(): Promise<{ success: boolean; error?: string }> {
     const savedPath = getMusicLibraryPath()
     if (!savedPath) {
@@ -324,6 +580,27 @@ async function scanMusicFolder(path: string, forceRefresh = false) {
 
     isLoading.value = true
     try {
+      // 优先从数据库加载（非首次启动，速度快）
+      try {
+        const songsFromDb = await invoke<Song[]>('load_default_playlist_songs')
+        if (songsFromDb && songsFromDb.length > 0) {
+          playlist.value = songsFromDb
+          folderPath.value = savedPath
+          // 加载歌单列表
+          await loadPlaylistsFromDb()
+          // 加载当前歌单的歌曲
+          void loadActivePlaylistSongs()
+          if (songsFromDb.length > 0 && currentIndex.value === -1) {
+            currentIndex.value = 0
+          }
+          return { success: true }
+        }
+      } catch (dbError) {
+        // 数据库加载失败（可能是第一次启动，数据库为空），回退到扫描文件夹
+        console.warn('从数据库加载失败，回退到文件夹扫描:', dbError)
+      }
+
+      // 数据库为空或加载失败，扫描物理文件夹
       const metaSrc = metadataSource.value === 'filename' ? 'filename' : 'auto'
       const songs = await invoke<Song[]>('scan_music_folder', {
         folderPath: savedPath,
@@ -333,6 +610,8 @@ async function scanMusicFolder(path: string, forceRefresh = false) {
       playlist.value = songs
       folderPath.value = savedPath
       syncDefaultPlaylist(songs)
+      // 加载当前歌单的歌曲
+      void loadActivePlaylistSongs()
       if (songs.length > 0 && currentIndex.value === -1) {
         currentIndex.value = 0
       }
@@ -347,21 +626,6 @@ async function scanMusicFolder(path: string, forceRefresh = false) {
       isLoading.value = false
     }
   }
-
-  // ========== 持久化(防抖) ==========
-  let playlistSaveTimer: ReturnType<typeof setTimeout> | null = null
-  watch(
-    playlists,
-    (pls) => {
-      if (playlistSaveTimer) {
-        clearTimeout(playlistSaveTimer)
-      }
-      playlistSaveTimer = setTimeout(() => {
-        savePlaylists(pls)
-      }, 500)
-    },
-    { deep: true, flush: 'post' }
-  )
 
   // 持久化 folderPath / metadataSource (与 settings 一起)
   let settingsSaveTimer: ReturnType<typeof setTimeout> | null = null
@@ -384,6 +648,9 @@ async function scanMusicFolder(path: string, forceRefresh = false) {
     { deep: true, flush: 'post' }
   )
 
+  // 初始化歌单 (异步, 不阻塞 store 创建)
+  void loadPlaylistsFromDb()
+
   return {
     // 歌曲
     playlist,
@@ -396,6 +663,8 @@ async function scanMusicFolder(path: string, forceRefresh = false) {
     playlists,
     activePlaylistId,
     activePlaylistSongs,
+    activeSongsLoading,
+    playlistsLoaded,
     defaultPlaylist,
     customPlaylists,
     filteredCustomPlaylists,
@@ -407,6 +676,9 @@ async function scanMusicFolder(path: string, forceRefresh = false) {
     getAudioUrl,
     getCoverUrl,
     // 歌单方法
+    loadPlaylistsFromDb,
+    loadPlaylistSongs,
+    loadActivePlaylistSongs,
     createPlaylist,
     deletePlaylist,
     renamePlaylist,
@@ -422,5 +694,6 @@ async function scanMusicFolder(path: string, forceRefresh = false) {
     autoLoadMusicLibrary,
     setMetadataSource,
     refreshMetadata,
+    updateSongLocalMetadata,
   }
 })

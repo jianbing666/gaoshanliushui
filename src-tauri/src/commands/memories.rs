@@ -8,23 +8,19 @@
 //   - 同一文件被移动, song_path 会被新路径覆盖 (latest-write-wins)
 //
 // 实现选择:
-//   - 用 rusqlite (同步 SQLite, bundled 静态链接) 而非 tauri-plugin-sql (拉入 sqlx, 编译开销大)
-//   - rusqlite 操作是同步的, 通过 tauri::async_runtime::spawn_blocking 包装避免阻塞 async runtime
+//   - 用 rusqlite (同步 SQLite, bundled 静态链接)
+//   - rusqlite 操作是同步的, 通过 db::run_db 包装避免阻塞 async runtime
 //   - 业务命令保持 async 签名, 与 Tauri 事件循环兼容
 //
 // 失败兜底:
 //   - 数据库初始化/查询失败统一返回 Result<T, String>
 //   - 前端 try/catch 后 console.warn, 不弹错误框打扰用户
 
-use std::path::PathBuf;
-use std::sync::{Mutex, OnceLock};
-
-use rusqlite::{params, Connection, OptionalExtension};
+use rusqlite::{params, OptionalExtension};
 use serde::{Deserialize, Serialize};
-use tauri::{AppHandle, Manager};
+use tauri::AppHandle;
 
-/// 数据库文件名
-const DB_FILE: &str = "memories.db";
+use crate::commands::db;
 
 /// 单条回忆记录 (前后端共享结构)
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -45,53 +41,8 @@ pub struct MemoryRecord {
     pub updated_at: i64,
 }
 
-/// 全局 DB 路径 (懒初始化一次, 后续命令直接复用, 避免重复 IO)
-static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
-
-/// 全局 DB 连接 (Mutex 保护, 跨命令复用同一连接, 避免每次 open_and_init 的 IO)
-/// rusqlite::Connection 是 Send 但非 Sync, 用 Mutex 包装后才能跨线程安全共享
-static DB_CONN: OnceLock<Mutex<Connection>> = OnceLock::new();
-
-/// 获取数据库文件绝对路径
-fn db_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = app
-        .path()
-        .app_data_dir()
-        .map_err(|e| format!("获取 app_data_dir 失败: {}", e))?;
-    if !dir.exists() {
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| format!("创建 app_data_dir 失败: {}", e))?;
-    }
-    Ok(dir.join(DB_FILE))
-}
-
-/// 初始化数据库路径 (OnceLock, 幂等)
-fn ensure_db_path(app: &AppHandle) -> Result<&'static PathBuf, String> {
-    if let Some(p) = DB_PATH.get() {
-        return Ok(p);
-    }
-    let p = db_path(app)?;
-    let _ = DB_PATH.set(p);
-    // 安全: set 失败说明已被其他线程设置, 取回即可
-    Ok(DB_PATH.get().expect("DB_PATH just set"))
-}
-
-/// 获取当前 Unix 毫秒时间戳
-fn now_ms() -> i64 {
-    use std::time::{SystemTime, UNIX_EPOCH};
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|d| d.as_millis() as i64)
-        .unwrap_or(0)
-}
-
-/// 打开数据库连接 + 执行 schema 初始化
-///
-/// bundled SQLite 无需额外配置, 一次建表 (IF NOT EXISTS) 幂等
-fn open_and_init(path: &PathBuf) -> Result<Connection, String> {
-    let conn = Connection::open(path).map_err(|e| format!("打开 SQLite 失败: {}", e))?;
-
-    // 建表 + 索引
+/// 初始化 memories 表 schema (幂等)
+pub fn init_schema(conn: &rusqlite::Connection) -> Result<(), String> {
     conn.execute_batch(
         r#"
         CREATE TABLE IF NOT EXISTS memories (
@@ -106,60 +57,8 @@ fn open_and_init(path: &PathBuf) -> Result<Connection, String> {
         CREATE INDEX IF NOT EXISTS idx_memories_hash ON memories(song_hash);
         "#,
     )
-    .map_err(|e| format!("初始化 schema 失败: {}", e))?;
-
-    // 性能优化: WAL 模式 + 合理同步策略
-    // WAL: 读写并发更好, 写入不阻塞读
-    // synchronous=NORMAL: 折中安全与性能
-    // temp_store=MEMORY: 临时表放内存
-    conn.pragma_update(None, "journal_mode", "WAL").ok();
-    conn.pragma_update(None, "synchronous", "NORMAL").ok();
-    conn.pragma_update(None, "temp_store", "MEMORY").ok();
-
-    Ok(conn)
-}
-
-/// 初始化 SQLite (建表 + 索引, 幂等)
-/// 在 main.rs setup 阶段调用一次, 失败仅打印警告
-/// 同时将打开的连接存入 DB_CONN, 后续命令直接复用, 避免每次 open_and_init 的 IO
-pub fn init_db(app: &AppHandle) -> Result<(), String> {
-    let path = ensure_db_path(app)?.clone();
-    let conn = open_and_init(&path)?;
-    // 尝试存到全局: 失败说明已有连接, 直接丢弃(原连接已可用, 重复 init 是浪费但无害)
-    let _ = DB_CONN.set(Mutex::new(conn));
+    .map_err(|e| format!("初始化 memories schema 失败: {}", e))?;
     Ok(())
-}
-
-/// 取出全局连接 (若未初始化, 懒初始化一次)
-fn get_or_init_conn(app: &AppHandle) -> Result<&'static Mutex<Connection>, String> {
-    if let Some(m) = DB_CONN.get() {
-        return Ok(m);
-    }
-    // 懒初始化: 仅在 init_db 未被调用时触发 (例如测试场景)
-    let path = ensure_db_path(app)?.clone();
-    let conn = open_and_init(&path)?;
-    // set 失败说明被其他线程抢着初始化了, 直接丢弃本地 conn
-    let _ = DB_CONN.set(Mutex::new(conn));
-    Ok(DB_CONN
-        .get()
-        .expect("DB_CONN just initialized by current thread"))
-}
-
-/// 在 spawn_blocking 中执行同步 SQLite 操作
-/// 复用全局连接, 不再每次 open_and_init
-async fn run_db<F, R>(app: &AppHandle, f: F) -> Result<R, String>
-where
-    F: FnOnce(&Connection) -> Result<R, String> + Send + 'static,
-    R: Send + 'static,
-{
-    let mutex = get_or_init_conn(app)?;
-    let mutex = mutex; // 'static 引用
-    tauri::async_runtime::spawn_blocking(move || {
-        let guard = mutex.lock().map_err(|e| format!("DB 锁失败: {}", e))?;
-        f(&guard)
-    })
-    .await
-    .map_err(|e| format!("spawn_blocking 失败: {}", e))?
 }
 
 /// 查询单条回忆
@@ -168,7 +67,7 @@ pub async fn get_memory(
     app: AppHandle,
     song_hash: String,
 ) -> Result<Option<MemoryRecord>, String> {
-    run_db(&app, move |conn| {
+    db::run_db(&app, move |conn| {
         let result = conn
             .query_row(
                 "SELECT id, song_hash, song_path, short_tags, long_text, created_at, updated_at
@@ -202,15 +101,12 @@ pub async fn save_memory(
     short_tags: Vec<String>,
     long_text: String,
 ) -> Result<MemoryRecord, String> {
-    let now = now_ms();
+    let now = db::now_ms();
     let short_tags_json = serde_json::to_string(&short_tags)
         .map_err(|e| format!("序列化 short_tags 失败: {}", e))?;
 
-    run_db(&app, move |conn| {
+    db::run_db(&app, move |conn| {
         // SQLite UPSERT: 有则更新, 无则插入
-        //   - 插入: created_at = updated_at = now
-        //   - 更新: 保留 created_at, 刷新 updated_at 与 song_path / short_tags / long_text
-        //   - 设计: 即使用户移动文件, song_path 也会被最新路径覆盖
         conn.execute(
             "INSERT INTO memories (song_hash, song_path, short_tags, long_text, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6)
@@ -260,7 +156,7 @@ pub async fn delete_memory(
     app: AppHandle,
     song_hash: String,
 ) -> Result<bool, String> {
-    run_db(&app, move |conn| {
+    db::run_db(&app, move |conn| {
         let affected = conn
             .execute("DELETE FROM memories WHERE song_hash = ?1", params![song_hash])
             .map_err(|e| format!("删除记忆失败: {}", e))?;
@@ -269,11 +165,41 @@ pub async fn delete_memory(
     .await
 }
 
+/// 列出所有回忆 (时间轴视图用)
+#[tauri::command]
+pub async fn list_all_memories(app: AppHandle) -> Result<Vec<MemoryRecord>, String> {
+    db::run_db(&app, |conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, song_hash, song_path, short_tags, long_text, created_at, updated_at
+                 FROM memories ORDER BY updated_at DESC",
+            )
+            .map_err(|e| format!("准备查询失败: {}", e))?;
+
+        let records = stmt
+            .query_map([], |row| {
+                Ok(MemoryRecord {
+                    id: row.get(0)?,
+                    song_hash: row.get(1)?,
+                    song_path: row.get(2)?,
+                    short_tags: row.get(3)?,
+                    long_text: row.get(4)?,
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                })
+            })
+            .map_err(|e| format!("查询所有记忆失败: {}", e))?;
+
+        let mut result = Vec::new();
+        for record in records {
+            result.push(record.map_err(|e| format!("遍历记录失败: {}", e))?);
+        }
+        Ok(result)
+    })
+    .await
+}
+
 /// 导出备注到指定目录 (生成 <歌名>.memo.json)
-///
-/// BUG 6: 新增可选 output_dir 参数
-///   - 传入 Some: 导出到指定目录
-///   - 传入 None: 导出到歌曲所在目录(原有行为)
 ///
 /// 设计原则:
 ///   - 仅在用户主动触发时执行, 不会静默生成
@@ -287,8 +213,8 @@ pub async fn export_memory(
     song_artist: String,
     output_dir: Option<String>,
 ) -> Result<String, String> {
-    // 1. 查询记录 (数据库 IO, 走 spawn_blocking)
-    let record: Option<MemoryRecord> = run_db(&app, move |conn| {
+    // 1. 查询记录
+    let record: Option<MemoryRecord> = db::run_db(&app, move |conn| {
         conn.query_row(
             "SELECT id, song_hash, song_path, short_tags, long_text, created_at, updated_at
              FROM memories WHERE song_hash = ?1",
@@ -312,7 +238,7 @@ pub async fn export_memory(
 
     let record = record.ok_or_else(|| "该歌曲暂无记忆, 无可导出内容".to_string())?;
 
-    // 2. 文件名安全处理: 去除 / \ : * ? " < > |
+    // 2. 文件名安全处理
     let safe_title: String = song_title
         .chars()
         .map(|c| match c {
@@ -331,7 +257,6 @@ pub async fn export_memory(
     let tags: Vec<String> = serde_json::from_str(&record.short_tags).unwrap_or_default();
 
     // 4. 构造输出路径
-    // BUG 6: 优先使用 output_dir, 否则用歌曲所在目录
     let song_path_buf = std::path::PathBuf::from(&record.song_path);
     let parent_dir = song_path_buf
         .parent()
@@ -339,7 +264,6 @@ pub async fn export_memory(
 
     let target_dir = if let Some(dir) = output_dir {
         let dir_path = std::path::PathBuf::from(&dir);
-        // 确保目录存在
         if !dir_path.exists() {
             std::fs::create_dir_all(&dir_path)
                 .map_err(|e| format!("创建导出目录失败: {}", e))?;

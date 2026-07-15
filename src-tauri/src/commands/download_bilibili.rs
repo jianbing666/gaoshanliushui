@@ -18,6 +18,9 @@ use tauri::{AppHandle, Emitter};
 use tauri_plugin_shell::ShellExt;
 use tokio::io::AsyncWriteExt;
 
+use crate::commands::db;
+use crate::commands::song_hash::compute_content_hash;
+
 /// 读取批量下载文档 (.md / .txt)
 /// 返回 UTF-8 解码后的文件内容, 由前端负责解析为条目。
 /// 限定扩展名: .md / .txt / .markdown (防止用户误选二进制文件)
@@ -457,8 +460,136 @@ pub async fn download_bilibili_music(
         .await;
     }
 
+    // 7. 写入数据库（后台异步，不阻塞下载流程）
+    let app_clone = app.clone();
+    let mp3_path_clone = mp3_path.clone();
+    let cover_path_clone = cover_path.clone();
+    let final_singer_clone = final_singer.clone();
+    let final_song_clone = final_song.clone();
+    let video_duration_secs = info
+        .get("duration")
+        .and_then(|v| v.as_u64())
+        .unwrap_or(0) as i64;
+
+    tokio::spawn(async move {
+        let _ = save_downloaded_song_to_db(
+            &app_clone,
+            &mp3_path_clone,
+            &cover_path_clone,
+            &final_song_clone,
+            &final_singer_clone,
+            video_duration_secs,
+        )
+        .await;
+    });
+
     emit_progress("done", "下载完成", 100);
     Ok(mp3_path.to_string_lossy().to_string())
+}
+
+/// 将下载完成的歌曲写入 SQLite 数据库和默认歌单
+async fn save_downloaded_song_to_db(
+    app: &AppHandle,
+    mp3_path: &Path,
+    cover_path: &Path,
+    title: &str,
+    artist: &str,
+    duration_secs: i64,
+) -> Result<(), String> {
+    // 计算内容哈希
+    let song_hash = compute_content_hash(mp3_path)
+        .ok_or_else(|| "计算 content_hash 失败".to_string())?;
+
+    let song_path_str = mp3_path.to_string_lossy().to_string();
+    let cover_path_str = if cover_path.exists() {
+        cover_path.to_string_lossy().to_string()
+    } else {
+        String::new()
+    };
+    let title_str = title.to_string();
+    let artist_str = artist.to_string();
+    let now = db::now_ms();
+
+    db::run_db(app, move |conn| {
+        // 1. 写入 songs 表（INSERT OR IGNORE，已存在则不覆盖用户修改的元数据）
+        conn.execute(
+            "INSERT OR IGNORE INTO songs
+                (song_hash, song_path, title, artist, album, duration, cover_path, source, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, '', ?5, ?6, 'bilibili_download', ?7, ?7)",
+            rusqlite::params![
+                song_hash,
+                song_path_str,
+                title_str,
+                artist_str,
+                duration_secs,
+                cover_path_str,
+                now,
+            ],
+        )
+        .map_err(|e| format!("写入 songs 表失败: {}", e))?;
+
+        // 如果歌曲已存在，只更新文件路径、封面、时长等原始属性，保留用户编辑的元数据
+        let changes = conn.changes();
+        if changes == 0 {
+            conn.execute(
+                "UPDATE songs SET 
+                    song_path = ?1,
+                    duration = ?2,
+                    cover_path = CASE WHEN ?3 != '' THEN ?3 ELSE cover_path END,
+                    updated_at = ?4
+                 WHERE song_hash = ?5",
+                rusqlite::params![
+                    song_path_str,
+                    duration_secs,
+                    cover_path_str,
+                    now,
+                    song_hash,
+                ],
+            )
+            .map_err(|e| format!("更新 songs 表失败: {}", e))?;
+        }
+
+        // 2. 确保默认歌单存在
+        let default_id: i64 = conn
+            .query_row(
+                "SELECT id FROM playlists WHERE is_default = 1 LIMIT 1",
+                [],
+                |row| row.get(0),
+            )
+            .unwrap_or_else(|_| {
+                // 默认歌单不存在则创建
+                conn
+                    .execute(
+                        "INSERT INTO playlists (name, is_default, sort_order, created_at, updated_at)
+                         VALUES ('全部歌曲', 1, 0, ?1, ?1)",
+                        rusqlite::params![now],
+                    )
+                    .ok();
+                conn.last_insert_rowid()
+            });
+
+        // 3. 添加到默认歌单（INSERT OR IGNORE，幂等）
+        // 计算 position: 当前最大 position + 1
+        let max_pos: i64 = conn
+            .query_row(
+                "SELECT COALESCE(MAX(position), -1) FROM playlist_songs WHERE playlist_id = ?1",
+                rusqlite::params![default_id],
+                |row| row.get(0),
+            )
+            .unwrap_or(-1);
+
+        conn.execute(
+            "INSERT OR IGNORE INTO playlist_songs (playlist_id, song_hash, position, added_at)
+             VALUES (?1, ?2, ?3, ?4)",
+            rusqlite::params![default_id, song_hash, max_pos + 1, now],
+        )
+        .map_err(|e| format!("添加到默认歌单失败: {}", e))?;
+
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
 }
 
 /// 流式下载到文件（带 Range 断点续传支持）

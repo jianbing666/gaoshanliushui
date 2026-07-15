@@ -18,6 +18,7 @@ import ChevronLeftIcon from '@/components/icons/ChevronLeftIcon.vue'
 import TrashIcon from '@/components/icons/TrashIcon.vue'
 import DownloadIcon from '@/components/icons/DownloadIcon.vue'
 import FolderIcon from '@/components/icons/FolderIcon.vue'
+import PencilIcon from '@/components/icons/PencilIcon.vue'
 
 const memory = useMemoryStore()
 const ui = useUIStore()
@@ -179,6 +180,14 @@ function onTextareaBlur() {
 onBeforeUnmount(() => {
   void memory.flushLongText()
 })
+
+// ========== 编辑元数据 ==========
+const songTitleRef = ref<HTMLElement | null>(null)
+function handleEditMetadata() {
+  if (!library.currentSong || !songTitleRef.value) return
+  const rect = songTitleRef.value.getBoundingClientRect()
+  ui.openEditMetadata(library.currentSong, rect.left, rect.bottom + 4)
+}
 </script>
 
 <template>
@@ -192,13 +201,27 @@ onBeforeUnmount(() => {
   >
     <!-- 头部: 歌曲名 + 关闭按钮 -->
     <div class="px-5 py-4 border-b border-gray-200/50 dark:border-gray-700/50 flex items-center justify-between gap-2 min-w-0">
-      <div class="min-w-0 flex-1">
-        <h2 class="text-gray-900 dark:text-white text-base font-semibold truncate" :title="library.currentSong?.title || ''">
-          {{ library.currentSong?.title || '请先选择歌曲' }}
-        </h2>
-        <p class="text-gray-500 dark:text-gray-400 text-xs truncate">
-          {{ library.currentSong?.artist || '未播放' }}
-        </p>
+      <div class="min-w-0 flex-1 flex items-center gap-2">
+        <div class="min-w-0 flex-1">
+          <h2 
+            ref="songTitleRef"
+            class="text-gray-900 dark:text-white text-base font-semibold truncate" 
+            :title="library.currentSong?.title || ''"
+          >
+            {{ library.currentSong?.title || '请先选择歌曲' }}
+          </h2>
+          <p class="text-gray-500 dark:text-gray-400 text-xs truncate">
+            {{ library.currentSong?.artist || '未播放' }}
+          </p>
+        </div>
+        <button
+          v-if="library.currentSong"
+          class="p-1 rounded-md hover:bg-gray-200/60 dark:hover:bg-gray-700/60 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors shrink-0"
+          title="编辑歌曲元数据"
+          @click="handleEditMetadata"
+        >
+          <PencilIcon :size="15" />
+        </button>
       </div>
       <button
         class="p-1.5 rounded-md hover:bg-gray-200/60 dark:hover:bg-gray-700/60 text-gray-500 dark:text-gray-400 hover:text-gray-800 dark:hover:text-white transition-colors shrink-0"

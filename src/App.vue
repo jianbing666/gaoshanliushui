@@ -35,6 +35,7 @@ const StatsPanel = markRaw(defineAsyncComponent(() => import('@/components/Stats
 const DownloadPanel = markRaw(defineAsyncComponent(() => import('@/components/DownloadPanel.vue')))
 const MemoryDrawer = markRaw(defineAsyncComponent(() => import('@/components/MemoryDrawer.vue')))
 const CreatePlaylistModal = markRaw(defineAsyncComponent(() => import('@/components/CreatePlaylistModal.vue')))
+const EditSongMetadata = markRaw(defineAsyncComponent(() => import('@/components/EditSongMetadata.vue')))
 
 const audio = useAudioStore()
 const library = useLibraryStore()
@@ -487,6 +488,16 @@ onUnmounted(() => {
 
     <!-- 创建歌单弹窗 -->
     <CreatePlaylistModal v-if="!ui.isMiniMode" />
+
+    <!-- 编辑歌曲元数据浮窗 -->
+    <EditSongMetadata
+      v-if="!ui.isMiniMode && ui.editMetadata.song"
+      :song="ui.editMetadata.song"
+      :visible="ui.editMetadata.visible"
+      :x="ui.editMetadata.x"
+      :y="ui.editMetadata.y"
+      @close="ui.closeEditMetadata"
+    />
   </div>
 </template>
 

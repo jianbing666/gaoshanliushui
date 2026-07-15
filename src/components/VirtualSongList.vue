@@ -12,15 +12,15 @@ import type { Song } from '@/types/song'
 const props = withDefaults(
   defineProps<{
     songs: Song[]
-    /** 非 compact 模式行高（默认 60px 适配 SongItem 非 compact 样式 + 双行 ScrollingText） */
+    /** 非 compact 模式行高（默认 56px 适配 SongItem h-14） */
     itemSize?: number
-    /** compact 模式行高（默认 36px 适配 SongItem compact 样式） */
+    /** compact 模式行高（默认 36px 适配 SongItem compact 模式） */
     compactSize?: number
     compact?: boolean
     playlistId?: string | null
   }>(),
   {
-    itemSize: 60,
+    itemSize: 56,
     compactSize: 36,
     compact: false,
     playlistId: null,

@@ -1,14 +1,14 @@
 <script setup lang="ts">
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useAudioStore } from '@/stores/audioStore'
-import type { Playlist } from '@/types/song'
+import type { Playlist, PlaylistSong, Song } from '@/types/song'
 import FolderIcon from '@/components/icons/FolderIcon.vue'
 import ChevronRightIcon from '@/components/icons/ChevronRightIcon.vue'
 import ChevronDownIcon from '@/components/icons/ChevronDownIcon.vue'
 import SongItem from '@/components/SongItem.vue'
 // 阶段 2.1: 虚拟列表
 import VirtualSongList from '@/components/VirtualSongList.vue'
-import { computed } from 'vue'
+import { ref, computed, watch } from 'vue'
 
 const props = defineProps<{
   playlist: Playlist
@@ -16,13 +16,41 @@ const props = defineProps<{
 
 const library = useLibraryStore()
 const audio = useAudioStore()
+const plSongs = ref<Song[]>([])
+const loading = ref(false)
+
+// 展开时加载歌曲
+async function loadSongs() {
+  if (!props.playlist.expanded) return
+  if (plSongs.value.length > 0) return
+
+  loading.value = true
+  try {
+    const songs: PlaylistSong[] = await library.loadPlaylistSongs(props.playlist.id)
+    const result: Song[] = []
+    for (const ps of songs) {
+      const song = library.playlist.find((s) => s.content_hash === ps.song_hash)
+      if (song) {
+        result.push(song)
+      }
+    }
+    plSongs.value = result
+  } finally {
+    loading.value = false
+  }
+}
+
+watch(
+  () => props.playlist.expanded,
+  (expanded) => {
+    if (expanded) {
+      void loadSongs()
+    }
+  }
+)
 
 // 歌单内的歌曲列表
-const songs = computed(() => {
-  return props.playlist.songIds
-    .map((id) => library.findSongById(id))
-    .filter((s) => s !== undefined)
-})
+const songs = computed(() => plSongs.value)
 
 // 阶段 2.1: 长度 > 200 启用虚拟滚动
 const useVirtualList = computed(() => songs.value.length > 200)

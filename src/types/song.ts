@@ -46,7 +46,7 @@ export interface MemoryRecord {
   updated_at: number
 }
 
-/// 歌单数据类型
+/// 歌单数据类型 (旧版, localStorage, 保留用于迁移)
 export interface Playlist {
   /** 歌单唯一标识 */
   id: string
@@ -58,6 +58,32 @@ export interface Playlist {
   songIds: string[]
   /** 是否展开（仅用于 UI 状态） */
   expanded?: boolean
+}
+
+/// 歌单记录 (SQLite 版)
+export interface PlaylistRecord {
+  id: number
+  name: string
+  description: string
+  is_default: boolean
+  sort_order: number
+  created_at: number
+  updated_at: number
+  song_count: number
+  /** UI 状态: 是否展开 */
+  expanded?: boolean
+}
+
+/// 歌单中的歌曲 (带元数据)
+export interface PlaylistSong {
+  song_hash: string
+  song_path: string
+  title: string
+  artist: string
+  duration: number
+  cover_path: string
+  position: number
+  added_at: number
 }
 
 /// 循环模式

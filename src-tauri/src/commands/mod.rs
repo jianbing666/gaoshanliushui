@@ -1,3 +1,4 @@
+pub mod db;
 pub mod scan_folder;
 pub mod toggle_mini_mode;
 pub mod global_shortcut;
@@ -7,4 +8,6 @@ pub mod download_bilibili;
 pub mod webview_memory;
 pub mod song_hash;
 pub mod memories;
+pub mod migrate;
+pub mod playlist;
 pub mod export;

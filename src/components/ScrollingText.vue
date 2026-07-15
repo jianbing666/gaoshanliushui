@@ -4,19 +4,23 @@
  *
  * 当文本宽度超过容器宽度时，横向循环滚动
  * 通过 ResizeObserver 监听尺寸变化，动态判断是否溢出
+ * 根据文本长度动态调整滚动速度（每秒滚动固定像素）
  */
-import { ref, onMounted, onBeforeUnmount, nextTick, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, nextTick, watch, computed } from 'vue'
 
 const props = withDefaults(
   defineProps<{
     text: string
-    /** 滚动周期 (秒) */
+    /** 滚动速度: 每秒滚动的像素数（默认 30px/s） */
+    speed?: number
+    /** 滚动周期 (秒) — 兼容旧版，优先使用 speed */
     duration?: number
     /** 字体 class (e.g. 'text-lg') */
     textClass?: string
   }>(),
   {
-    duration: 10,
+    speed: 30,
+    duration: undefined,
   },
 )
 
@@ -24,17 +28,30 @@ const containerRef = ref<HTMLElement | null>(null)
 const measureRef = ref<HTMLElement | null>(null)
 const isOverflow = ref(false)
 const animKey = ref(0)
+const textWidth = ref(0)
 
 let observer: ResizeObserver | null = null
+
+/** 根据文本宽度和速度计算滚动周期（秒） */
+const computedDuration = computed(() => {
+  // 如果显式传了 duration，优先使用（兼容旧版）
+  if (props.duration !== undefined && props.duration > 0) {
+    return props.duration
+  }
+  if (textWidth.value <= 0 || props.speed <= 0) return 15
+  // 滚动距离是文本宽度的一半（因为有两份重复文本）
+  return Math.max(8, textWidth.value / 2 / props.speed)
+})
 
 async function measure() {
   await nextTick()
   if (!containerRef.value || !measureRef.value) return
 
   const containerWidth = containerRef.value.clientWidth
-  const textWidth = measureRef.value.scrollWidth
+  const w = measureRef.value.scrollWidth
+  textWidth.value = w
 
-  isOverflow.value = textWidth > containerWidth + 1
+  isOverflow.value = w > containerWidth + 1
   animKey.value++
 }
 
@@ -90,7 +107,7 @@ watch(
     >
       <div
         class="flex w-max scrolling-track"
-        :style="{ animationDuration: `${duration}s` }"
+        :style="{ animationDuration: `${computedDuration}s` }"
       >
         <span :class="textClass || 'text-lg'" class="text-gray-600 dark:text-gray-400 pr-12 shrink-0">
           {{ text }}
