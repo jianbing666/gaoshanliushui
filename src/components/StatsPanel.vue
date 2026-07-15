@@ -4,6 +4,7 @@ import { useLibraryStore } from '@/stores/libraryStore'
 import { useUIStore } from '@/stores/uiStore'
 import MusicIcon from '@/components/icons/MusicIcon.vue'
 import ChevronRightIcon from '@/components/icons/ChevronRightIcon.vue'
+import ScrollingText from '@/components/ScrollingText.vue'
 
 const history = useHistoryStore()
 const library = useLibraryStore()
@@ -139,8 +140,16 @@ function onCoverError(e: Event) {
                 </div>
               </div>
               <div class="flex-1 min-w-0">
-                <p class="text-gray-900 dark:text-white text-sm font-medium truncate">{{ history.mostLoopedSong.song.title }}</p>
-                <p class="text-gray-500 dark:text-gray-400 text-xs truncate">{{ history.mostLoopedSong.song.artist || '未知艺术家' }}</p>
+                <ScrollingText
+                  :text="history.mostLoopedSong.song.title"
+                  text-class="text-sm font-medium text-gray-900 dark:text-white"
+                  :duration="8"
+                />
+                <ScrollingText
+                  :text="history.mostLoopedSong.song.artist || '未知艺术家'"
+                  text-class="text-xs text-gray-500 dark:text-gray-400"
+                  :duration="10"
+                />
                 <p class="text-blue-500 dark:text-blue-400 text-xs mt-0.5">播放次数最多 · {{ history.mostLoopedSong.count }} 次</p>
               </div>
             </div>
@@ -164,8 +173,16 @@ function onCoverError(e: Event) {
                 </div>
               </div>
               <div class="flex-1 min-w-0">
-                <p class="text-gray-900 dark:text-white text-sm font-medium truncate">{{ history.longestPlayedSong.song.title }}</p>
-                <p class="text-gray-500 dark:text-gray-400 text-xs truncate">{{ history.longestPlayedSong.song.artist || '未知艺术家' }}</p>
+                <ScrollingText
+                  :text="history.longestPlayedSong.song.title"
+                  text-class="text-sm font-medium text-gray-900 dark:text-white"
+                  :duration="8"
+                />
+                <ScrollingText
+                  :text="history.longestPlayedSong.song.artist || '未知艺术家'"
+                  text-class="text-xs text-gray-500 dark:text-gray-400"
+                  :duration="10"
+                />
                 <p class="text-green-500 dark:text-green-400 text-xs mt-0.5">累计时长最久 · {{ formatDurationShort(history.longestPlayedSong.duration) }}</p>
               </div>
             </div>

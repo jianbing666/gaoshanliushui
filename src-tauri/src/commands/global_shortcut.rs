@@ -144,7 +144,7 @@ pub async fn update_global_shortcut(
 ) -> Result<(), String> {
     let store = app.state::<ShortcutStore>();
     let field = parse_shortcut_id(&shortcut_id);
-    
+
     let old_shortcut = match field {
         "toggle_play" => store.toggle_play.lock().unwrap().clone(),
         "prev_track" => store.prev_track.lock().unwrap().clone(),
@@ -158,8 +158,24 @@ pub async fn update_global_shortcut(
         return Ok(());
     }
 
-    if let Ok(old_sc) = parse_shortcut(&old_shortcut) {
-        let _ = app.global_shortcut().unregister(old_sc);
+    // 注销旧快捷键 (始终尝试, 即使空字符串也跳过 parse 错误)
+    if !old_shortcut.is_empty() {
+        if let Ok(old_sc) = parse_shortcut(&old_shortcut) {
+            let _ = app.global_shortcut().unregister(old_sc);
+        }
+    }
+
+    // v1.1 (2026-07-14): new_shortcut == "" 表示清空禁用该快捷键
+    if new_shortcut.is_empty() {
+        match field {
+            "toggle_play" => *store.toggle_play.lock().unwrap() = String::new(),
+            "prev_track" => *store.prev_track.lock().unwrap() = String::new(),
+            "next_track" => *store.next_track.lock().unwrap() = String::new(),
+            "volume_up" => *store.volume_up.lock().unwrap() = String::new(),
+            "volume_down" => *store.volume_down.lock().unwrap() = String::new(),
+            _ => {}
+        }
+        return Ok(());
     }
 
     let new_sc = parse_shortcut(&new_shortcut)?;

@@ -12,7 +12,7 @@ import type { Song } from '@/types/song'
 const props = withDefaults(
   defineProps<{
     songs: Song[]
-    /** 非 compact 模式行高（默认 50px 适配 SongItem 非 compact 样式） */
+    /** 非 compact 模式行高（默认 60px 适配 SongItem 非 compact 样式 + 双行 ScrollingText） */
     itemSize?: number
     /** compact 模式行高（默认 36px 适配 SongItem compact 样式） */
     compactSize?: number
@@ -20,7 +20,7 @@ const props = withDefaults(
     playlistId?: string | null
   }>(),
   {
-    itemSize: 50,
+    itemSize: 60,
     compactSize: 36,
     compact: false,
     playlistId: null,

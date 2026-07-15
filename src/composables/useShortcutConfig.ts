@@ -165,6 +165,25 @@ export function useShortcutConfig() {
   }
 
   /**
+   * v1.1 (2026-07-14): 清空单个快捷键 (X 按钮)
+   * 把 currentShortcut 设为空字符串, 后端会取消该快捷键的注册
+   */
+  async function clearShortcut(shortcutId: string) {
+    const index = shortcuts.value.findIndex(s => s.id === shortcutId)
+    if (index === -1) return
+    const empty = ''
+    // 通知后端注销快捷键 (newShortcut = '' 表示禁用)
+    try {
+      await invoke('update_global_shortcut', { shortcutId, newShortcut: empty })
+    } catch (err) {
+      console.error('清除全局快捷键失败:', err)
+      // 即使后端失败也更新本地状态, 用户可手动重试
+    }
+    shortcuts.value[index].currentShortcut = empty
+    saveShortcuts()
+  }
+
+  /**
    * 恢复所有默认快捷键
    */
   function resetAllToDefault() {
@@ -212,6 +231,7 @@ export function useShortcutConfig() {
     cancelEdit,
     updateShortcut,
     resetToDefault,
+    clearShortcut,
     resetAllToDefault,
     handleKeyDown,
   }

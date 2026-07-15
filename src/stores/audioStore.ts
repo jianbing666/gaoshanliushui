@@ -77,11 +77,16 @@ export const useAudioStore = defineStore('audio', () => {
   }
 
   // ========== 切歌/播放控制 ==========
+  // BUG 2: 区分「用户手动切歌」(不自动播放) 和「自然播放结束自动下一首」(自动播放)
+  //   next() / prev() / playByIndex() = 用户手动触发 → 不自动播放
+  //   nextAuto() / playByIndexAuto() = 系统自动触发(如播放结束) → 自动播放
   function next() {
     if (library.playlist.length === 0) return
 
     isSwitchingSong.value = true
-    pendingPlay.value = true
+    // BUG 2 修复: 用户手动切歌不自动播放, 仅切换到下一首并暂停在 0:00
+    pendingPlay.value = false
+    isPlaying.value = false
 
     if (loopMode.value === 'single') {
       currentTime.value = 0
@@ -108,7 +113,41 @@ export const useAudioStore = defineStore('audio', () => {
       library.currentIndex = 0
     }
 
-    // 切歌后异步触发 JS 堆 GC
+    void invoke('clean_renderer_memory').catch(() => {})
+  }
+
+  // 自动下一首 (自然播放结束时调用, 会自动播放)
+  function nextAuto() {
+    if (library.playlist.length === 0) return
+    isSwitchingSong.value = true
+    pendingPlay.value = true
+    isPlaying.value = true
+
+    if (loopMode.value === 'single') {
+      currentTime.value = 0
+      const idx = library.currentIndex
+      library.currentIndex = -1
+      nextTick(() => {
+        library.currentIndex = idx
+      })
+      return
+    }
+
+    if (loopMode.value === 'shuffle') {
+      shuffleHistory.value.push(library.currentIndex)
+      if (shuffleHistory.value.length > 100) {
+        shuffleHistory.value.shift()
+      }
+      library.currentIndex = getRandomIndex()
+      return
+    }
+
+    if (library.currentIndex < library.playlist.length - 1) {
+      library.currentIndex++
+    } else if (loopMode.value === 'list') {
+      library.currentIndex = 0
+    }
+
     void invoke('clean_renderer_memory').catch(() => {})
   }
 
@@ -116,7 +155,9 @@ export const useAudioStore = defineStore('audio', () => {
     if (library.playlist.length === 0) return
 
     isSwitchingSong.value = true
-    pendingPlay.value = true
+    // BUG 2 修复: 同上, 切歌不自动播放
+    pendingPlay.value = false
+    isPlaying.value = false
 
     if (loopMode.value === 'single') {
       currentTime.value = 0
@@ -153,7 +194,10 @@ export const useAudioStore = defineStore('audio', () => {
         shuffleHistory.value.push(library.currentIndex)
       }
       isSwitchingSong.value = true
-      pendingPlay.value = true
+      // BUG 2 修复: 点击列表切换歌曲不自动播放, 仅加载并暂停在 0:00
+      //   用户需主动点击播放按钮才开始播放
+      pendingPlay.value = false
+      isPlaying.value = false
       library.currentIndex = index
     }
   }
@@ -199,6 +243,10 @@ export const useAudioStore = defineStore('audio', () => {
   function play() {
     if (isPlaying.value) return
     isPlaying.value = true
+    // 2026-07-14: 同步 html5 audio 元素到 playing 状态,
+    //   让 OS 把 MediaKey 路由到 WebView (蓝牙耳机/键盘多媒体键)
+    //   muted+volume=0 绝对静音, 实际播放由 Web Audio 处理
+    void html5AudioPlayer.play()
     void audioEngine.resumePlayback()
     startTimeUpdate()
   }
@@ -226,6 +274,8 @@ export const useAudioStore = defineStore('audio', () => {
     if (isPlaying.value && audioEngine.state.hasSource && !audioEngine.state.isPaused) return
     await audioEngine.forceWake()
     isPlaying.value = true
+    // 2026-07-14: 同步 html5 audio 元素 playing, 让 MediaKey 路由到 WebView
+    void html5AudioPlayer.play()
     await audioEngine.resumePlayback()
     startTimeUpdate()
   }
@@ -279,8 +329,8 @@ export const useAudioStore = defineStore('audio', () => {
       return
     }
 
-    // 列表循环末尾 / shuffle: 走 next()
-    next()
+    // 列表循环末尾 / shuffle: 走 nextAuto (自然播放完, 自动播放下一首)
+    nextAuto()
   })
 
   // ========== 播放时间更新定时器 ==========

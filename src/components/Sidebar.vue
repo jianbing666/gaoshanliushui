@@ -102,8 +102,20 @@ const useVirtualList = computed(() => library.filteredActivePlaylistSongs.length
             v-model="library.searchQuery"
             type="text"
             placeholder="搜索歌曲..."
-            class="w-full pl-9 pr-3 py-1.5 bg-gray-100/60 dark:bg-gray-700/40 border border-transparent rounded-lg text-gray-700 dark:text-gray-200 text-sm placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:bg-white dark:focus:bg-gray-700/60 focus:border-gray-200 dark:focus:border-gray-600 transition-all"
+            class="w-full pl-9 pr-9 py-1.5 bg-gray-100/60 dark:bg-gray-700/40 border border-transparent rounded-lg text-gray-700 dark:text-gray-200 text-sm placeholder-gray-400 dark:placeholder-gray-500 focus:outline-none focus:bg-white dark:focus:bg-gray-700/60 focus:border-gray-200 dark:focus:border-gray-600 transition-all"
           />
+          <!-- v1.1 (2026-07-14): X 清除按钮 -->
+          <button
+            v-if="library.searchQuery"
+            class="absolute right-2 top-1/2 -translate-y-1/2 w-5 h-5 flex items-center justify-center text-gray-400 dark:text-gray-500 hover:text-gray-700 dark:hover:text-gray-200 rounded-full hover:bg-gray-200/60 dark:hover:bg-gray-600/60 transition-colors"
+            title="清除搜索"
+            @click="library.searchQuery = ''"
+          >
+            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
         </div>
       </div>
       <div class="flex-1 overflow-y-auto p-2 space-y-0.5">

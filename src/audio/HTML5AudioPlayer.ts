@@ -7,14 +7,15 @@ import { convertFileSrc } from '@tauri-apps/api/core'
  * 实际播放完全由 Web Audio API (AudioBufferSourceNode) 处理.
  *
  * 关键设计:
- *   - 永远不调用 audio.play() (避免 WebView2 中 volume=0 失效导致切歌时短暂听到 HTML5 Audio)
- *   - 仅加载 (src=url, load()), 触发 canplay 获取 duration, 立即暂停保持 paused 状态
- *   - MediaSession.playbackState 由 store 直接控制, 不依赖 audio 的实际 play/pause 状态
+ *   - 永远不实际发声: volume=0 + muted=true 双保险, 即使 audio.play() 也无声
+ *   - audio 元素保持 playing 状态: 这是让 OS 把 MediaKey 路由到 WebView 的关键
+ *   - MediaSession.playbackState 由 store 直接控制
  *
- * 迁移说明 (架构分离 v1):
- *   - 原位置: src/utils/audioPlayer.ts
- *   - 新位置: src/audio/HTML5AudioPlayer.ts
- *   - 内部实现零改动, 仅迁移路径
+ * 修复 2026-07-14 (v1.1.0 外部设备失效):
+ *   - v1.0.0 时期 audio.play() 真正调用, MediaSession 被 OS 正确识别, 蓝牙耳机可用
+ *   - v1.1.0 重构后 audio 永远 paused, OS 不再分发 MediaKey → 蓝牙耳机/键盘多媒体键失效
+ *   - 现在: 加载完成后保持 paused=false (muted+volume=0 静音), OS 仍可识别媒体源
+ *     但不会发出任何声音
  */
 export class HTML5AudioPlayer {
   private audio: HTMLAudioElement
@@ -24,11 +25,7 @@ export class HTML5AudioPlayer {
   private _onPlay: (() => void) | null = null
   private _onPause: (() => void) | null = null
 
-  // 修复 2026-07-14: 之前 audioPlayer 在 canplay 时调用 audio.play() 触发了
-  //   HTML5 Audio 的短暂播放 (WebView2 中 volume=0 在 src 切换瞬间不可靠),
-  //   导致切歌时用户能听到旧歌开头 0-1s.
-  // 现在 audioPlayer 完全不调用 play/pause, 所有状态由 Web Audio 链路管理.
-  // 保留 setIsSwitchingSong 入口 (用于切歌完成后清锁).
+  // 2026-07-14: 保留 store 切歌状态通知入口
   private _setIsSwitchingSong: ((v: boolean) => void) | null = null
 
   constructor() {
@@ -87,11 +84,11 @@ export class HTML5AudioPlayer {
   /**
    * 加载本地音频文件 (通过 Tauri convertFileSrc 转换路径), 等待 canplay 后 resolve
    *
-   * 修复 2026-07-14: 之前在 canplay 中调用 audio.play(), 触发 WebView2 中
-   *   HTML5 Audio 的短暂播放 (即使 volume=0 在 src 切换瞬间可能失效),
-   *   导致切歌时用户能听到旧歌开头 0-1s.
-   * 现在: 加载完成后立即 pause, 永远不调用 play(). MediaSession.playbackState
-   *   由 store 直接设置, 不依赖 HTML5 Audio 的 play/pause 状态.
+   * 修复 2026-07-14 (v1.1.0 外部设备失效):
+   *   - 之前 canplay 后立即 pause, 让 audio 永远 paused, OS 不分发 MediaKey
+   *   - 现在 canplay 后保持 playing 状态 (muted+volume=0 静音, 无声)
+   *     操作系统能正确识别"这是一个正在播放的媒体源", 把蓝牙耳机/键盘
+   *     多媒体键的 MediaKey 事件路由给 WebView → 触发 MediaSession action handler
    */
   async load(filePath: string): Promise<void> {
     return new Promise((resolve, reject) => {
@@ -99,10 +96,15 @@ export class HTML5AudioPlayer {
 
       const handleCanPlay = () => {
         cleanup()
-        // 立即 reset currentTime = 0, 立即 pause
-        // 双保险: muted=true + volume=0 + paused 状态, 杜绝任何发声可能
+        // 重置到开头
         this.audio.currentTime = 0
-        this.audio.pause()
+        // 保持 playing 状态 (muted=true + volume=0 不会发声)
+        // 这样 OS 才能识别 mediaSession 媒体源, 外部设备 MediaKey 才能路由到 WebView
+        if (this.audio.paused) {
+          this.audio.play().catch(() => {
+            // 静默失败: 不影响功能, OS 路由会退化但 Web Audio 主链路不受影响
+          })
+        }
         this._setIsSwitchingSong?.(false)
         resolve()
       }
@@ -126,17 +128,28 @@ export class HTML5AudioPlayer {
   }
 
   /**
-   * 播放 (保留 API 但不实际播放, 仅同步 MediaSession)
+   * 播放 (保持 audio 元素在 playing 状态, 由 OS 分发 MediaKey)
    * 实际播放由 Web Audio API 的 AudioBufferSourceNode 处理
    */
   async play(): Promise<void> {
-    // 修复 2026-07-14: 不再调用 audio.play(), 避免 WebView2 短暂播放 HTML5 Audio
-    // 进度更新完全由 store 的 timeUpdateInterval 轮询 Web Audio currentTime
+    // 2026-07-14: 调用 audio.play() 让 OS 识别媒体源, 触发 MediaKey 路由
+    //   muted=true + volume=0 绝对静音, 不会发出任何声音
+    if (this.audio.paused && this.audio.src) {
+      try {
+        await this.audio.play()
+      } catch {
+        // 静默: autoplay 策略被拒时不影响主链路
+      }
+    }
   }
 
-  /** 暂停 (空操作, 实际暂停由 Web Audio 处理) */
+  /**
+   * 暂停 (让 audio 元素 paused=true, 同步 MediaSession.playbackState)
+   */
   pause() {
-    // 空操作: HTML5 Audio 始终保持 paused 状态
+    if (!this.audio.paused) {
+      this.audio.pause()
+    }
   }
 
   /** 跳转到指定时间 (秒) - 仅同步到 HTML5 Audio 用于 MediaSession 显示 */

@@ -17,7 +17,7 @@
 //   - 前端 try/catch 后 console.warn, 不弹错误框打扰用户
 
 use std::path::PathBuf;
-use std::sync::OnceLock;
+use std::sync::{Mutex, OnceLock};
 
 use rusqlite::{params, Connection, OptionalExtension};
 use serde::{Deserialize, Serialize};
@@ -47,6 +47,10 @@ pub struct MemoryRecord {
 
 /// 全局 DB 路径 (懒初始化一次, 后续命令直接复用, 避免重复 IO)
 static DB_PATH: OnceLock<PathBuf> = OnceLock::new();
+
+/// 全局 DB 连接 (Mutex 保护, 跨命令复用同一连接, 避免每次 open_and_init 的 IO)
+/// rusqlite::Connection 是 Send 但非 Sync, 用 Mutex 包装后才能跨线程安全共享
+static DB_CONN: OnceLock<Mutex<Connection>> = OnceLock::new();
 
 /// 获取数据库文件绝对路径
 fn db_path(app: &AppHandle) -> Result<PathBuf, String> {
@@ -117,22 +121,42 @@ fn open_and_init(path: &PathBuf) -> Result<Connection, String> {
 
 /// 初始化 SQLite (建表 + 索引, 幂等)
 /// 在 main.rs setup 阶段调用一次, 失败仅打印警告
+/// 同时将打开的连接存入 DB_CONN, 后续命令直接复用, 避免每次 open_and_init 的 IO
 pub fn init_db(app: &AppHandle) -> Result<(), String> {
     let path = ensure_db_path(app)?.clone();
-    let _ = open_and_init(&path)?;
+    let conn = open_and_init(&path)?;
+    // 尝试存到全局: 失败说明已有连接, 直接丢弃(原连接已可用, 重复 init 是浪费但无害)
+    let _ = DB_CONN.set(Mutex::new(conn));
     Ok(())
 }
 
+/// 取出全局连接 (若未初始化, 懒初始化一次)
+fn get_or_init_conn(app: &AppHandle) -> Result<&'static Mutex<Connection>, String> {
+    if let Some(m) = DB_CONN.get() {
+        return Ok(m);
+    }
+    // 懒初始化: 仅在 init_db 未被调用时触发 (例如测试场景)
+    let path = ensure_db_path(app)?.clone();
+    let conn = open_and_init(&path)?;
+    // set 失败说明被其他线程抢着初始化了, 直接丢弃本地 conn
+    let _ = DB_CONN.set(Mutex::new(conn));
+    Ok(DB_CONN
+        .get()
+        .expect("DB_CONN just initialized by current thread"))
+}
+
 /// 在 spawn_blocking 中执行同步 SQLite 操作
+/// 复用全局连接, 不再每次 open_and_init
 async fn run_db<F, R>(app: &AppHandle, f: F) -> Result<R, String>
 where
     F: FnOnce(&Connection) -> Result<R, String> + Send + 'static,
     R: Send + 'static,
 {
-    let path = ensure_db_path(app)?.clone();
+    let mutex = get_or_init_conn(app)?;
+    let mutex = mutex; // 'static 引用
     tauri::async_runtime::spawn_blocking(move || {
-        let conn = open_and_init(&path)?;
-        f(&conn)
+        let guard = mutex.lock().map_err(|e| format!("DB 锁失败: {}", e))?;
+        f(&guard)
     })
     .await
     .map_err(|e| format!("spawn_blocking 失败: {}", e))?

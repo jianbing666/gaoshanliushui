@@ -2,6 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch, shallowRef } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { convertFileSrc } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import type { Song, Playlist } from '@/types/song'
 import {
   loadSettings,
@@ -13,6 +14,7 @@ import {
   clearMusicLibraryPath,
   generateId,
 } from '@/utils/storage'
+import { useSettingsStore } from './settingsStore'
 
 /**
  * 歌曲库域 store
@@ -215,49 +217,91 @@ export const useLibraryStore = defineStore('library', () => {
   }
 
   // ========== 文件夹扫描 ==========
-  async function scanMusicFolder(path: string, forceRefresh = false) {
-    isLoading.value = true
-    try {
-      const metaSrc = metadataSource.value === 'filename' ? 'filename' : 'auto'
-      const songs = await invoke<Song[]>('scan_music_folder', {
-        folderPath: path,
-        metadataSource: metaSrc,
-        forceRefresh,
-      })
+// v1.1 性能优化 (2026-07-15): 两阶段扫描
+//   - 阶段 1 (快速返回): 文件名/ID3基础信息 + duration + content_hash
+//     → 前端立即拿到歌曲列表，记忆功能可用
+//   - 阶段 2 (后台异步): 封面提取 + 缩略图生成
+//     → 通过 scan:enrich-progress 事件增量更新
+//     → 封面提取是最耗时的操作，移到后台不阻塞首屏
+async function scanMusicFolder(path: string, forceRefresh = false) {
+  isLoading.value = true
 
-      // 记录当前播放的歌曲 ID,用于扫描后恢复
-      const currentSongId = currentSong.value?.id
+  try {
+    const metaSrc = metadataSource.value === 'filename' ? 'filename' : 'auto'
+    const songs = await invoke<Song[]>('scan_music_folder', {
+      folderPath: path,
+      metadataSource: metaSrc,
+      forceRefresh,
+    })
 
-      playlist.value = songs
-      folderPath.value = path
-      setMusicLibraryPath(path)
-      syncDefaultPlaylist(songs)
+    // 记录当前播放的歌曲 ID,用于扫描后恢复
+    const currentSongId = currentSong.value?.id
 
-      // 尝试恢复当前播放位置
-      if (currentSongId) {
-        const newIndex = songs.findIndex((s) => s.id === currentSongId)
-        if (newIndex !== -1) {
-          currentIndex.value = newIndex
-        } else if (songs.length > 0) {
-          currentIndex.value = 0
-        } else {
-          currentIndex.value = -1
-        }
-      } else if (songs.length > 0 && currentIndex.value === -1) {
+    playlist.value = songs
+    folderPath.value = path
+    setMusicLibraryPath(path)
+    syncDefaultPlaylist(songs)
+
+    // 下载输出目录默认联动音乐库
+    // 仅当用户从未显式设置过 (downloadOutputDir 为空) 时自动同步
+    const settingsStore = useSettingsStore()
+    if (!settingsStore.downloadOutputDir) {
+      settingsStore.setDownloadOutputDir(path)
+    }
+
+    // 尝试恢复当前播放位置
+    if (currentSongId) {
+      const newIndex = songs.findIndex((s) => s.id === currentSongId)
+      if (newIndex !== -1) {
+        currentIndex.value = newIndex
+      } else if (songs.length > 0) {
         currentIndex.value = 0
-      } else if (songs.length === 0) {
+      } else {
         currentIndex.value = -1
       }
-
-      return songs
-    } catch (error) {
-      console.error('扫描文件夹失败:', error)
-      clearMusicLibraryPath()
-      throw error
-    } finally {
-      isLoading.value = false
+    } else if (songs.length > 0 && currentIndex.value === -1) {
+      currentIndex.value = 0
+    } else if (songs.length === 0) {
+      currentIndex.value = -1
     }
+
+    // ========== 阶段 2: 监听后台封面补全事件 ==========
+    const unlistenProgress = await listen('scan:enrich-progress', (event) => {
+      const payload = event.payload as {
+        id: string
+        file_path: string
+        cover_path: string | null
+        cover_thumb_path: string | null
+        index: number
+        total: number
+      }
+
+      const songIndex = playlist.value.findIndex((s) => s.id === payload.id)
+      if (songIndex !== -1) {
+        const updated = [...playlist.value]
+        updated[songIndex] = {
+          ...updated[songIndex],
+          cover_path: payload.cover_path ?? updated[songIndex].cover_path,
+          cover_thumb_path: payload.cover_thumb_path ?? updated[songIndex].cover_thumb_path,
+        }
+        playlist.value = updated
+        syncDefaultPlaylist(updated)
+      }
+    })
+
+    const unlistenComplete = await listen('scan:enrich-complete', () => {
+      unlistenProgress()
+      unlistenComplete()
+    })
+
+    return songs
+  } catch (error) {
+    clearMusicLibraryPath()
+    throw error
+  } finally {
+    isLoading.value = false
   }
+}
 
   function setMetadataSource(source: 'auto' | 'filename') {
     metadataSource.value = source

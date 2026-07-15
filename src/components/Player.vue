@@ -5,6 +5,8 @@ import { useSettingsStore } from '@/stores/settingsStore'
 import AudioSpectrum from '@/components/AudioSpectrum.vue'
 // Memory feature - 高山流水 v1.1: 弹幕式 tag 展示
 import MemoryMarquee from '@/components/MemoryMarquee.vue'
+// v1.1 (2026-07-14): 长文本循环滚动
+import ScrollingText from '@/components/ScrollingText.vue'
 
 const audio = useAudioStore()
 const library = useLibraryStore()
@@ -20,10 +22,11 @@ const settings = useSettingsStore()
           BUG 4 修复: 容器高度扩展到 108px, 6 行
           top: 调整到 -120px, 确保多行弹幕不遮挡唱片
           z-index: 10 (高于唱片默认 0, 低于 ControlBar / 抽屉)
+          v1.1 修复 (2026-07-14): 显式指定 w-96, 避免 absolute 父容器无 width 致 0×0 渲染
         -->
         <div
           v-if="library.currentSong"
-          class="absolute left-1/2 -translate-x-1/2 z-10"
+          class="absolute left-1/2 -translate-x-1/2 z-10 w-96"
           style="top: -120px;"
         >
           <MemoryMarquee />
@@ -60,9 +63,21 @@ const settings = useSettingsStore()
         <AudioSpectrum />
 
         <!-- 歌曲信息 -->
-        <h2 class="text-gray-900 dark:text-white text-2xl font-semibold mt-8">{{ library.currentSong.title }}</h2>
-        <p class="text-gray-600 dark:text-gray-400 text-lg mt-2">{{ library.currentSong.artist || '未知艺术家' }}</p>
-        <p v-if="library.currentSong.album" class="text-gray-500 dark:text-gray-500 text-sm mt-1">
+        <div class="w-80 mx-auto mt-8">
+          <ScrollingText
+            :text="library.currentSong.title"
+            text-class="text-2xl font-semibold text-gray-900 dark:text-white"
+            :duration="12"
+          />
+        </div>
+        <div class="w-80 mx-auto mt-2">
+          <ScrollingText
+            :text="library.currentSong.artist || '未知艺术家'"
+            text-class="text-lg text-gray-600 dark:text-gray-400"
+            :duration="10"
+          />
+        </div>
+        <p v-if="library.currentSong.album" class="text-gray-500 dark:text-gray-500 text-sm mt-1 max-w-xs mx-auto truncate">
           {{ library.currentSong.album }}
         </p>
       </div>

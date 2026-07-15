@@ -39,6 +39,7 @@ const {
   cancelEdit,
   updateShortcut,
   resetToDefault,
+  clearShortcut,
   resetAllToDefault,
   handleKeyDown,
 } = useShortcutConfig()
@@ -64,6 +65,16 @@ async function selectFolder() {
     }
   } catch (error) {
     console.error('选择文件夹失败:', error)
+  }
+}
+
+// v1.1 (2026-07-14): 重新扫描当前目录 (不弹确认, 直接触发, forceRefresh=false 节省缓存)
+async function confirmRescan() {
+  if (!library.folderPath) return
+  try {
+    await library.scanMusicFolder(library.folderPath, false)
+  } catch (error) {
+    console.error('重新扫描失败:', error)
   }
 }
 
@@ -247,156 +258,6 @@ onUnmounted(() => {
         </div>
       </div>
 
-      <!-- 背景图片 -->
-      <div class="space-y-3">
-        <h3 class="text-gray-900 dark:text-white text-sm font-semibold">背景图片</h3>
-
-        <div class="space-y-4">
-          <div class="flex items-center gap-1 bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-1">
-            <button
-              v-for="option in backgroundModeOptions"
-              :key="option.value"
-              class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
-              :class="
-                settings.background.mode === option.value
-                  ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
-              "
-              @click="handleBackgroundModeChange(option.value)"
-            >
-              {{ option.label }}
-            </button>
-          </div>
-
-          <div v-if="settings.background.mode === 'image'" class="space-y-2">
-            <button
-              class="w-full px-4 py-2.5 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-all flex items-center justify-center gap-2"
-              @click="selectBackgroundImage"
-            >
-              {{ settings.background.imagePath ? '更换图片' : '选择图片' }}
-            </button>
-            <p v-if="settings.background.imagePath" class="text-xs text-gray-500 dark:text-gray-400 truncate px-1">
-              {{ settings.background.imagePath }}
-            </p>
-          </div>
-
-          <div v-if="settings.background.mode === 'folder'" class="space-y-3">
-            <button
-              class="w-full px-4 py-2.5 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-all flex items-center justify-center gap-2"
-              :disabled="isScanningBgFolder"
-              @click="selectBackgroundFolder"
-            >
-              {{ isScanningBgFolder ? '扫描中...' : settings.background.folderPath ? '更换文件夹' : '选择文件夹' }}
-            </button>
-            <p v-if="settings.background.folderPath" class="text-xs text-gray-500 dark:text-gray-400 truncate px-1">
-              {{ settings.background.folderPath }}
-            </p>
-            <p v-if="settings.background.imageList?.length" class="text-xs text-gray-500 dark:text-gray-400 px-1">
-              共 {{ settings.background.imageList.length }} 张图片
-            </p>
-
-            <div>
-              <div class="flex items-center justify-between mb-2">
-                <p class="text-xs text-gray-500 dark:text-gray-400">轮播间隔</p>
-                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ settings.background.interval }} 秒</span>
-              </div>
-              <input
-                type="range"
-                class="w-full"
-                :min="5"
-                :max="300"
-                :value="settings.background.interval"
-                step="5"
-                @input="(e) => updateBgSetting('interval', parseInt((e.target as HTMLInputElement).value))"
-              />
-            </div>
-
-            <div class="flex items-center gap-2">
-              <button
-                class="flex-1 px-3 py-2 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-md text-xs text-gray-600 dark:text-gray-300 transition-colors"
-                @click="settings.prevBackgroundImage()"
-                :disabled="!settings.background.imageList?.length"
-              >
-                上一张
-              </button>
-              <button
-                class="flex-1 px-3 py-2 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-md text-xs text-gray-600 dark:text-gray-300 transition-colors"
-                @click="settings.nextBackgroundImage()"
-                :disabled="!settings.background.imageList?.length"
-              >
-                下一张
-              </button>
-            </div>
-          </div>
-
-          <div v-if="settings.background.mode !== 'none'" class="space-y-4 pt-2 border-t border-gray-200/50 dark:border-gray-700/50">
-            <div>
-              <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">填充方式</p>
-              <div class="flex gap-1">
-                <button
-                  v-for="opt in fitOptions"
-                  :key="opt.value"
-                  class="flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-all bg-gray-100/60 dark:bg-gray-800/60"
-                  :class="
-                    settings.background.fit === opt.value
-                      ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200/60 dark:hover:bg-gray-700/60'
-                  "
-                  @click="updateBgSetting('fit', opt.value)"
-                >
-                  {{ opt.label }}
-                </button>
-              </div>
-            </div>
-
-            <div>
-              <div class="flex items-center justify-between mb-2">
-                <p class="text-xs text-gray-500 dark:text-gray-400">遮罩透明度</p>
-                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ Math.round(settings.background.overlay * 100) }}%</span>
-              </div>
-              <input
-                type="range"
-                class="w-full"
-                :min="0"
-                :max="100"
-                :value="settings.background.overlay * 100"
-                @input="(e) => updateBgSetting('overlay', parseInt((e.target as HTMLInputElement).value) / 100)"
-              />
-            </div>
-
-            <div>
-              <div class="flex items-center justify-between mb-2">
-                <p class="text-xs text-gray-500 dark:text-gray-400">模糊程度</p>
-                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ settings.background.blur }}px</span>
-              </div>
-              <input
-                type="range"
-                class="w-full"
-                :min="0"
-                :max="30"
-                :value="settings.background.blur"
-                @input="(e) => updateBgSetting('blur', parseInt((e.target as HTMLInputElement).value))"
-              />
-            </div>
-
-            <div>
-              <div class="flex items-center justify-between mb-2">
-                <p class="text-xs text-gray-500 dark:text-gray-400">缩放比例</p>
-                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ settings.background.scale }}%</span>
-              </div>
-              <input
-                type="range"
-                class="w-full"
-                :min="50"
-                :max="200"
-                :value="settings.background.scale"
-                @input="(e) => updateBgSetting('scale', parseInt((e.target as HTMLInputElement).value))"
-              />
-            </div>
-          </div>
-        </div>
-      </div>
-
       <!-- 音乐库 -->
       <div class="space-y-3">
         <h3 class="text-gray-900 dark:text-white text-sm font-semibold">音乐库</h3>
@@ -408,13 +269,25 @@ onUnmounted(() => {
               {{ library.folderPath || '未选择' }}
             </p>
           </div>
-          <button
-            class="w-full px-4 py-2 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-all"
-            :disabled="library.isLoading"
-            @click="selectFolder"
-          >
-            {{ library.isLoading ? '扫描中...' : '更改目录' }}
-          </button>
+          <!-- 音乐库目录 + 重新扫描 (同一行) -->
+          <div class="flex gap-2">
+            <button
+              class="flex-1 px-4 py-2 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-all disabled:opacity-50"
+              :disabled="library.isLoading"
+              @click="selectFolder"
+            >
+              {{ library.folderPath ? '更改目录' : '选择目录' }}
+            </button>
+            <button
+              v-if="library.folderPath"
+              class="flex-1 px-4 py-2 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-all disabled:opacity-50"
+              :disabled="library.isLoading"
+              @click="confirmRescan"
+              :title="'重新扫描当前目录'"
+            >
+              {{ library.isLoading ? '扫描中...' : '重新扫描' }}
+            </button>
+          </div>
 
           <!-- 元数据来源 -->
           <div class="space-y-2 pt-2 border-t border-gray-200/50 dark:border-gray-700/50">
@@ -449,7 +322,7 @@ onUnmounted(() => {
           </div>
 
           <!-- 刷新元数据 -->
-          <div v-if="library.folderPath" class="pt-2 border-t border-gray-200/50 dark:border-gray-700/50">
+          <div v-if="false" class="pt-2 border-t border-gray-200/50 dark:border-gray-700/50">
             <template v-if="!showRefreshConfirm">
               <button
                 class="w-full px-4 py-2 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-all"
@@ -486,65 +359,6 @@ onUnmounted(() => {
           <p class="text-xs text-gray-500 dark:text-gray-400 text-center">
             共 {{ library.playlist.length }} 首歌曲
           </p>
-        </div>
-      </div>
-
-      <!-- 快捷键 -->
-      <div class="space-y-3">
-        <div class="flex items-center justify-between">
-          <h3 class="text-gray-900 dark:text-white text-sm font-semibold">快捷键</h3>
-          <button
-            class="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
-            @click="resetAllToDefault"
-          >
-            恢复默认
-          </button>
-        </div>
-
-        <div class="space-y-2">
-          <div
-            v-for="shortcut in shortcuts"
-            :key="shortcut.id"
-            class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3 space-y-2"
-          >
-            <div>
-              <p class="text-gray-900 dark:text-white text-sm font-medium">{{ shortcut.action }}</p>
-              <p class="text-gray-500 dark:text-gray-400 text-xs">{{ shortcut.description }}</p>
-            </div>
-
-            <div class="flex items-center gap-2">
-              <div
-                v-if="editingShortcut === shortcut.id"
-                class="flex-1 relative"
-                @click.stop
-              >
-                <input
-                  type="text"
-                  readonly
-                  value="按下新快捷键..."
-                  class="w-full bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:border-gray-900 dark:focus:border-white"
-                  @keydown="handleShortcutKeyDown($event, shortcut.id)"
-                  @blur="cancelEdit"
-                />
-              </div>
-              <div v-else class="flex-1 flex items-center gap-2">
-                <div
-                  class="flex-1 bg-white dark:bg-gray-700 rounded-md px-3 py-2 text-gray-900 dark:text-white text-sm font-mono cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors text-center"
-                  @click.stop="startEdit(shortcut.id)"
-                >
-                  {{ shortcut.currentShortcut }}
-                </div>
-                <button
-                  v-if="shortcut.currentShortcut !== shortcut.defaultShortcut"
-                  class="px-2 py-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors shadow-sm border rounded-md"
-                  @click="resetToDefault(shortcut.id)"
-                  title="恢复默认"
-                >
-                  重置
-                </button>
-              </div>
-            </div>
-          </div>
         </div>
       </div>
 
@@ -709,6 +523,228 @@ onUnmounted(() => {
                   {{ settings.sleepTimerMinutes }}分
                 </span>
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 快捷键 -->
+      <div class="space-y-3">
+        <div class="flex items-center justify-between">
+          <h3 class="text-gray-900 dark:text-white text-sm font-semibold">快捷键</h3>
+          <button
+            class="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+            @click="resetAllToDefault"
+          >
+            恢复默认
+          </button>
+        </div>
+
+        <div class="space-y-2">
+          <div
+            v-for="shortcut in shortcuts"
+            :key="shortcut.id"
+            class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3 space-y-2"
+          >
+            <div>
+              <p class="text-gray-900 dark:text-white text-sm font-medium">{{ shortcut.action }}</p>
+              <p class="text-gray-500 dark:text-gray-400 text-xs">{{ shortcut.description }}</p>
+            </div>
+
+            <div class="flex items-center gap-2">
+              <div
+                v-if="editingShortcut === shortcut.id"
+                class="flex-1 relative"
+                @click.stop
+              >
+                <input
+                  type="text"
+                  readonly
+                  value="按下新快捷键..."
+                  class="w-full bg-white dark:bg-gray-700 text-gray-900 dark:text-white text-sm border border-gray-300 dark:border-gray-600 rounded-md px-3 py-2 focus:outline-none focus:border-gray-900 dark:focus:border-white"
+                  @keydown="handleShortcutKeyDown($event, shortcut.id)"
+                  @blur="cancelEdit"
+                />
+              </div>
+              <div v-else class="flex-1 flex items-center gap-2">
+                <div
+                  class="flex-1 bg-white dark:bg-gray-700 rounded-md px-3 py-2 text-gray-900 dark:text-white text-sm font-mono cursor-pointer hover:bg-gray-50 dark:hover:bg-gray-600 transition-colors text-center"
+                  :class="!shortcut.currentShortcut && 'text-gray-400 dark:text-gray-500'"
+                  @click.stop="startEdit(shortcut.id)"
+                >
+                  {{ shortcut.currentShortcut || '未设置' }}
+                </div>
+                <!-- v1.1 (2026-07-14): X 清除按钮 -->
+                <button
+                  v-if="shortcut.currentShortcut"
+                  class="px-2 py-1 text-gray-400 dark:text-gray-500 hover:text-red-500 dark:hover:text-red-400 transition-colors shadow-sm border rounded-md flex items-center justify-center"
+                  :title="'清除当前快捷键'"
+                  @click="clearShortcut(shortcut.id)"
+                >
+                  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                    <line x1="18" y1="6" x2="6" y2="18"></line>
+                    <line x1="6" y1="6" x2="18" y2="18"></line>
+                  </svg>
+                </button>
+                <button
+                  v-if="shortcut.currentShortcut && shortcut.currentShortcut !== shortcut.defaultShortcut"
+                  class="px-2 py-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors shadow-sm border rounded-md"
+                  @click="resetToDefault(shortcut.id)"
+                  title="恢复默认"
+                >
+                  重置
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- 背景图片 -->
+      <div class="space-y-3">
+        <h3 class="text-gray-900 dark:text-white text-sm font-semibold">背景图片</h3>
+
+        <div class="space-y-4">
+          <div class="flex items-center gap-1 bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-1">
+            <button
+              v-for="option in backgroundModeOptions"
+              :key="option.value"
+              class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+              :class="
+                settings.background.mode === option.value
+                  ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                  : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+              "
+              @click="handleBackgroundModeChange(option.value)"
+            >
+              {{ option.label }}
+            </button>
+          </div>
+
+          <div v-if="settings.background.mode === 'image'" class="space-y-2">
+            <button
+              class="w-full px-4 py-2.5 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-all flex items-center justify-center gap-2"
+              @click="selectBackgroundImage"
+            >
+              {{ settings.background.imagePath ? '更换图片' : '选择图片' }}
+            </button>
+            <p v-if="settings.background.imagePath" class="text-xs text-gray-500 dark:text-gray-400 truncate px-1">
+              {{ settings.background.imagePath }}
+            </p>
+          </div>
+
+          <div v-if="settings.background.mode === 'folder'" class="space-y-3">
+            <button
+              class="w-full px-4 py-2.5 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-all flex items-center justify-center gap-2"
+              :disabled="isScanningBgFolder"
+              @click="selectBackgroundFolder"
+            >
+              {{ isScanningBgFolder ? '扫描中...' : settings.background.folderPath ? '更换文件夹' : '选择文件夹' }}
+            </button>
+            <p v-if="settings.background.folderPath" class="text-xs text-gray-500 dark:text-gray-400 truncate px-1">
+              {{ settings.background.folderPath }}
+            </p>
+            <p v-if="settings.background.imageList?.length" class="text-xs text-gray-500 dark:text-gray-400 px-1">
+              共 {{ settings.background.imageList.length }} 张图片
+            </p>
+
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <p class="text-xs text-gray-500 dark:text-gray-400">轮播间隔</p>
+                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ settings.background.interval }} 秒</span>
+              </div>
+              <input
+                type="range"
+                class="w-full"
+                :min="5"
+                :max="300"
+                :value="settings.background.interval"
+                step="5"
+                @input="(e) => updateBgSetting('interval', parseInt((e.target as HTMLInputElement).value))"
+              />
+            </div>
+
+            <div class="flex items-center gap-2">
+              <button
+                class="flex-1 px-3 py-2 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-md text-xs text-gray-600 dark:text-gray-300 transition-colors"
+                @click="settings.prevBackgroundImage()"
+                :disabled="!settings.background.imageList?.length"
+              >
+                上一张
+              </button>
+              <button
+                class="flex-1 px-3 py-2 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-md text-xs text-gray-600 dark:text-gray-300 transition-colors"
+                @click="settings.nextBackgroundImage()"
+                :disabled="!settings.background.imageList?.length"
+              >
+                下一张
+              </button>
+            </div>
+          </div>
+
+          <div v-if="settings.background.mode !== 'none'" class="space-y-4 pt-2 border-t border-gray-200/50 dark:border-gray-700/50">
+            <div>
+              <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">填充方式</p>
+              <div class="flex gap-1">
+                <button
+                  v-for="opt in fitOptions"
+                  :key="opt.value"
+                  class="flex-1 px-2 py-1.5 rounded-md text-xs font-medium transition-all bg-gray-100/60 dark:bg-gray-800/60"
+                  :class="
+                    settings.background.fit === opt.value
+                      ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                      : 'text-gray-600 dark:text-gray-300 hover:bg-gray-200/60 dark:hover:bg-gray-700/60'
+                  "
+                  @click="updateBgSetting('fit', opt.value)"
+                >
+                  {{ opt.label }}
+                </button>
+              </div>
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <p class="text-xs text-gray-500 dark:text-gray-400">遮罩透明度</p>
+                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ Math.round(settings.background.overlay * 100) }}%</span>
+              </div>
+              <input
+                type="range"
+                class="w-full"
+                :min="0"
+                :max="100"
+                :value="settings.background.overlay * 100"
+                @input="(e) => updateBgSetting('overlay', parseInt((e.target as HTMLInputElement).value) / 100)"
+              />
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <p class="text-xs text-gray-500 dark:text-gray-400">模糊程度</p>
+                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ settings.background.blur }}px</span>
+              </div>
+              <input
+                type="range"
+                class="w-full"
+                :min="0"
+                :max="30"
+                :value="settings.background.blur"
+                @input="(e) => updateBgSetting('blur', parseInt((e.target as HTMLInputElement).value))"
+              />
+            </div>
+
+            <div>
+              <div class="flex items-center justify-between mb-2">
+                <p class="text-xs text-gray-500 dark:text-gray-400">缩放比例</p>
+                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ settings.background.scale }}%</span>
+              </div>
+              <input
+                type="range"
+                class="w-full"
+                :min="50"
+                :max="200"
+                :value="settings.background.scale"
+                @input="(e) => updateBgSetting('scale', parseInt((e.target as HTMLInputElement).value))"
+              />
             </div>
           </div>
         </div>
