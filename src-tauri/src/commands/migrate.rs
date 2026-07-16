@@ -140,13 +140,9 @@ pub fn run_migration(music_folder: &str, app: &AppHandle) -> Result<usize, Strin
     }
 
     let now = db::now_ms();
-    let mut count = 0usize;
+    let mut songs_to_insert: Vec<(String, String, String, String)> = Vec::new();
 
-    // 获取数据库连接 (同步操作)
-    let mutex = db::get_conn()?;
-    let conn = mutex.lock().map_err(|e| format!("DB 锁失败: {}", e))?;
-
-    // 遍历所有子文件夹
+    // 遍历所有子文件夹，收集数据
     let read_dir = std::fs::read_dir(music_path)
         .map_err(|e| format!("读取音乐目录失败: {}", e))?;
 
@@ -181,27 +177,34 @@ pub fn run_migration(music_folder: &str, app: &AppHandle) -> Result<usize, Strin
         // 解析文件夹名
         let (artist, title) = parse_folder_name(folder_name);
 
-        // 写入数据库
-        conn.execute(
-            "INSERT OR REPLACE INTO songs 
-                (song_hash, song_path, title, artist, duration, cover_path, source, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
-            params![
-                content_hash,
-                mp3_path_str,
-                title,
-                artist,
-                0,
-                "",
-                "folder_migration",
-                now,
-                now,
-            ],
-        )
-        .map_err(|e| format!("写入 songs 表失败: {}", e))?;
-
-        count += 1;
+        songs_to_insert.push((content_hash, mp3_path_str, title, artist));
     }
+
+    // 批量写入数据库
+    let count = db::with_conn(|conn| {
+        let mut inserted = 0usize;
+        for (content_hash, mp3_path_str, title, artist) in &songs_to_insert {
+            conn.execute(
+                "INSERT OR REPLACE INTO songs 
+                    (song_hash, song_path, title, artist, duration, cover_path, source, created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
+                params![
+                    content_hash,
+                    mp3_path_str,
+                    title,
+                    artist,
+                    0,
+                    "",
+                    "folder_migration",
+                    now,
+                    now,
+                ],
+            )
+            .map_err(|e| format!("写入 songs 表失败: {}", e))?;
+            inserted += 1;
+        }
+        Ok(inserted)
+    })?;
 
     // 写入 flag 文件
     let _ = std::fs::write(&flag_path, "");

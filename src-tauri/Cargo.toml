@@ -1,6 +1,6 @@
 [package]
 name = "gaoshanliushui"
-version = "1.1.0"
+version = "1.2.0"
 description = "A music player inspired by the classical Chinese melody 'High Mountain and Flowing Water'"
 authors = ["GaoShanLiuShui"]
 edition = "2021"

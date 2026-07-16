@@ -160,3 +160,25 @@ export interface PlayHistoryItem {
   /** 是否完整播放（播放超过 80% 视为完整播放） */
   completed: boolean
 }
+
+/** v1.2.0 - 数据目录信息 */
+export interface DataDirInfo {
+  /** 当前数据目录路径 */
+  current_path: string
+  /** 是否为自定义目录 */
+  is_custom: boolean
+  /** 默认数据目录路径 */
+  default_path: string
+}
+
+/** v1.2.0 - 文件/目录使用量统计 */
+export interface FileUsage {
+  /** 名称 */
+  name: string
+  /** 路径 */
+  path: string
+  /** 大小（字节） */
+  size_bytes: number
+  /** 是否为目录 */
+  is_dir: boolean
+}

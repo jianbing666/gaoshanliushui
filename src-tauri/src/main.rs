@@ -17,6 +17,8 @@ use commands::migrate;
 use commands::playlist;
 use commands::export;
 use commands::history;
+use commands::app_config;
+use commands::data_dir;
 
 use std::sync::Mutex;
 use tauri::Manager;
@@ -63,8 +65,14 @@ fn main() {
                 eprintln!("注册全局快捷键失败: {}", e);
             }
 
+            // 初始化数据目录 (必须在数据库之前，因为 db_path 依赖 data_dir)
+            if let Err(e) = data_dir::init_data_dir(&app.handle()) {
+                eprintln!("[data_dir] 初始化数据目录失败，使用默认目录: {}", e);
+            }
+
             // 初始化数据库 (所有表统一在一个连接中创建)
             if let Err(e) = db::init_db(&app.handle(), |conn| {
+                app_config::init_schema(conn)?;
                 memories::init_schema(conn)?;
                 migrate::init_schema(conn)?;
                 playlist::init_schema(conn)?;
@@ -133,6 +141,14 @@ fn main() {
             history::update_play_history,
             history::delete_play_history,
             history::clear_play_history,
+            // v1.2.0 - 数据目录管理
+            data_dir::get_data_dir_info,
+            data_dir::set_data_dir,
+            data_dir::reset_data_dir,
+            data_dir::get_data_usage,
+            data_dir::open_data_dir,
+            data_dir::clear_thumbnail_cache,
+            data_dir::migrate_data,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

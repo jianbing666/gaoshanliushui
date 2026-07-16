@@ -13,6 +13,7 @@ use walkdir::WalkDir;
 
 use crate::commands::song_hash::compute_content_hash;
 use crate::commands::db;
+use crate::commands::data_dir;
 use crate::models::Song;
 use tauri::{AppHandle, Emitter};
 
@@ -25,7 +26,6 @@ const COVER_IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "gif", "bmp", "w
 /// ========== 缩略图配置 ==========
 const THUMB_WIDTH: u32 = 128;
 const THUMB_QUALITY: u8 = 75;
-const THUMB_DIR: &str = "gaoshanliushui-covers-thumb";
 
 /// 递归扫描指定文件夹下的所有音频文件，并解析元数据
 ///
@@ -430,9 +430,6 @@ fn enrich_covers_async(
     let total = audio_files.len();
     let now = db::now_ms();
 
-    // 获取数据库连接 (后台线程同步操作)
-    let conn = db::get_conn().ok().and_then(|m| m.lock().ok());
-
     for (idx, file_path) in audio_files.iter().enumerate() {
         let file_path_str = match file_path.to_str() {
             Some(s) => s.to_string(),
@@ -441,10 +438,12 @@ fn enrich_covers_async(
         let id = generate_id(&file_path_str);
 
         if force_refresh {
-            let cover_dir = std::env::temp_dir().join("gaoshanliushui-covers");
-            let _ = std::fs::remove_file(cover_dir.join(format!("{}.jpg", id)));
-            let thumb_dir = std::env::temp_dir().join(THUMB_DIR);
-            let _ = std::fs::remove_file(thumb_dir.join(format!("{}.jpg", id)));
+            if let Ok(cover_dir) = data_dir::get_covers_dir() {
+                let _ = std::fs::remove_file(cover_dir.join(format!("{}.jpg", id)));
+            }
+            if let Ok(thumb_dir) = data_dir::get_thumbnails_dir() {
+                let _ = std::fs::remove_file(thumb_dir.join(format!("{}.jpg", id)));
+            }
         }
 
         // 文件名模式下只检查同级图片（阶段1已做），跳过内嵌封面提取
@@ -474,13 +473,15 @@ fn enrich_covers_async(
         };
 
         // 更新 songs 表的 cover_path
-        if let Some(ref conn) = conn {
-            if let Some(ref cp) = cover_path {
-                let _ = conn.execute(
+        if let Some(ref cp) = cover_path {
+            let _ = db::with_conn(|conn| {
+                conn.execute(
                     "UPDATE songs SET cover_path = ?1, updated_at = ?2 WHERE song_path = ?3",
                     rusqlite::params![cp, now, file_path_str],
-                );
-            }
+                )
+                .map_err(|e| e.to_string())?;
+                Ok(())
+            });
         }
 
         // emit 增量更新
@@ -554,7 +555,10 @@ fn extract_cover_art(file_path: &Path, song_id: &str) -> (Option<String>, Option
 
     let picture = &pictures[0];
 
-    let cover_dir = std::env::temp_dir().join("gaoshanliushui-covers");
+    let cover_dir = match data_dir::get_covers_dir() {
+        Ok(dir) => dir,
+        Err(_) => return (None, None),
+    };
     if !cover_dir.exists() {
         let _ = std::fs::create_dir_all(&cover_dir);
     }
@@ -589,7 +593,10 @@ fn generate_thumbnail(data: &[u8], song_id: &str) -> Option<String> {
         image::imageops::FilterType::Triangle,
     );
 
-    let thumb_dir = std::env::temp_dir().join(THUMB_DIR);
+    let thumb_dir = match data_dir::get_thumbnails_dir() {
+        Ok(dir) => dir,
+        Err(_) => return None,
+    };
     if !thumb_dir.exists() {
         let _ = std::fs::create_dir_all(&thumb_dir);
     }
@@ -620,10 +627,21 @@ fn generate_thumbnail(data: &[u8], song_id: &str) -> Option<String> {
 /// 清除所有封面与缩略图缓存
 #[tauri::command]
 pub fn clear_cover_cache() {
-    for dir_name in &["gaoshanliushui-covers", THUMB_DIR] {
-        let dir = std::env::temp_dir().join(dir_name);
-        if dir.exists() {
-            if let Ok(entries) = std::fs::read_dir(&dir) {
+    if let Ok(cover_dir) = data_dir::get_covers_dir() {
+        if cover_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&cover_dir) {
+                for entry in entries.flatten() {
+                    let path = entry.path();
+                    if path.is_file() {
+                        let _ = std::fs::remove_file(&path);
+                    }
+                }
+            }
+        }
+    }
+    if let Ok(thumb_dir) = data_dir::get_thumbnails_dir() {
+        if thumb_dir.exists() {
+            if let Ok(entries) = std::fs::read_dir(&thumb_dir) {
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if path.is_file() {

@@ -2,7 +2,7 @@
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useAudioStore } from '@/stores/audioStore'
-// BUG 7 修复: 导出功能已迁移到回忆抽屉, 不再需要 useMemoryStore
+import MigrateDataModal from './MigrateDataModal.vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
 import type { ThemeMode, BackgroundSettings } from '@/types/song'
@@ -188,10 +188,9 @@ async function handleClearCache() {
   isClearingCache.value = true
   cacheCleared.value = false
   try {
-    // 清除音频缓存（前端内存）
     audio.clearAudioBufferCache()
-    // 清除封面缓存（后端文件）
     await invoke('clear_cover_cache')
+    await settings.loadDataUsage()
     cacheCleared.value = true
     setTimeout(() => {
       cacheCleared.value = false
@@ -203,6 +202,55 @@ async function handleClearCache() {
   }
 }
 
+const isClearingDataCache = ref(false)
+const dataCacheCleared = ref(false)
+const showMigrateModal = ref(false)
+
+async function handleResetDataDir() {
+  try {
+    await settings.resetDataDirToDefault()
+  } catch (error) {
+    console.error('恢复默认数据目录失败:', error)
+  }
+}
+
+async function handleOpenDataDir() {
+  try {
+    await settings.openDataDirInExplorer()
+  } catch (error) {
+    console.error('打开数据目录失败:', error)
+  }
+}
+
+async function handleClearDataCache() {
+  if (isClearingDataCache.value) return
+  isClearingDataCache.value = true
+  dataCacheCleared.value = false
+  try {
+    await settings.clearDataCache()
+    dataCacheCleared.value = true
+    setTimeout(() => {
+      dataCacheCleared.value = false
+    }, 2000)
+  } catch (error) {
+    console.error('清除数据缓存失败:', error)
+  } finally {
+    isClearingDataCache.value = false
+  }
+}
+
+function formatBytes(bytes: number): string {
+  if (bytes === 0) return '0 B'
+  const k = 1024
+  const sizes = ['B', 'KB', 'MB', 'GB']
+  const i = Math.floor(Math.log(bytes) / Math.log(k))
+  return parseFloat((bytes / Math.pow(k, i)).toFixed(1)) + ' ' + sizes[i]
+}
+
+function totalDataUsage(): number {
+  return settings.dataUsageList.reduce((sum, item) => sum + item.size_bytes, 0)
+}
+
 function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60)
   const s = seconds % 60
@@ -211,6 +259,8 @@ function formatTime(seconds: number): string {
 
 onMounted(() => {
   document.addEventListener('click', handleClickOutside)
+  settings.loadDataDirInfo().catch(console.error)
+  settings.loadDataUsage().catch(console.error)
 })
 
 onUnmounted(() => {
@@ -528,6 +578,86 @@ onUnmounted(() => {
         </div>
       </div>
 
+      <!-- 数据管理 -->
+      <div class="space-y-3">
+        <h3 class="text-gray-900 dark:text-white text-sm font-semibold">数据管理</h3>
+
+        <div class="space-y-2">
+          <!-- 当前数据目录 -->
+          <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
+            <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">
+              当前目录
+              <span v-if="settings.dataDirInfo?.is_custom" class="text-blue-500 dark:text-blue-400 ml-1">（自定义）</span>
+            </p>
+            <p class="text-sm text-gray-900 dark:text-white truncate" :title="settings.dataDirInfo?.current_path">
+              {{ settings.dataDirInfo?.current_path || '加载中...' }}
+            </p>
+          </div>
+
+          <!-- 存储使用量 -->
+          <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3 space-y-2">
+            <div class="flex items-center justify-between">
+              <p class="text-xs text-gray-500 dark:text-gray-400">存储使用</p>
+              <p class="text-xs text-gray-700 dark:text-gray-300 font-medium">{{ formatBytes(totalDataUsage()) }}</p>
+            </div>
+            <div v-if="settings.dataUsageList.length > 0" class="space-y-1.5">
+              <div v-for="item in settings.dataUsageList" :key="item.name" class="space-y-1">
+                <div class="flex items-center justify-between">
+                  <span class="text-xs text-gray-600 dark:text-gray-400">{{ item.name }}</span>
+                  <span class="text-xs text-gray-500 dark:text-gray-500">{{ formatBytes(item.size_bytes) }}</span>
+                </div>
+                <div class="w-full h-1.5 bg-gray-200/60 dark:bg-gray-700/60 rounded-full overflow-hidden">
+                  <div
+                    class="h-full bg-blue-500/70 dark:bg-blue-400/70 rounded-full transition-all"
+                    :style="{ width: totalDataUsage() > 0 ? (item.size_bytes / totalDataUsage() * 100) + '%' : '0%' }"
+                  ></div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- 操作按钮 -->
+          <div class="flex gap-2">
+            <button
+              class="flex-1 px-3 py-2 bg-blue-500/90 hover:bg-blue-500 text-white rounded-lg text-xs transition-all"
+              @click="showMigrateModal = true"
+            >
+              迁移到新目录
+            </button>
+            <button
+              class="flex-1 px-3 py-2 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-lg text-xs text-gray-700 dark:text-gray-300 transition-all"
+              @click="handleOpenDataDir"
+            >
+              打开目录
+            </button>
+          </div>
+
+          <div class="flex gap-2">
+            <button
+              v-if="settings.dataDirInfo?.is_custom"
+              class="flex-1 px-3 py-2 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-lg text-xs text-gray-700 dark:text-gray-300 transition-all"
+              @click="handleResetDataDir"
+            >
+              恢复默认
+            </button>
+            <button
+              class="flex-1 px-3 py-2 transition-all rounded-lg text-xs font-medium shrink-0"
+              :class="dataCacheCleared
+                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700'"
+              :disabled="isClearingDataCache"
+              @click="handleClearDataCache"
+            >
+              {{ isClearingDataCache ? '清除中...' : dataCacheCleared ? '已清除' : '清除缓存' }}
+            </button>
+          </div>
+
+          <p class="text-xs text-gray-400 dark:text-gray-500 leading-relaxed">
+            数据目录存放数据库、封面缓存等应用数据。迁移过程会复制所有数据到新目录并自动切换。
+          </p>
+        </div>
+      </div>
+
       <!-- 快捷键 -->
       <div class="space-y-3">
         <div class="flex items-center justify-between">
@@ -758,6 +888,12 @@ onUnmounted(() => {
       </div>
     </div>
   </aside>
+
+  <MigrateDataModal
+    v-if="showMigrateModal"
+    @close="showMigrateModal = false"
+    @completed="showMigrateModal = false"
+  />
 </template>
 
 <style scoped>

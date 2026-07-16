@@ -12,3 +12,5 @@ pub mod migrate;
 pub mod playlist;
 pub mod export;
 pub mod history;
+pub mod app_config;
+pub mod data_dir;

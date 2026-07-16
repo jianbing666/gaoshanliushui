@@ -2,7 +2,7 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch, markRaw } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { convertFileSrc } from '@tauri-apps/api/core'
-import type { ThemeMode, BackgroundSettings, FontSettings, FontFamily } from '@/types/song'
+import type { ThemeMode, BackgroundSettings, FontSettings, FontFamily, DataDirInfo, FileUsage } from '@/types/song'
 import { loadSettings, saveSettings, getSystemTheme } from '@/utils/storage'
 
 /**
@@ -292,6 +292,78 @@ export const useSettingsStore = defineStore('settings', () => {
     downloadOutputDir.value = path
   }
 
+  // ========== 数据目录管理 ==========
+  const dataDirInfo = ref<DataDirInfo | null>(null)
+  const dataUsageList = ref<FileUsage[]>([])
+  const isDataDirLoading = ref(false)
+
+  async function loadDataDirInfo() {
+    isDataDirLoading.value = true
+    try {
+      const info = await invoke<DataDirInfo>('get_data_dir_info')
+      dataDirInfo.value = info
+      return info
+    } catch (error) {
+      console.error('获取数据目录信息失败:', error)
+      throw error
+    } finally {
+      isDataDirLoading.value = false
+    }
+  }
+
+  async function loadDataUsage() {
+    try {
+      const usage = await invoke<FileUsage[]>('get_data_usage')
+      dataUsageList.value = usage
+      return usage
+    } catch (error) {
+      console.error('获取数据使用量失败:', error)
+      return []
+    }
+  }
+
+  async function setCustomDataDir(path: string) {
+    try {
+      await invoke('set_data_dir', { path })
+      await loadDataDirInfo()
+      await loadDataUsage()
+    } catch (error) {
+      console.error('设置数据目录失败:', error)
+      throw error
+    }
+  }
+
+  async function resetDataDirToDefault() {
+    try {
+      await invoke('reset_data_dir')
+      await loadDataDirInfo()
+      await loadDataUsage()
+    } catch (error) {
+      console.error('恢复默认数据目录失败:', error)
+      throw error
+    }
+  }
+
+  async function openDataDirInExplorer() {
+    try {
+      await invoke('open_data_dir')
+    } catch (error) {
+      console.error('打开数据目录失败:', error)
+      throw error
+    }
+  }
+
+  async function clearDataCache() {
+    try {
+      const cleared = await invoke<number>('clear_thumbnail_cache')
+      await loadDataUsage()
+      return cleared
+    } catch (error) {
+      console.error('清除缓存失败:', error)
+      throw error
+    }
+  }
+
   // ========== 记忆导出目录 ==========
   // BUG 6: 记忆备注导出文件夹, 持久化存储
   //   - 默认与音乐库文件夹一致 (library.folderPath)
@@ -450,6 +522,16 @@ export const useSettingsStore = defineStore('settings', () => {
     // 下载
     downloadOutputDir,
     setDownloadOutputDir,
+    // 数据目录管理
+    dataDirInfo,
+    dataUsageList,
+    isDataDirLoading,
+    loadDataDirInfo,
+    loadDataUsage,
+    setCustomDataDir,
+    resetDataDirToDefault,
+    openDataDirInExplorer,
+    clearDataCache,
     // 记忆导出
     memoryExportDir,
     setMemoryExportDir,
