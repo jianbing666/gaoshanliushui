@@ -204,6 +204,33 @@ pub async fn scan_music_folder(
                 result
             };
 
+            // ========== 同步默认歌单 ==========
+            // 确保默认歌单存在，并将所有扫描到的歌曲加入默认歌单
+            // 这是启动时 load_default_playlist_songs 能读到数据的关键
+            let default_id: i64 = tx
+                .query_row(
+                    "SELECT id FROM playlists WHERE is_default = 1 LIMIT 1",
+                    [],
+                    |row| row.get(0),
+                )
+                .unwrap_or_else(|_| {
+                    tx.execute(
+                    "INSERT INTO playlists (name, is_default, sort_order, created_at, updated_at)
+                                 VALUES ('全部歌曲', 1, 0, ?1, ?1)",
+                    rusqlite::params![now],
+                ).ok();
+                    tx.last_insert_rowid()
+                });
+
+            // 批量插入 playlist_songs（INSERT OR IGNORE，幂等）
+            for (i, hash) in hashes.iter().enumerate() {
+                tx.execute(
+                    "INSERT OR IGNORE INTO playlist_songs (playlist_id, song_hash, position, added_at)
+                     VALUES (?1, ?2, ?3, ?4)",
+                    rusqlite::params![default_id, hash, i as i64, now],
+                ).ok();
+            }
+
             tx.commit()
                 .map_err(|e| format!("提交事务失败: {}", e))?;
 

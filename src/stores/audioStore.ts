@@ -77,15 +77,17 @@ export const useAudioStore = defineStore('audio', () => {
   }
 
   // ========== 切歌/播放控制 ==========
-  // BUG 2: 区分「用户手动切歌」(不自动播放) 和「自然播放结束自动下一首」(自动播放)
-  //   next() / prev() / playByIndex() = 用户手动触发 → 不自动播放
-  //   nextAuto() / playByIndexAuto() = 系统自动触发(如播放结束) → 自动播放
+  // 切歌策略: 记录播放意图 (userWantsToPlay = 切歌前是否在播放)
+  //   - 切歌前在播放 → 加载完自动播放
+  //   - 切歌前暂停 → 加载完保持暂停
+  //   - 通过 stopPlayback() 中 gain.gain = 0 实现静音切换, 无重叠/重复播放
   function next() {
     if (library.playlist.length === 0) return
 
     isSwitchingSong.value = true
-    // BUG 2 修复: 用户手动切歌不自动播放, 仅切换到下一首并暂停在 0:00
-    pendingPlay.value = false
+    // 记录播放意图: 切歌前在播放则自动播放, 否则保持暂停
+    const wasPlaying = isPlaying.value
+    pendingPlay.value = wasPlaying
     isPlaying.value = false
 
     if (loopMode.value === 'single') {
@@ -155,8 +157,9 @@ export const useAudioStore = defineStore('audio', () => {
     if (library.playlist.length === 0) return
 
     isSwitchingSong.value = true
-    // BUG 2 修复: 同上, 切歌不自动播放
-    pendingPlay.value = false
+    // 记录播放意图: 切歌前在播放则自动播放, 否则保持暂停
+    const wasPlaying = isPlaying.value
+    pendingPlay.value = wasPlaying
     isPlaying.value = false
 
     if (loopMode.value === 'single') {
@@ -194,9 +197,9 @@ export const useAudioStore = defineStore('audio', () => {
         shuffleHistory.value.push(library.currentIndex)
       }
       isSwitchingSong.value = true
-      // BUG 2 修复: 点击列表切换歌曲不自动播放, 仅加载并暂停在 0:00
-      //   用户需主动点击播放按钮才开始播放
-      pendingPlay.value = false
+      // 记录播放意图: 切歌前在播放则自动播放, 否则保持暂停
+      const wasPlaying = isPlaying.value
+      pendingPlay.value = wasPlaying
       isPlaying.value = false
       library.currentIndex = index
     }
@@ -363,48 +366,62 @@ export const useAudioStore = defineStore('audio', () => {
       if (isLoadingSong) return
       isLoadingSong = true
 
+      // 记录播放意图 (在异步加载前就保存, 防止中间状态变化)
+      const shouldAutoPlay = isPlaying.value || pendingPlay.value
+
       try {
+        // 第 1 步: 立即停止旧播放 + 静音 (AudioEngine 三层静音防护)
         audioEngine.stopPlayback()
         stopTimeUpdate()
         currentTime.value = 0
 
-        // 先确保 HTML5 Audio 静音
-        html5AudioPlayer.setVolume(0)
-
-        // 加载 HTML5 Audio(仅用于元数据和 MediaSession)
-        await html5AudioPlayer.load(song.file_path)
-        html5AudioPlayer.setVolume(0)
-        html5AudioPlayer.setMediaSession(
-          song.title,
-          song.artist,
-          song.cover_path ? library.getCoverUrl(song.cover_path) : undefined
-        )
-
-        // Web Audio 主播放链路
+        // 第 2 步: 初始化 AudioContext + 加载 Web Audio buffer (主链路, 优先)
         audioEngine.init(volume.value)
-
         const audioUrl = library.getAudioUrl(song.file_path)
         const audioBuffer = await audioEngine.getAudioBuffer(audioUrl, song.id, library.currentSong?.id)
 
         if (audioBuffer) {
           audioEngine.setCurrentUrl(audioUrl)
+        }
 
-          if (isPlaying.value || pendingPlay.value) {
-            pendingPlay.value = false
-            isSwitchingSong.value = false
-            await audioEngine.playFromOffset(0, () => {
-              // 播放开始时触发 history 记录
-              if (currentSong.value) {
-                history.startHistoryRecord(currentSong.value, audioEngine)
-              }
-            })
-            startTimeUpdate()
-          }
+        // 第 3 步: 并行加载 HTML5 Audio (仅用于元数据/MediaSession, 不发声)
+        //    放在 Web Audio 之后, 不阻塞主播放链路
+        html5AudioPlayer.setVolume(0)
+        html5AudioPlayer.load(song.file_path).then(() => {
+          html5AudioPlayer.setVolume(0)
+          html5AudioPlayer.setMediaSession(
+            song.title,
+            song.artist,
+            song.cover_path ? library.getCoverUrl(song.cover_path) : undefined
+          )
+        }).catch((e) => {
+          console.warn('[audioStore] HTML5 Audio 加载失败 (不影响播放):', e)
+        })
+
+        // 第 4 步: 根据播放意图决定是否自动播放
+        if (audioBuffer && shouldAutoPlay) {
+          pendingPlay.value = false
+          // 先设 isPlaying = true (此时 isSwitchingSong 仍为 true, isPlaying watcher 会跳过, 不会重复播放)
+          isPlaying.value = true
+          await audioEngine.playFromOffset(0, () => {
+            // 播放开始时触发 history 记录
+            if (currentSong.value) {
+              history.startHistoryRecord(currentSong.value, audioEngine)
+            }
+          })
+          // 最后才解除切歌锁
+          isSwitchingSong.value = false
+          startTimeUpdate()
+        } else {
+          // 不自动播放: 只更新 UI 状态, 保持暂停在 0:00
+          isSwitchingSong.value = false
+          pendingPlay.value = false
         }
       } catch (e) {
         console.error('[audioStore] 加载歌曲失败:', e)
         isSwitchingSong.value = false
         pendingPlay.value = false
+        isPlaying.value = false
       } finally {
         isLoadingSong = false
       }

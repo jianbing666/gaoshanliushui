@@ -59,6 +59,7 @@ function handlePlay(index: number) {
           :compact="props.compact"
           :playlist-id="props.playlistId"
           :on-play="handlePlay"
+          :fill-height="true"
         />
       </div>
     </template>
@@ -75,6 +76,8 @@ function handlePlay(index: number) {
   display: flex;
   align-items: center;
   width: 100%;
+  height: 100%;
   padding: 0;
+  overflow: hidden;
 }
 </style>

@@ -15,6 +15,8 @@ const props = defineProps<{
   index: number
   compact?: boolean
   playlistId?: string | null
+  /** 是否撑满父容器高度（虚拟列表中使用，由父容器控制高度） */
+  fillHeight?: boolean
 }>()
 
 const emit = defineEmits<{
@@ -48,9 +50,11 @@ function onCoverError(e: Event) {
     阶段 2 阶段 2.x 优化: 避免 compact 等无关 prop 变化触发整个列表 diff (5000 首歌场景收益显著)
   -->
   <div
-    class="flex items-center gap-3 px-3 rounded-lg cursor-pointer transition-colors hover:bg-gray-100/50 dark:hover:bg-white/10 group"
+    class="flex items-center gap-3 px-3 rounded-lg cursor-pointer transition-colors hover:bg-gray-100/50 dark:hover:bg-white/10 group w-full max-w-full"
     :class="[
-      compact ? 'h-9' : 'h-14',
+      fillHeight
+        ? 'h-full'
+        : (compact ? 'h-9' : 'h-14'),
       isCurrentSong ? 'bg-gray-100/50 dark:bg-white/10' : '',
     ]"
     @click="emit('play', index)"

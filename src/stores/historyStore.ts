@@ -24,6 +24,11 @@ import type { AudioEngine } from '@/audio/AudioEngine'
  *   - 历史记录操作 (startHistoryRecord / endHistoryRecord / clearPlayHistory / removeHistoryItem)
  *   - 统计报告 (generateStatsMarkdown / exportStatsReport)
  *
+ * 数据存储:
+ *   - v1.1+: 优先使用 SQLite (play_history 表)
+ *   - 启动时从 SQLite 加载, 若为空则从 localStorage 迁移
+ *   - 写入操作同时写入 SQLite 和 localStorage (双写过渡)
+ *
  * 不包含: UI 面板显隐 (在 uiStore), 播放控制 (在 audioStore), 设置 (在 settingsStore)
  *
  * 跨域调用:
@@ -36,11 +41,13 @@ import type { AudioEngine } from '@/audio/AudioEngine'
 let currentHistoryItem: PlayHistoryItem | null = null
 // 播放开始的 audioContext 时间 (用于计算 playedDuration, 比 wall-clock 更精确)
 let currentPlayStartAudioTime = 0
+// 是否已从 SQLite 加载完成
+let dbLoaded = false
 
 export const useHistoryStore = defineStore('history', () => {
   // ========== 历史记录数据 ==========
-  const playHistory = ref<PlayHistoryItem[]>(loadPlayHistory())
-  const fullPlayHistory = ref<PlayHistoryItem[]>(loadFullPlayHistory())
+  const playHistory = ref<PlayHistoryItem[]>([])
+  const fullPlayHistory = ref<PlayHistoryItem[]>([])
 
   // ========== 预聚合索引 (启动时构建一次, 后续增量更新) ==========
   // 设计目标: 6 个统计 computed 从 O(n) 全量扫描 -> O(1) 读桶 / O(唯一歌曲数) 找最值
@@ -58,6 +65,106 @@ export const useHistoryStore = defineStore('history', () => {
   let totalPlayedDuration = 0
   let totalCompletedCount = 0
   let totalUniqueSongs = 0
+
+  // ========== 从 SQLite 加载 ==========
+  async function loadFromDb() {
+    if (dbLoaded) return
+    try {
+      const records = await invoke<any[]>('get_play_history', { limit: MAX_FULL_HISTORY_ITEMS })
+      if (records && records.length > 0) {
+        // 转换为前端 PlayHistoryItem 格式
+        const items: PlayHistoryItem[] = records.map((r) => ({
+          id: r.id,
+          songId: r.song_hash,
+          title: r.title,
+          artist: r.artist,
+          album: r.album,
+          duration: r.duration,
+          cover_path: r.cover_path ? r.cover_path : null,
+          file_path: r.song_path,
+          playedAt: r.played_at,
+          playedDuration: r.played_duration,
+          completed: r.completed,
+        }))
+
+        fullPlayHistory.value = items
+        // 构建去重的展示历史 (每首歌只保留最新一条)
+        const seen = new Set<string>()
+        const displayItems: PlayHistoryItem[] = []
+        for (const item of items) {
+          if (!seen.has(item.songId)) {
+            seen.add(item.songId)
+            displayItems.push(item)
+            if (displayItems.length >= MAX_HISTORY_ITEMS) break
+          }
+        }
+        playHistory.value = displayItems
+
+        // 重建索引
+        buildStatsIndex()
+        dbLoaded = true
+        return
+      }
+
+      // 数据库为空, 尝试从 localStorage 迁移
+      const localFull = loadFullPlayHistory()
+      if (localFull.length > 0) {
+        await migrateFromLocalStorage(localFull)
+      } else {
+        // 完全没有数据, 直接用空的
+        fullPlayHistory.value = []
+        playHistory.value = []
+        buildStatsIndex()
+      }
+      dbLoaded = true
+    } catch (e) {
+      console.warn('[History] 从 SQLite 加载失败, 回退到 localStorage:', e)
+      // 回退到 localStorage
+      playHistory.value = loadPlayHistory()
+      fullPlayHistory.value = loadFullPlayHistory()
+      buildStatsIndex()
+      dbLoaded = true
+    }
+  }
+
+  // 从 localStorage 迁移到 SQLite
+  async function migrateFromLocalStorage(localItems: PlayHistoryItem[]) {
+    try {
+      const records = localItems.map((item) => ({
+        id: item.id,
+        song_hash: item.songId,
+        song_path: item.file_path,
+        title: item.title,
+        artist: item.artist,
+        album: item.album,
+        duration: item.duration,
+        cover_path: item.cover_path || '',
+        played_at: item.playedAt,
+        played_duration: item.playedDuration,
+        completed: item.completed,
+      }))
+      await invoke('batch_add_play_history', { records })
+
+      // 加载到内存
+      fullPlayHistory.value = localItems
+      const seen = new Set<string>()
+      const displayItems: PlayHistoryItem[] = []
+      for (const item of localItems) {
+        if (!seen.has(item.songId)) {
+          seen.add(item.songId)
+          displayItems.push(item)
+          if (displayItems.length >= MAX_HISTORY_ITEMS) break
+        }
+      }
+      playHistory.value = displayItems
+      buildStatsIndex()
+    } catch (e) {
+      console.warn('[History] 迁移 localStorage 数据失败:', e)
+      fullPlayHistory.value = localItems
+      playHistory.value = loadPlayHistory()
+      buildStatsIndex()
+    }
+  }
 
   // ========== 索引构建 ==========
   function buildStatsIndex() {
@@ -174,7 +281,27 @@ export const useHistoryStore = defineStore('history', () => {
     }
     savePlayHistory(playHistory.value)
 
-    // 3. 增量更新预聚合索引
+    // 3. 异步写入 SQLite
+    if (dbLoaded) {
+      const item = currentHistoryItem
+      invoke('add_play_history', {
+        record: {
+          id: item.id,
+          song_hash: item.songId,
+          song_path: item.file_path,
+          title: item.title,
+          artist: item.artist,
+          album: item.album,
+          duration: item.duration,
+          cover_path: item.cover_path || '',
+          played_at: item.playedAt,
+          played_duration: item.playedDuration,
+          completed: item.completed,
+        },
+      }).catch((e) => console.warn('[History] 写入 SQLite 失败:', e))
+    }
+
+    // 4. 增量更新预聚合索引
     const item = currentHistoryItem
     const d = new Date(item.playedAt)
     const dayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -210,6 +337,11 @@ export const useHistoryStore = defineStore('history', () => {
     savePlayHistory(playHistory.value)
     saveFullPlayHistory(fullPlayHistory.value)
     rebuildStatsIndex()
+
+    // 同步清空 SQLite
+    if (dbLoaded) {
+      invoke('clear_play_history').catch((e) => console.warn('[History] 清空 SQLite 失败:', e))
+    }
   }
 
   /**
@@ -254,6 +386,11 @@ export const useHistoryStore = defineStore('history', () => {
       totalPlayedDuration = Math.max(0, totalPlayedDuration - removed.playedDuration)
       if (removed.completed) totalCompletedCount = Math.max(0, totalCompletedCount - 1)
       if (newCount === 0) totalUniqueSongs = Math.max(0, totalUniqueSongs - 1)
+    }
+
+    // 同步删除 SQLite
+    if (dbLoaded) {
+      invoke('delete_play_history', { id }).catch((e) => console.warn('[History] 从 SQLite 删除失败:', e))
     }
   }
 
@@ -464,6 +601,7 @@ export const useHistoryStore = defineStore('history', () => {
     endHistoryRecord,
     clearPlayHistory,
     removeHistoryItem,
+    loadFromDb,
     // 报告
     generateStatsMarkdown,
     exportStatsReport,

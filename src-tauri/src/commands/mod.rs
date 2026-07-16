@@ -11,3 +11,4 @@ pub mod memories;
 pub mod migrate;
 pub mod playlist;
 pub mod export;
+pub mod history;

@@ -3,6 +3,7 @@ import { useAudioStore } from '@/stores/audioStore'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
+import { useHistoryStore } from '@/stores/historyStore'
 import { ref, watch, onMounted, onUnmounted, computed, nextTick, defineAsyncComponent, markRaw } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
@@ -41,6 +42,7 @@ const audio = useAudioStore()
 const library = useLibraryStore()
 const ui = useUIStore()
 const settings = useSettingsStore()
+const history = useHistoryStore()
 const appWindow = getCurrentWindow()
 const showSettings = ref(false)
 const autoLoadError = ref<string | null>(null)
@@ -175,6 +177,13 @@ onMounted(async () => {
       if (!result.success && result.error) {
         autoLoadError.value = `音乐库路径已失效：${result.error}\n请在设置面板中重新选择目录`
         showSettings.value = true
+      }
+
+      // 2.5 加载播放历史 (从 SQLite, 若为空则从 localStorage 迁移)
+      try {
+        await history.loadFromDb()
+      } catch (e) {
+        console.warn('[App] 加载历史记录失败:', e)
       }
 
       // 3. 注册 Tauri 窗口显示事件 (IPC 通道建立, ~50ms)

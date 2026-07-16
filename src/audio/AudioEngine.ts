@@ -49,6 +49,10 @@ export class AudioEngine {
   /** 当前音量(用于恢复 gain.gain) */
   private currentVolume = 0.8
 
+  /** 切歌静音锁: stopPlayback 时设为 true, playFromOffset 成功启动新 source 后设为 false
+   *  防止旧 source 停止过程中发出任何声音, 也防止新 source 启动前的静音状态被误恢复 */
+  private isMutedForSwitch = false
+
   // ========== 回调(由 audioStore 注入) ==========
   private _onEnded: (() => void) | null = null
   private _onStart: (() => void) | null = null
@@ -175,11 +179,6 @@ export class AudioEngine {
     this.playbackStartTime = this.audioContext.currentTime - offset
     this.isPaused = false
 
-    // 关键: 恢复音量(切歌时 stopPlayback 已将 gain 置 0)
-    if (this.gainNode) {
-      this.gainNode.gain.setValueAtTime(this.currentVolume, this.audioContext.currentTime)
-    }
-
     // 触发播放开始回调(用于 history 记录)
     if (onStart) {
       this._onStart = onStart
@@ -187,7 +186,15 @@ export class AudioEngine {
     this._onStart?.()
 
     try {
+      // 先启动 source (此时 gain 仍为 0, 不会发声)
       newSource.start(0, offset)
+      // 再恢复音量: 确保新 source 已经开始渲染, 才解除静音
+      // 这样既不会有旧声音残留, 也不会有新声音的开头被截断
+      if (this.gainNode) {
+        this.gainNode.gain.cancelScheduledValues(this.audioContext.currentTime)
+        this.gainNode.gain.setValueAtTime(this.currentVolume, this.audioContext.currentTime)
+      }
+      this.isMutedForSwitch = false
     } catch (error) {
       console.error('[Audio] AudioBufferSourceNode 启动失败:', error)
       this.audioSourceNode = null
@@ -237,17 +244,28 @@ export class AudioEngine {
 
   /**
    * 停止播放(切歌时调用)
+   *
+   * 切歌静音策略(三层防护):
+   *   1. gain.gain 立即设为 0 (最直接, 任何残留声音都会被静音)
+   *   2. isMutedForSwitch = true (静音锁, 防止 setVolume 等意外恢复音量)
+   *   3. 旧 source 置空 buffer + stop + disconnect (彻底清理)
+   *
+   * 这样即使 AudioBufferSourceNode.stop() 是异步的,
+   * 在 stopPlayback() 返回的瞬间, 也绝对不会有任何声音输出.
    */
   stopPlayback(): void {
+    // 第 1 层: 立即静音 + 静音锁 (在操作 source 之前就锁死, 确保零延迟)
+    if (this.gainNode && this.audioContext) {
+      this.gainNode.gain.cancelScheduledValues(this.audioContext.currentTime)
+      this.gainNode.gain.setValueAtTime(0, this.audioContext.currentTime)
+    }
+    this.isMutedForSwitch = true
+
     if (this.audioSourceNode) {
       try {
-        // 先清空 onended
+        // 第 2 层: 清空 onended, 防止手动 stop 触发播放结束回调
         this.audioSourceNode.onended = null
-        // 切歌静音: 立即将 gain.gain 设为 0
-        // 原因: AudioBufferSourceNode.stop() 是异步的,旧 source 仍会输出旧 buffer 1-2s
-        if (this.gainNode && this.audioContext) {
-          this.gainNode.gain.setValueAtTime(0, this.audioContext.currentTime)
-        }
+        // 第 3 层: 置空 buffer + stop + disconnect, 彻底切断旧 source
         const oldSource = this.audioSourceNode
         oldSource.buffer = null
         oldSource.stop()
@@ -293,10 +311,12 @@ export class AudioEngine {
 
   /**
    * 设置音量(0-1),应用到 gain.gain
+   * 切歌静音锁激活时, 只更新 currentVolume 但不应用到 gain,
+   * 等 playFromOffset 成功启动新 source 后再恢复
    */
   setVolume(value: number): void {
     this.currentVolume = value
-    if (this.gainNode) {
+    if (this.gainNode && !this.isMutedForSwitch) {
       this.gainNode.gain.value = value
     }
   }

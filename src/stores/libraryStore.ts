@@ -580,44 +580,29 @@ async function scanMusicFolder(path: string, forceRefresh = false) {
 
     isLoading.value = true
     try {
-      // 优先从数据库加载（非首次启动，速度快）
-      try {
-        const songsFromDb = await invoke<Song[]>('load_default_playlist_songs')
-        if (songsFromDb && songsFromDb.length > 0) {
-          playlist.value = songsFromDb
-          folderPath.value = savedPath
-          // 加载歌单列表
-          await loadPlaylistsFromDb()
-          // 加载当前歌单的歌曲
-          void loadActivePlaylistSongs()
-          if (songsFromDb.length > 0 && currentIndex.value === -1) {
-            currentIndex.value = 0
-          }
-          return { success: true }
+      // 直接从数据库加载（不扫描物理文件夹）
+      // 只有用户主动点击"选择文件夹"或"重新扫描"时才扫描物理文件夹
+      const songsFromDb = await invoke<Song[]>('load_default_playlist_songs')
+      if (songsFromDb && songsFromDb.length > 0) {
+        playlist.value = songsFromDb
+        folderPath.value = savedPath
+        await loadPlaylistsFromDb()
+        void loadActivePlaylistSongs()
+        if (songsFromDb.length > 0 && currentIndex.value === -1) {
+          currentIndex.value = 0
         }
-      } catch (dbError) {
-        // 数据库加载失败（可能是第一次启动，数据库为空），回退到扫描文件夹
-        console.warn('从数据库加载失败，回退到文件夹扫描:', dbError)
+        return { success: true }
       }
 
-      // 数据库为空或加载失败，扫描物理文件夹
-      const metaSrc = metadataSource.value === 'filename' ? 'filename' : 'auto'
-      const songs = await invoke<Song[]>('scan_music_folder', {
-        folderPath: savedPath,
-        metadataSource: metaSrc,
-        forceRefresh: false,
-      })
-      playlist.value = songs
+      // 数据库为空，不自动扫描文件夹
+      // 用户需要手动点击"选择文件夹"或"重新扫描"来导入音乐
+      playlist.value = []
       folderPath.value = savedPath
-      syncDefaultPlaylist(songs)
-      // 加载当前歌单的歌曲
+      await loadPlaylistsFromDb()
       void loadActivePlaylistSongs()
-      if (songs.length > 0 && currentIndex.value === -1) {
-        currentIndex.value = 0
-      }
       return { success: true }
     } catch (error) {
-      console.error('自动加载音乐库失败(路径可能已失效):', error)
+      console.error('从数据库加载音乐库失败:', error)
       clearMusicLibraryPath()
       folderPath.value = ''
       const errorMsg = error instanceof Error ? error.message : '未知错误'

@@ -126,10 +126,11 @@ const useVirtualList = computed(() => library.filteredActivePlaylistSongs.length
             :songs="library.filteredActivePlaylistSongs"
             @play="playFilteredSong"
           >
-            <template #default="{ song, index }">
+            <template #default="{ song, index, fillHeight }">
               <SongItem
                 :song="song"
                 :index="index"
+                :fill-height="fillHeight"
                 @play="playFilteredSong"
               />
             </template>

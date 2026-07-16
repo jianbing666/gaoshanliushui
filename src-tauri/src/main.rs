@@ -16,6 +16,7 @@ use commands::memories;
 use commands::migrate;
 use commands::playlist;
 use commands::export;
+use commands::history;
 
 use std::sync::Mutex;
 use tauri::Manager;
@@ -67,6 +68,7 @@ fn main() {
                 memories::init_schema(conn)?;
                 migrate::init_schema(conn)?;
                 playlist::init_schema(conn)?;
+                history::init_history_schema(conn)?;
                 Ok(())
             }) {
                 eprintln!("[db] 初始化数据库失败, 相关功能将不可用: {}", e);
@@ -124,6 +126,13 @@ fn main() {
             playlist::export_playlist,
             // BUG 7: 通用文件导出 (绕过 fs plugin 权限限制)
             export::write_text_file,
+            // 播放历史记录
+            history::get_play_history,
+            history::add_play_history,
+            history::batch_add_play_history,
+            history::update_play_history,
+            history::delete_play_history,
+            history::clear_play_history,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
