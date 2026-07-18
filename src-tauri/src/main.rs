@@ -19,9 +19,12 @@ use commands::export;
 use commands::history;
 use commands::app_config;
 use commands::data_dir;
+use commands::song;
+use tauri_plugin_media::MediaExt;
 
 use std::sync::Mutex;
 use tauri::Manager;
+use tauri::Emitter;
 
 pub struct AppSettings {
     pub minimize_to_tray: Mutex<bool>,
@@ -50,6 +53,8 @@ fn main() {
             Some(vec![]),
         ))
         .plugin(tauri_plugin_dialog::init())
+        .plugin(tauri_plugin_media::init())
+        .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .manage(global_shortcut::ShortcutStore::default())
@@ -81,6 +86,22 @@ fn main() {
             }) {
                 eprintln!("[db] 初始化数据库失败, 相关功能将不可用: {}", e);
             }
+
+            // 注册媒体控制事件回调 (将系统媒体按键事件转发到前端)
+            let app_handle = app.handle().clone();
+            app.media().set_event_handler(move |event| {
+                use tauri_plugin_media::MediaControlEventType::*;
+                let event_name = match event.event_type {
+                    Play => "media://play",
+                    Pause => "media://pause",
+                    PlayPause => "media://playpause",
+                    Stop => "media://stop",
+                    Next => "media://next",
+                    Previous => "media://previous",
+                    _ => return,
+                };
+                let _ = app_handle.emit(event_name, ());
+            });
 
             Ok(())
         })
@@ -149,6 +170,8 @@ fn main() {
             data_dir::open_data_dir,
             data_dir::clear_thumbnail_cache,
             data_dir::migrate_data,
+            // 歌曲管理
+            song::delete_song,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -58,6 +58,8 @@ export interface Playlist {
   songIds: string[]
   /** 是否展开（仅用于 UI 状态） */
   expanded?: boolean
+  /** 歌曲数量（从数据库获取） */
+  songCount?: number
 }
 
 /// 歌单记录 (SQLite 版)

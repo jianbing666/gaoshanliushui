@@ -1,12 +1,14 @@
 import { defineStore } from 'pinia'
 import { ref, computed, nextTick, watch, onScopeDispose } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import type { LoopMode } from '@/types/song'
 import { audioEngine } from '@/audio/AudioEngine'
 import { html5AudioPlayer } from '@/audio/HTML5AudioPlayer'
 import { loadSettings, saveSettings } from '@/utils/storage'
 import { useLibraryStore } from './libraryStore'
 import { useHistoryStore } from './historyStore'
+import { mediaControls, PlaybackStatus } from 'tauri-plugin-media-api'
 
 /**
  * 播放控制域 store
@@ -53,27 +55,47 @@ export const useAudioStore = defineStore('audio', () => {
 
   // ========== 计算属性 ==========
   const currentSong = computed(() => library.currentSong)
+
+  // 当前歌单的歌曲列表（默认歌单 = 全部歌曲，自定义歌单 = 歌单内歌曲）
+  const activeSongs = computed(() => library.activePlaylistSongs)
+
+  // 当前歌曲在当前歌单中的索引
+  const currentActiveIndex = computed(() => {
+    const current = currentSong.value
+    if (!current) return -1
+    return activeSongs.value.findIndex((s) => s.id === current.id)
+  })
+
   const hasNext = computed(() => {
     if (loopMode.value === 'single') return true
-    if (loopMode.value === 'list') return true
-    if (loopMode.value === 'shuffle') return library.playlist.length > 0
-    return library.currentIndex < library.playlist.length - 1
+    if (loopMode.value === 'list') return activeSongs.value.length > 0
+    if (loopMode.value === 'shuffle') return activeSongs.value.length > 0
+    return currentActiveIndex.value >= 0 && currentActiveIndex.value < activeSongs.value.length - 1
   })
   const hasPrev = computed(() => {
     if (loopMode.value === 'single') return true
-    if (loopMode.value === 'list') return true
-    if (loopMode.value === 'shuffle') return library.playlist.length > 0
-    return library.currentIndex > 0
+    if (loopMode.value === 'list') return activeSongs.value.length > 0
+    if (loopMode.value === 'shuffle') return activeSongs.value.length > 0
+    return currentActiveIndex.value > 0
   })
 
   // ========== 工具方法 ==========
+  // 将当前歌单中的索引转换为全局索引
+  function activeIndexToGlobal(activeIdx: number): number {
+    const song = activeSongs.value[activeIdx]
+    if (!song) return -1
+    return library.playlist.findIndex((s) => s.id === song.id)
+  }
+
   function getRandomIndex(): number {
-    if (library.playlist.length <= 1) return 0
-    let newIndex = Math.floor(Math.random() * library.playlist.length)
-    if (newIndex === library.currentIndex && library.playlist.length > 1) {
-      newIndex = (newIndex + 1) % library.playlist.length
+    const songs = activeSongs.value
+    if (songs.length <= 1) return 0
+    const currentIdx = currentActiveIndex.value
+    let newActiveIndex = Math.floor(Math.random() * songs.length)
+    if (newActiveIndex === currentIdx && songs.length > 1) {
+      newActiveIndex = (newActiveIndex + 1) % songs.length
     }
-    return newIndex
+    return activeIndexToGlobal(newActiveIndex)
   }
 
   // ========== 切歌/播放控制 ==========
@@ -82,7 +104,8 @@ export const useAudioStore = defineStore('audio', () => {
   //   - 切歌前暂停 → 加载完保持暂停
   //   - 通过 stopPlayback() 中 gain.gain = 0 实现静音切换, 无重叠/重复播放
   function next() {
-    if (library.playlist.length === 0) return
+    const songs = activeSongs.value
+    if (songs.length === 0) return
 
     isSwitchingSong.value = true
     // 记录播放意图: 切歌前在播放则自动播放, 否则保持暂停
@@ -109,10 +132,12 @@ export const useAudioStore = defineStore('audio', () => {
       return
     }
 
-    if (library.currentIndex < library.playlist.length - 1) {
-      library.currentIndex++
+    // 顺序 / 列表循环: 基于当前歌单
+    const curIdx = currentActiveIndex.value
+    if (curIdx >= 0 && curIdx < songs.length - 1) {
+      library.currentIndex = activeIndexToGlobal(curIdx + 1)
     } else if (loopMode.value === 'list') {
-      library.currentIndex = 0
+      library.currentIndex = activeIndexToGlobal(0)
     }
 
     void invoke('clean_renderer_memory').catch(() => {})
@@ -120,7 +145,8 @@ export const useAudioStore = defineStore('audio', () => {
 
   // 自动下一首 (自然播放结束时调用, 会自动播放)
   function nextAuto() {
-    if (library.playlist.length === 0) return
+    const songs = activeSongs.value
+    if (songs.length === 0) return
     isSwitchingSong.value = true
     pendingPlay.value = true
     isPlaying.value = true
@@ -144,17 +170,20 @@ export const useAudioStore = defineStore('audio', () => {
       return
     }
 
-    if (library.currentIndex < library.playlist.length - 1) {
-      library.currentIndex++
+    // 顺序 / 列表循环: 基于当前歌单
+    const curIdx = currentActiveIndex.value
+    if (curIdx >= 0 && curIdx < songs.length - 1) {
+      library.currentIndex = activeIndexToGlobal(curIdx + 1)
     } else if (loopMode.value === 'list') {
-      library.currentIndex = 0
+      library.currentIndex = activeIndexToGlobal(0)
     }
 
     void invoke('clean_renderer_memory').catch(() => {})
   }
 
   function prev() {
-    if (library.playlist.length === 0) return
+    const songs = activeSongs.value
+    if (songs.length === 0) return
 
     isSwitchingSong.value = true
     // 记录播放意图: 切歌前在播放则自动播放, 否则保持暂停
@@ -182,10 +211,12 @@ export const useAudioStore = defineStore('audio', () => {
       return
     }
 
-    if (library.currentIndex > 0) {
-      library.currentIndex--
+    // 顺序 / 列表循环: 基于当前歌单
+    const curIdx = currentActiveIndex.value
+    if (curIdx > 0) {
+      library.currentIndex = activeIndexToGlobal(curIdx - 1)
     } else if (loopMode.value === 'list') {
-      library.currentIndex = library.playlist.length - 1
+      library.currentIndex = activeIndexToGlobal(songs.length - 1)
     }
 
     void invoke('clean_renderer_memory').catch(() => {})
@@ -259,7 +290,6 @@ export const useAudioStore = defineStore('audio', () => {
     isPlaying.value = false
     audioEngine.pausePlayback()
     stopTimeUpdate()
-    html5AudioPlayer.pause()
     // 暂停: 累加本次播放时长到历史
     history.endHistoryRecord(audioEngine)
   }
@@ -288,7 +318,6 @@ export const useAudioStore = defineStore('audio', () => {
     isPlaying.value = false
     audioEngine.pausePlayback()
     stopTimeUpdate()
-    html5AudioPlayer.pause()
   }
 
   async function forceTogglePlay() {
@@ -326,8 +355,8 @@ export const useAudioStore = defineStore('audio', () => {
       return
     }
 
-    // 顺序模式末尾: 停止播放
-    if (loopMode.value === 'none' && library.currentIndex >= library.playlist.length - 1) {
+    // 顺序模式末尾: 停止播放（基于当前歌单）
+    if (loopMode.value === 'none' && currentActiveIndex.value >= activeSongs.value.length - 1) {
       isPlaying.value = false
       return
     }
@@ -437,10 +466,10 @@ export const useAudioStore = defineStore('audio', () => {
       if (playing) {
         await audioEngine.resumePlayback()
         startTimeUpdate()
+        void html5AudioPlayer.play()
       } else {
         audioEngine.pausePlayback()
         stopTimeUpdate()
-        html5AudioPlayer.pause()
       }
     }
   )
@@ -478,11 +507,21 @@ export const useAudioStore = defineStore('audio', () => {
   function setupMediaSessionHandlers() {
     if (!('mediaSession' in navigator)) return
     try {
-      navigator.mediaSession.setActionHandler('play', () => { void forcePlay() })
-      navigator.mediaSession.setActionHandler('pause', () => { void forcePause() })
-      navigator.mediaSession.setActionHandler('previoustrack', () => { void forcePrevious() })
-      navigator.mediaSession.setActionHandler('nexttrack', () => { void forceNext() })
-      navigator.mediaSession.setActionHandler('stop', () => { void forcePause() })
+      navigator.mediaSession.setActionHandler('play', () => {
+        void forcePlay()
+      })
+      navigator.mediaSession.setActionHandler('pause', () => {
+        void forcePause()
+      })
+      navigator.mediaSession.setActionHandler('previoustrack', () => {
+        void forcePrevious()
+      })
+      navigator.mediaSession.setActionHandler('nexttrack', () => {
+        void forceNext()
+      })
+      navigator.mediaSession.setActionHandler('stop', () => {
+        void forcePause()
+      })
     } catch (e) {
       console.warn('[MediaSession] 设置 action handler 失败:', e)
     }
@@ -493,13 +532,103 @@ export const useAudioStore = defineStore('audio', () => {
   function syncMediaSessionPlaybackState() {
     if (!('mediaSession' in navigator)) return
     try {
-      navigator.mediaSession.playbackState = isPlaying.value ? 'playing' : 'paused'
-    } catch {
-      // 忽略
+      const state = isPlaying.value ? 'playing' : 'paused'
+      navigator.mediaSession.playbackState = state
+    } catch (e) {
+      console.warn('[MediaSession] 同步 playbackState 失败:', e)
     }
   }
   syncMediaSessionPlaybackState()
   watch(() => isPlaying.value, syncMediaSessionPlaybackState)
+
+  // ========== 原生系统媒体控制 (tauri-plugin-media) ==========
+  // 绕过 WebView2 MediaSession 的不稳定性, 直接通过 Rust 原生层对接 Windows SMTC
+  // 事件通过 Tauri 事件系统从 Rust 端 emit 到前端 (setEventHandler 前端 API 未实现)
+  let nativeMediaInitialized = false
+
+  async function initNativeMediaControls() {
+    try {
+      await mediaControls.initialize('com.gaoshanliushui.player', '高山流水')
+      nativeMediaInitialized = true
+
+      const events = ['play', 'pause', 'playpause', 'stop', 'next', 'previous']
+      for (const evt of events) {
+        await listen(`media://${evt}`, () => {
+          switch (evt) {
+            case 'play':
+              void forcePlay()
+              break
+            case 'pause':
+              void forcePause()
+              break
+            case 'playpause':
+              if (isPlaying.value) {
+                void forcePause()
+              } else {
+                void forcePlay()
+              }
+              break
+            case 'stop':
+              void forcePause()
+              break
+            case 'next':
+              void forceNext()
+              break
+            case 'previous':
+              void forcePrevious()
+              break
+          }
+        })
+      }
+    } catch (e) {
+      console.warn('[NativeMedia] 初始化失败:', e)
+    }
+  }
+
+  async function updateNativeMediaMetadata() {
+    if (!nativeMediaInitialized || !currentSong.value) return
+    try {
+      const song = currentSong.value
+      const library = useLibraryStore()
+      await mediaControls.updateNowPlaying(
+        {
+          title: song.title,
+          artist: song.artist || '未知艺术家',
+          album: song.album || undefined,
+          duration: duration.value > 0 ? duration.value : undefined,
+          artworkUrl: song.cover_path ? library.getCoverUrl(song.cover_path) : undefined,
+          artworkData: '',
+        },
+        {
+          status: isPlaying.value ? PlaybackStatus.Playing : PlaybackStatus.Paused,
+          position: currentTime.value,
+        }
+      )
+    } catch (e) {
+      console.warn('[NativeMedia] 更新 metadata 失败:', e)
+    }
+  }
+
+  async function updateNativeMediaPlaybackStatus() {
+    if (!nativeMediaInitialized) return
+    try {
+      await mediaControls.updatePlaybackStatus(
+        isPlaying.value ? PlaybackStatus.Playing : PlaybackStatus.Paused
+      )
+    } catch (e) {
+      console.warn('[NativeMedia] 更新播放状态失败:', e)
+    }
+  }
+
+  void initNativeMediaControls()
+
+  watch(() => currentSong.value, () => {
+    void updateNativeMediaMetadata()
+  })
+
+  watch(() => isPlaying.value, () => {
+    void updateNativeMediaPlaybackStatus()
+  })
 
   // ========== 监听 settings 的睡眠定时器触发 ==========
   function handleSleepTimerFire() {

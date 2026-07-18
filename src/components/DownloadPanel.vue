@@ -5,6 +5,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useUIStore } from '@/stores/uiStore'
+import { useLibraryStore } from '@/stores/libraryStore'
 import FolderIcon from '@/components/icons/FolderIcon.vue'
 import ChevronRightIcon from '@/components/icons/ChevronRightIcon.vue'
 import DownloadIcon from '@/components/icons/DownloadIcon.vue'
@@ -13,6 +14,7 @@ import CheckIcon from '@/components/icons/CheckIcon.vue'
 
 const settings = useSettingsStore()
 const ui = useUIStore()
+const library = useLibraryStore()
 
 // ============== 表单字段 (单条模式) ==============
 const url = ref('')
@@ -160,6 +162,7 @@ async function startDownload() {
     status.value = 'success'
     resultMessage.value = `已保存到: ${savedPath}`
     lastSavedPath.value = savedPath
+    await library.autoLoadMusicLibrary()
   } catch (e) {
     status.value = 'error'
     resultMessage.value = typeof e === 'string' ? e : String(e)
@@ -340,6 +343,11 @@ async function startBatchDownload() {
   batchRunning.value = false
   batchFinished.value = true
   batchLog.value.unshift(`[${new Date().toLocaleTimeString()}] 批量下载结束, 成功 ${batchCompleted.value}, 失败 ${batchFailed.value}`)
+
+  if (batchCompleted.value > 0) {
+    await library.autoLoadMusicLibrary()
+    batchLog.value.unshift(`[${new Date().toLocaleTimeString()}] 音乐库已刷新`)
+  }
 }
 
 function clearBatch() {
@@ -552,7 +560,7 @@ onUnmounted(() => {
         v-if="!isDownloading && status === 'idle' && !showBatchPanel"
         class="text-xs text-gray-400 dark:text-gray-500 leading-relaxed bg-gray-100/40 dark:bg-gray-800/40 rounded-md p-3"
       >
-        点击右上角 <span class="text-gray-600 dark:text-gray-300">📄</span> 可批量导入 .md / .txt 文档(每行: 歌手-歌名-链接)。
+        点击右上角文件图标可批量导入 .md / .txt 文档(每行: 歌手-歌名-链接)。
       </div>
 
       <!-- ==================== 批量下载区域 ==================== -->

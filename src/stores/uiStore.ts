@@ -1,7 +1,7 @@
 import { defineStore } from 'pinia'
-import { ref, watch } from 'vue'
+import { ref, computed } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
-import type { Song } from '@/types/song'
+import type { Song, Playlist } from '@/types/song'
 import { useSettingsStore } from './settingsStore'
 
 /**
@@ -29,6 +29,13 @@ export interface ContextMenuState {
   y: number
 }
 
+export interface PlaylistContextMenuState {
+  visible: boolean
+  playlist: Playlist | null
+  x: number
+  y: number
+}
+
 export interface EditMetadataState {
   visible: boolean
   song: Song | null
@@ -44,14 +51,24 @@ const NORMAL_TARGET_H = 800
 const MINI_ANIM_DURATION = 320 // ms
 const MINI_INVOKE_INTERVAL = 10 // ms - IPC 节流, 避免每帧调用
 
+export type RightPanelKey = 'settings' | 'stats' | 'download' | 'memory' | 'equalizer' | null
+
 export const useUIStore = defineStore('ui', () => {
-  // ========== 面板可见性 ==========
+  // ========== 左侧面板 ==========
   const showSidebar = ref(true)
   const showHistoryDrawer = ref(false)
-  const showStatsPanel = ref(false)
-  const showDownloadPanel = ref(false)
-  // Memory feature - 高山流水 v1.1: 回忆抽屉 (右侧, w-80, 与设置/统计/下载同侧互斥)
-  const showMemoryDrawer = ref(false)
+
+  // ========== 右侧面板（统一管理，同侧互斥） ==========
+  // 单一数据源: activeRightPanel 直接表示当前打开的右侧面板
+  // 替代之前分散的 showStatsPanel / showDownloadPanel / showMemoryDrawer + App.vue 里的 showSettings
+  const activeRightPanel = ref<RightPanelKey>(null)
+
+  // 为了向后兼容，保留各个布尔 ref（computed 形式）
+  const showStatsPanel = computed(() => activeRightPanel.value === 'stats')
+  const showDownloadPanel = computed(() => activeRightPanel.value === 'download')
+  const showMemoryDrawer = computed(() => activeRightPanel.value === 'memory')
+  const showSettings = computed(() => activeRightPanel.value === 'settings')
+  const showEqualizerPanel = computed(() => activeRightPanel.value === 'equalizer')
 
   // ========== 侧边栏 toggle(同侧互斥:与历史记录) ==========
   function toggleSidebar() {
@@ -69,50 +86,44 @@ export const useUIStore = defineStore('ui', () => {
     showHistoryDrawer.value = !showHistoryDrawer.value
   }
 
-  // ========== 记忆抽屉 toggle(同侧互斥:与设置/统计/下载, 右侧 w-80) ==========
-  // 记忆抽屉与设置/统计/下载都在右侧, 一次只能开一个
-  // 展开记忆抽屉时, 通过自定义事件通知 App.vue 收起 showSettings
-  function toggleMemoryDrawer() {
-    const newVal = !showMemoryDrawer.value
-    showMemoryDrawer.value = newVal
-    if (newVal) {
-      // 通知 App.vue: 展开记忆抽屉时收起 showSettings
-      window.dispatchEvent(new CustomEvent('ui:memory-opened'))
+  // ========== 右侧面板统一切换 ==========
+  function toggleRightPanel(panel: Exclude<RightPanelKey, null>) {
+    if (activeRightPanel.value === panel) {
+      // 点击已打开的面板 → 关闭
+      activeRightPanel.value = null
+    } else {
+      // 切换到新面板（自动关闭旧的，因为是单一状态）
+      activeRightPanel.value = panel
     }
+  }
+
+  // ========== 设置面板 toggle ==========
+  function toggleSettingsPanel() {
+    toggleRightPanel('settings')
   }
 
   // ========== 统计面板 toggle ==========
   function toggleStatsPanel() {
-    const newVal = !showStatsPanel.value
-    showStatsPanel.value = newVal
-    if (newVal) {
-      // BUG 5 修复: 展开统计时关闭所有其他右侧面板
-      showDownloadPanel.value = false
-      showMemoryDrawer.value = false
-      // 通知 App.vue: 展开统计时收起 showSettings
-      window.dispatchEvent(new CustomEvent('ui:stats-opened'))
-    }
+    toggleRightPanel('stats')
   }
 
   // ========== 下载面板 toggle ==========
   function toggleDownloadPanel() {
-    const newVal = !showDownloadPanel.value
-    showDownloadPanel.value = newVal
-    if (newVal) {
-      // BUG 5 修复: 展开下载时关闭所有其他右侧面板
-      showStatsPanel.value = false
-      showMemoryDrawer.value = false
-      // 通知 App.vue: 展开下载时收起 showSettings
-      window.dispatchEvent(new CustomEvent('ui:download-opened'))
-    }
+    toggleRightPanel('download')
   }
 
-  // ========== 强制关闭右侧所有面板(供 App.vue 同侧互斥使用) ==========
-  // 用直接赋值而非 toggle, 避免 "关闭已关闭的面板" 时反而打开的 BUG
+  // ========== 记忆抽屉 toggle ==========
+  function toggleMemoryDrawer() {
+    toggleRightPanel('memory')
+  }
+
+  function toggleEqualizerPanel() {
+    toggleRightPanel('equalizer')
+  }
+
+  // ========== 关闭右侧所有面板 ==========
   function closeAllRightPanels() {
-    showStatsPanel.value = false
-    showDownloadPanel.value = false
-    showMemoryDrawer.value = false
+    activeRightPanel.value = null
   }
 
   // ========== 全局右键菜单 ==========
@@ -136,6 +147,27 @@ export const useUIStore = defineStore('ui', () => {
 
   function closeContextMenu() {
     contextMenu.value.visible = false
+  }
+
+  // ========== 歌单右键菜单 ==========
+  const playlistContextMenu = ref<PlaylistContextMenuState>({
+    visible: false,
+    playlist: null,
+    x: 0,
+    y: 0,
+  })
+
+  function openPlaylistContextMenu(playlist: Playlist, x: number, y: number) {
+    playlistContextMenu.value = {
+      visible: true,
+      playlist,
+      x,
+      y,
+    }
+  }
+
+  function closePlaylistContextMenu() {
+    playlistContextMenu.value.visible = false
   }
 
   // ========== 编辑元数据浮窗 ==========
@@ -171,6 +203,41 @@ export const useUIStore = defineStore('ui', () => {
   function closeCreatePlaylistModal() {
     showCreatePlaylistModal.value = false
     createPlaylistAddSongId.value = null
+  }
+
+  // ========== 通用确认对话框 ==========
+  const confirmDialog = ref({
+    visible: false,
+    title: '',
+    message: '',
+    type: 'default' as 'default' | 'danger',
+    confirmText: '',
+    cancelText: '',
+    onConfirm: null as (() => void) | null,
+  })
+
+  function openConfirmDialog(options: {
+    title: string
+    message: string
+    type?: 'default' | 'danger'
+    confirmText?: string
+    cancelText?: string
+    onConfirm?: () => void
+  }) {
+    confirmDialog.value = {
+      visible: true,
+      title: options.title,
+      message: options.message,
+      type: options.type || 'default',
+      confirmText: options.confirmText || '',
+      cancelText: options.cancelText || '',
+      onConfirm: options.onConfirm || null,
+    }
+  }
+
+  function closeConfirmDialog() {
+    confirmDialog.value.visible = false
+    confirmDialog.value.onConfirm = null
   }
 
   // ========== 迷你模式 ==========
@@ -262,31 +329,33 @@ export const useUIStore = defineStore('ui', () => {
     miniModeAnimId = requestAnimationFrame(step)
   }
 
-  // 监听 showStatsPanel / showDownloadPanel, 通知 App.vue 处理 showSettings 互斥
-  // (通过自定义事件,App.vue 在 onMounted 中订阅)
-  watch([showStatsPanel, showDownloadPanel], ([stats, dl]) => {
-    if (stats || dl) {
-      window.dispatchEvent(new CustomEvent('ui:right-panel-opened', { detail: { stats, download: dl } }))
-    }
-  })
-
   return {
     // 面板
     showSidebar,
     showHistoryDrawer,
+    activeRightPanel,
     showStatsPanel,
     showDownloadPanel,
     showMemoryDrawer,
+    showSettings,
+    showEqualizerPanel,
     toggleSidebar,
     toggleHistoryDrawer,
+    toggleRightPanel,
+    toggleSettingsPanel,
     toggleStatsPanel,
     toggleDownloadPanel,
     toggleMemoryDrawer,
+    toggleEqualizerPanel,
     closeAllRightPanels,
     // 右键菜单
     contextMenu,
     openContextMenu,
     closeContextMenu,
+    // 歌单右键菜单
+    playlistContextMenu,
+    openPlaylistContextMenu,
+    closePlaylistContextMenu,
     // 编辑元数据
     editMetadata,
     openEditMetadata,
@@ -296,6 +365,10 @@ export const useUIStore = defineStore('ui', () => {
     createPlaylistAddSongId,
     openCreatePlaylistModal,
     closeCreatePlaylistModal,
+    // 通用确认对话框
+    confirmDialog,
+    openConfirmDialog,
+    closeConfirmDialog,
     // 迷你模式
     isMiniMode,
     setMiniMode,

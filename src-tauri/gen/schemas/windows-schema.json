@@ -429,6 +429,84 @@
           "markdownDescription": "Denies the is_enabled command without any pre-configured scope."
         },
         {
+          "description": "No features are enabled by default, as we believe\nthe clipboard can be inherently dangerous and it is \napplication specific if read and/or write access is needed.\n\nClipboard interaction needs to be explicitly enabled.\n",
+          "type": "string",
+          "const": "clipboard-manager:default",
+          "markdownDescription": "No features are enabled by default, as we believe\nthe clipboard can be inherently dangerous and it is \napplication specific if read and/or write access is needed.\n\nClipboard interaction needs to be explicitly enabled.\n"
+        },
+        {
+          "description": "Enables the clear command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:allow-clear",
+          "markdownDescription": "Enables the clear command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the read_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:allow-read-image",
+          "markdownDescription": "Enables the read_image command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the read_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:allow-read-text",
+          "markdownDescription": "Enables the read_text command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the write_html command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:allow-write-html",
+          "markdownDescription": "Enables the write_html command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the write_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:allow-write-image",
+          "markdownDescription": "Enables the write_image command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the write_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:allow-write-text",
+          "markdownDescription": "Enables the write_text command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clear command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:deny-clear",
+          "markdownDescription": "Denies the clear command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the read_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:deny-read-image",
+          "markdownDescription": "Denies the read_image command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the read_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:deny-read-text",
+          "markdownDescription": "Denies the read_text command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the write_html command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:deny-write-html",
+          "markdownDescription": "Denies the write_html command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the write_image command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:deny-write-image",
+          "markdownDescription": "Denies the write_image command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the write_text command without any pre-configured scope.",
+          "type": "string",
+          "const": "clipboard-manager:deny-write-text",
+          "markdownDescription": "Denies the write_text command without any pre-configured scope."
+        },
+        {
           "description": "Default core plugins set.\n#### This default permission set includes:\n\n- `core:path:default`\n- `core:event:default`\n- `core:window:default`\n- `core:webview:default`\n- `core:app:default`\n- `core:image:default`\n- `core:resources:default`\n- `core:menu:default`\n- `core:tray:default`",
           "type": "string",
           "const": "core:default",
@@ -2575,6 +2653,144 @@
           "type": "string",
           "const": "global-shortcut:deny-unregister-all",
           "markdownDescription": "Denies the unregister_all command without any pre-configured scope."
+        },
+        {
+          "description": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-initialize-session`\n- `allow-set-metadata`\n- `allow-set-playback-info`\n- `allow-set-playback-status`\n- `allow-set-position`\n- `allow-clear-metadata`\n- `allow-get-metadata`\n- `allow-get-playback-info`\n- `allow-get-playback-status`\n- `allow-get-position`\n- `allow-is-enabled`",
+          "type": "string",
+          "const": "media:default",
+          "markdownDescription": "Default permissions for the plugin\n#### This default permission set includes:\n\n- `allow-initialize-session`\n- `allow-set-metadata`\n- `allow-set-playback-info`\n- `allow-set-playback-status`\n- `allow-set-position`\n- `allow-clear-metadata`\n- `allow-get-metadata`\n- `allow-get-playback-info`\n- `allow-get-playback-status`\n- `allow-get-position`\n- `allow-is-enabled`"
+        },
+        {
+          "description": "Enables the clear_metadata command without any pre-configured scope.",
+          "type": "string",
+          "const": "media:allow-clear-metadata",
+          "markdownDescription": "Enables the clear_metadata command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_metadata command without any pre-configured scope.",
+          "type": "string",
+          "const": "media:allow-get-metadata",
+          "markdownDescription": "Enables the get_metadata command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_playback_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "media:allow-get-playback-info",
+          "markdownDescription": "Enables the get_playback_info command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_playback_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "media:allow-get-playback-status",
+          "markdownDescription": "Enables the get_playback_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the get_position command without any pre-configured scope.",
+          "type": "string",
+          "const": "media:allow-get-position",
+          "markdownDescription": "Enables the get_position command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the initialize_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "media:allow-initialize-session",
+          "markdownDescription": "Enables the initialize_session command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the is_enabled command without any pre-configured scope.",
+          "type": "string",
+          "const": "media:allow-is-enabled",
+          "markdownDescription": "Enables the is_enabled command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_metadata command without any pre-configured scope.",
+          "type": "string",
+          "const": "media:allow-set-metadata",
+          "markdownDescription": "Enables the set_metadata command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_playback_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "media:allow-set-playback-info",
+          "markdownDescription": "Enables the set_playback_info command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_playback_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "media:allow-set-playback-status",
+          "markdownDescription": "Enables the set_playback_status command without any pre-configured scope."
+        },
+        {
+          "description": "Enables the set_position command without any pre-configured scope.",
+          "type": "string",
+          "const": "media:allow-set-position",
+          "markdownDescription": "Enables the set_position command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the clear_metadata command without any pre-configured scope.",
+          "type": "string",
+          "const": "media:deny-clear-metadata",
+          "markdownDescription": "Denies the clear_metadata command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_metadata command without any pre-configured scope.",
+          "type": "string",
+          "const": "media:deny-get-metadata",
+          "markdownDescription": "Denies the get_metadata command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_playback_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "media:deny-get-playback-info",
+          "markdownDescription": "Denies the get_playback_info command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_playback_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "media:deny-get-playback-status",
+          "markdownDescription": "Denies the get_playback_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the get_position command without any pre-configured scope.",
+          "type": "string",
+          "const": "media:deny-get-position",
+          "markdownDescription": "Denies the get_position command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the initialize_session command without any pre-configured scope.",
+          "type": "string",
+          "const": "media:deny-initialize-session",
+          "markdownDescription": "Denies the initialize_session command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the is_enabled command without any pre-configured scope.",
+          "type": "string",
+          "const": "media:deny-is-enabled",
+          "markdownDescription": "Denies the is_enabled command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_metadata command without any pre-configured scope.",
+          "type": "string",
+          "const": "media:deny-set-metadata",
+          "markdownDescription": "Denies the set_metadata command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_playback_info command without any pre-configured scope.",
+          "type": "string",
+          "const": "media:deny-set-playback-info",
+          "markdownDescription": "Denies the set_playback_info command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_playback_status command without any pre-configured scope.",
+          "type": "string",
+          "const": "media:deny-set-playback-status",
+          "markdownDescription": "Denies the set_playback_status command without any pre-configured scope."
+        },
+        {
+          "description": "Denies the set_position command without any pre-configured scope.",
+          "type": "string",
+          "const": "media:deny-set-position",
+          "markdownDescription": "Denies the set_position command without any pre-configured scope."
         },
         {
           "description": "This permission set configures which\nshell functionality is exposed by default.\n\n#### Granted Permissions\n\nIt allows to use the `open` functionality with a reasonable\nscope pre-configured. It will allow opening `http(s)://`,\n`tel:` and `mailto:` links.\n\n#### This default permission set includes:\n\n- `allow-open`",

@@ -14,7 +14,7 @@ import { useUIStore } from '@/stores/uiStore'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import XIcon from '@/components/icons/XIcon.vue'
-import ChevronLeftIcon from '@/components/icons/ChevronLeftIcon.vue'
+import ChevronRightIcon from '@/components/icons/ChevronRightIcon.vue'
 import TrashIcon from '@/components/icons/TrashIcon.vue'
 import DownloadIcon from '@/components/icons/DownloadIcon.vue'
 import FolderIcon from '@/components/icons/FolderIcon.vue'
@@ -228,7 +228,7 @@ function handleEditMetadata() {
         title="关闭"
         @click="handleClose"
       >
-        <ChevronLeftIcon :size="18" />
+        <ChevronRightIcon :size="18" />
       </button>
     </div>
 

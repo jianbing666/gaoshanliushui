@@ -374,6 +374,26 @@ export const useSettingsStore = defineStore('settings', () => {
     memoryExportDir.value = path
   }
 
+  // ========== 设置面板展开状态 ==========
+  type SettingsSection = 'appearance' | 'library' | 'system' | 'data' | 'shortcuts' | 'background'
+  const expandedSettingsSections = ref<Set<SettingsSection>>(
+    new Set(saved.expandedSettingsSections as SettingsSection[] ?? [])
+  )
+
+  function toggleSettingsSection(section: SettingsSection) {
+    const newSet = new Set(expandedSettingsSections.value)
+    if (newSet.has(section)) {
+      newSet.delete(section)
+    } else {
+      newSet.add(section)
+    }
+    expandedSettingsSections.value = newSet
+  }
+
+  function isSettingsSectionExpanded(section: SettingsSection): boolean {
+    return expandedSettingsSections.value.has(section)
+  }
+
   // ========== 字体设置 ==========
   const fontSettings = ref<FontSettings>({
     ...defaultFontSettings,
@@ -435,8 +455,8 @@ export const useSettingsStore = defineStore('settings', () => {
   // ========== 持久化(防抖) ==========
   let settingsSaveTimer: ReturnType<typeof setTimeout> | null = null
   watch(
-    [theme, background, minimizeToTray, fontSettings, showSpectrum, spectrumQuality, downloadOutputDir, showMemoryTags, memoryExportDir],
-    ([th, bg, mt, fs, spectrum, spectrumQualityVal, dlDir, showMemTags, memDir]) => {
+    [theme, background, minimizeToTray, fontSettings, showSpectrum, spectrumQuality, downloadOutputDir, showMemoryTags, memoryExportDir, expandedSettingsSections],
+    ([th, bg, mt, fs, spectrum, spectrumQualityVal, dlDir, showMemTags, memDir, expandedSections]) => {
       if (settingsSaveTimer) {
         clearTimeout(settingsSaveTimer)
       }
@@ -451,6 +471,7 @@ export const useSettingsStore = defineStore('settings', () => {
           downloadOutputDir: dlDir,
           showMemoryTags: showMemTags,
           memoryExportDir: memDir,
+          expandedSettingsSections: Array.from(expandedSections as Set<string>),
         })
       }, 300)
     },
@@ -535,5 +556,9 @@ export const useSettingsStore = defineStore('settings', () => {
     // 记忆导出
     memoryExportDir,
     setMemoryExportDir,
+    // 设置面板展开状态
+    expandedSettingsSections,
+    toggleSettingsSection,
+    isSettingsSectionExpanded,
   }
 })

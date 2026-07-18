@@ -7,6 +7,7 @@ import ChevronLeftIcon from '@/components/icons/ChevronLeftIcon.vue'
 import PlusIcon from '@/components/icons/PlusIcon.vue'
 import TrashIcon from '@/components/icons/TrashIcon.vue'
 import FolderIcon from '@/components/icons/FolderIcon.vue'
+import { invoke } from '@tauri-apps/api/core'
 
 const ui = useUIStore()
 const library = useLibraryStore()
@@ -68,9 +69,9 @@ function backToMain() {
 function addToPlaylist(playlistId: string) {
   if (ui.contextMenu.song) {
     void library.addSongToPlaylist(ui.contextMenu.song.id, playlistId)
-    // 立即更新本地状态
     playlistMembership.value[playlistId] = true
   }
+  closeMenu()
 }
 
 function moveToPlaylist(playlistId: string) {
@@ -98,6 +99,32 @@ function removeFromCurrentPlaylist() {
     void library.removeSongFromPlaylist(ui.contextMenu.song.id, ui.contextMenu.playlistId)
   }
   closeMenu()
+}
+
+function deleteSong() {
+  if (!ui.contextMenu.song) return
+  const song = ui.contextMenu.song
+  closeMenu()
+
+  ui.openConfirmDialog({
+    title: '删除歌曲',
+    message: `此操作将永久删除歌曲文件、封面图片以及所有相关数据，且无法恢复。\n\n确定要删除"${song.title}"吗？`,
+    type: 'danger',
+    confirmText: '删除',
+    cancelText: '取消',
+    onConfirm: async () => {
+      try {
+        await invoke('delete_song', {
+          songHash: song.content_hash || song.id,
+          deleteFile: true,
+        })
+        library.removeSongFromLibrary(song.id)
+      } catch (e) {
+        console.error('[SongContextMenu] 删除歌曲失败:', e)
+        alert('删除歌曲失败，请检查文件权限')
+      }
+    },
+  })
 }
 
 function adjustPosition() {
@@ -197,6 +224,16 @@ onUnmounted(() => {
           <span>从当前歌单移除</span>
         </button>
       </template>
+
+      <div class="h-px bg-gray-200/60 dark:bg-gray-700/60 my-1"></div>
+
+      <button
+        class="w-full px-3 py-2 rounded-lg text-left text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2 transition-colors"
+        @click="deleteSong"
+      >
+        <TrashIcon :size="14" />
+        <span>删除歌曲</span>
+      </button>
     </div>
 
     <!-- 添加到歌单子菜单 -->

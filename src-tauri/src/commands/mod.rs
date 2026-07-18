@@ -14,3 +14,4 @@ pub mod export;
 pub mod history;
 pub mod app_config;
 pub mod data_dir;
+pub mod song;

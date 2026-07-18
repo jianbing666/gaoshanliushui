@@ -1,17 +1,52 @@
 use std::path::PathBuf;
 use std::sync::{Mutex, OnceLock};
 
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use tauri::{AppHandle, Manager};
 
 use crate::commands::app_config;
 
 const CUSTOM_DATA_DIR_KEY: &str = "custom_data_dir";
+const BOOT_CONFIG_FILE: &str = "boot_config.json";
 const COVERS_DIR_NAME: &str = "covers";
 const THUMBNAILS_DIR_NAME: &str = "thumbnails";
 const BACKGROUNDS_DIR_NAME: &str = "backgrounds";
 
 static DATA_DIR: OnceLock<Mutex<PathBuf>> = OnceLock::new();
+
+#[derive(Serialize, Deserialize, Default)]
+struct BootConfig {
+    custom_data_dir: Option<String>,
+}
+
+fn boot_config_path(default_dir: &PathBuf) -> PathBuf {
+    default_dir.join(BOOT_CONFIG_FILE)
+}
+
+fn read_boot_config(default_dir: &PathBuf) -> BootConfig {
+    let path = boot_config_path(default_dir);
+    if path.exists() {
+        match std::fs::read_to_string(&path) {
+            Ok(content) => serde_json::from_str::<BootConfig>(&content).unwrap_or_default(),
+            Err(e) => {
+                eprintln!("[data_dir] 读取启动配置失败: {}", e);
+                BootConfig::default()
+            }
+        }
+    } else {
+        BootConfig::default()
+    }
+}
+
+fn write_boot_config(default_dir: &PathBuf, config: &BootConfig) -> Result<(), String> {
+    ensure_dir(default_dir)?;
+    let path = boot_config_path(default_dir);
+    let content = serde_json::to_string_pretty(config)
+        .map_err(|e| format!("序列化启动配置失败: {}", e))?;
+    std::fs::write(&path, content)
+        .map_err(|e| format!("写入启动配置失败: {}", e))?;
+    Ok(())
+}
 
 #[derive(Serialize)]
 pub struct DataDirInfo {
@@ -46,9 +81,9 @@ pub fn init_data_dir(app: &AppHandle) -> Result<(), String> {
     let default_dir = default_data_dir(app)?;
     ensure_dir(&default_dir)?;
 
-    let custom_path = app_config::get_config(CUSTOM_DATA_DIR_KEY)
-        .ok()
-        .flatten()
+    let boot_config = read_boot_config(&default_dir);
+    let custom_path = boot_config
+        .custom_data_dir
         .map(PathBuf::from);
 
     let data_dir = if let Some(custom) = custom_path {
@@ -56,10 +91,10 @@ pub fn init_data_dir(app: &AppHandle) -> Result<(), String> {
             custom
         } else {
             eprintln!("[data_dir] 自定义数据目录不存在，回退到默认目录: {:?}", custom);
-            default_dir
+            default_dir.clone()
         }
     } else {
-        default_dir
+        default_dir.clone()
     };
 
     ensure_dir(&data_dir)?;
@@ -130,10 +165,7 @@ fn file_size(path: &std::path::Path) -> u64 {
 pub async fn get_data_dir_info(app: AppHandle) -> Result<DataDirInfo, String> {
     let current = get_data_dir_path()?;
     let default = default_data_dir(&app)?;
-    let is_custom = app_config::get_config(CUSTOM_DATA_DIR_KEY)
-        .ok()
-        .flatten()
-        .is_some();
+    let is_custom = current != default;
 
     Ok(DataDirInfo {
         current_path: current.to_string_lossy().to_string(),
@@ -143,7 +175,7 @@ pub async fn get_data_dir_info(app: AppHandle) -> Result<DataDirInfo, String> {
 }
 
 #[tauri::command]
-pub async fn set_data_dir(_app: AppHandle, path: String) -> Result<(), String> {
+pub async fn set_data_dir(app: AppHandle, path: String) -> Result<(), String> {
     let target = PathBuf::from(&path);
     if !target.exists() {
         return Err(format!("目录不存在: {}", path));
@@ -153,6 +185,11 @@ pub async fn set_data_dir(_app: AppHandle, path: String) -> Result<(), String> {
     }
 
     ensure_subdirs(&target)?;
+
+    let default_dir = default_data_dir(&app)?;
+    let mut boot_config = read_boot_config(&default_dir);
+    boot_config.custom_data_dir = Some(path.clone());
+    write_boot_config(&default_dir, &boot_config)?;
 
     app_config::set_config(CUSTOM_DATA_DIR_KEY, &path)?;
 
@@ -171,6 +208,10 @@ pub async fn reset_data_dir(app: AppHandle) -> Result<(), String> {
     let default = default_data_dir(&app)?;
     ensure_dir(&default)?;
     ensure_subdirs(&default)?;
+
+    let mut boot_config = read_boot_config(&default);
+    boot_config.custom_data_dir = None;
+    write_boot_config(&default, &boot_config)?;
 
     app_config::delete_config(CUSTOM_DATA_DIR_KEY)?;
 
@@ -619,6 +660,15 @@ pub async fn migrate_data(app: AppHandle, target_path: String) -> Result<(), Str
     // 数据库连接成功后，再写入配置到新数据库
     if let Err(e) = app_config::set_config(CUSTOM_DATA_DIR_KEY, &target_path) {
         eprintln!("[data_dir] 写入配置失败，但迁移已完成: {}", e);
+    }
+
+    // 同时写入启动配置文件（确保下次启动时能读取到）
+    if let Ok(default_dir) = default_data_dir(&app) {
+        let mut boot_config = read_boot_config(&default_dir);
+        boot_config.custom_data_dir = Some(target_path.clone());
+        if let Err(e) = write_boot_config(&default_dir, &boot_config) {
+            eprintln!("[data_dir] 写入启动配置失败: {}", e);
+        }
     }
 
     let _ = app.emit(

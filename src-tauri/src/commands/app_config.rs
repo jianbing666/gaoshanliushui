@@ -14,6 +14,7 @@ pub fn init_schema(conn: &rusqlite::Connection) -> Result<(), String> {
     Ok(())
 }
 
+#[allow(dead_code)]
 pub fn get_config(key: &str) -> Result<Option<String>, String> {
     db::with_conn(|conn| {
         let result: Result<String, _> = conn.query_row(

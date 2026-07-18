@@ -13,6 +13,9 @@
  *   - 强制唤醒: forceWake() 显式 await audioContext.resume()
  *   - onended 清理: 手动 stop 前先 audioSourceNode.onended = null
  *
+ * 音频链路 (v1.2.0 + EQ):
+ *   AudioBufferSourceNode → Equalizer(10段) → AnalyserNode → GainNode → Destination
+ *
  * 调用入口(由 audioStore.ts 注入):
  *   - audioStore 调 engine.playFromOffset(0, song, onStart)
  *   - audioStore 调 engine.pausePlayback()
@@ -20,6 +23,8 @@
  *   - audioStore 调 engine.seekTo(time)
  *   - 引擎通过 setOnEnded 注入的回调通知 audioStore 播完
  */
+
+import { equalizer } from './Equalizer'
 
 export class AudioEngine {
   // ========== 模块级状态(Web Audio 单例) ==========
@@ -70,12 +75,13 @@ export class AudioEngine {
       this.analyserNode.fftSize = 2048
       this.analyserNode.smoothingTimeConstant = 0.8
       this.gainNode = this.audioContext.createGain()
-      // 关键: 同步 gain.gain 到当前 volume,避免显示音量与实际音量脱钩
       this.gainNode.gain.value = volume
       this.currentVolume = volume
 
       this.analyserNode.connect(this.gainNode)
       this.gainNode.connect(this.audioContext.destination)
+
+      equalizer.init(this.audioContext, this.analyserNode)
     }
   }
 
@@ -166,7 +172,7 @@ export class AudioEngine {
 
     const newSource = this.audioContext.createBufferSource()
     newSource.buffer = audioBuffer
-    newSource.connect(this.analyserNode!)
+    equalizer.reconnectSource(newSource)
 
     newSource.onended = () => {
       if (!this.isPaused) {
@@ -373,11 +379,12 @@ export class AudioEngine {
 
   /**
    * 断开频谱分析链路(低功耗模式下节省 CPU)
+   * 注意: 同时会绕过均衡器, 直接 source → gain
    */
   disconnectAnalyser(): void {
     if (this.audioSourceNode && this.analyserNode && this.gainNode && this.audioContext) {
       try {
-        this.audioSourceNode.disconnect()
+        equalizer.disconnect()
         this.audioSourceNode.connect(this.gainNode)
       } catch (e) {
         // 忽略断开失败
@@ -386,13 +393,13 @@ export class AudioEngine {
   }
 
   /**
-   * 重新连接频谱分析链路
+   * 重新连接频谱分析链路 (同时恢复均衡器)
    */
   reconnectAnalyser(): void {
     if (this.audioSourceNode && this.analyserNode && this.gainNode && this.audioContext) {
       try {
         this.audioSourceNode.disconnect()
-        this.audioSourceNode.connect(this.analyserNode)
+        equalizer.reconnectSource(this.audioSourceNode)
       } catch (e) {
         // 忽略重连失败
       }

@@ -35,6 +35,9 @@ export class HTML5AudioPlayer {
     //   防止 WebView2 在 src 切换瞬间 volume=0 失效
     this.audio.volume = 0
     this.audio.muted = true
+    // 关键: 循环播放, 永远不 ended, 保持 playing 状态
+    //   这样 OS 才会持续把 MediaKey 事件路由到 WebView
+    this.audio.loop = true
 
     this.audio.addEventListener('timeupdate', () => {
       this._onTimeUpdate?.(this.audio.currentTime)
@@ -101,7 +104,8 @@ export class HTML5AudioPlayer {
         // 保持 playing 状态 (muted=true + volume=0 不会发声)
         // 这样 OS 才能识别 mediaSession 媒体源, 外部设备 MediaKey 才能路由到 WebView
         if (this.audio.paused) {
-          this.audio.play().catch(() => {
+          this.audio.play().catch((e) => {
+            console.warn('[HTML5AudioPlayer] 自动播放失败:', e)
             // 静默失败: 不影响功能, OS 路由会退化但 Web Audio 主链路不受影响
           })
         }

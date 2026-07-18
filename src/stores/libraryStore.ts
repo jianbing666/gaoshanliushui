@@ -57,7 +57,7 @@ export const useLibraryStore = defineStore('library', () => {
   const activePlaylistId = ref<string>('1')
   const playlistsLoaded = ref(false)
   const playlistSongCache = new Map<string, PlaylistSong[]>()
-
+  const playlistContentVersion = ref(0)
   // song.id -> content_hash 映射
   const idToHashMap = computed(() => {
     const map = new Map<string, string>()
@@ -183,6 +183,7 @@ export const useLibraryStore = defineStore('library', () => {
         type: r.is_default ? 'default' : 'custom',
         songIds: [],
         expanded: r.is_default ? true : false,
+        songCount: r.song_count,
       }))
       playlists.value = result
       playlistsLoaded.value = true
@@ -269,6 +270,7 @@ export const useLibraryStore = defineStore('library', () => {
     } else {
       playlistSongCache.clear()
     }
+    playlistContentVersion.value++
   }
 
   async function createPlaylist(name: string): Promise<Playlist> {
@@ -358,6 +360,13 @@ export const useLibraryStore = defineStore('library', () => {
         songHash: hash,
       })
       invalidatePlaylistCache(playlistId)
+      // 更新歌单歌曲数量
+      if (pl.songCount !== undefined) {
+        pl.songCount++
+      }
+      if (playlistId === activePlaylistId.value) {
+        void loadActivePlaylistSongs()
+      }
       return true
     } catch (error) {
       console.error('添加歌曲到歌单失败:', error)
@@ -386,6 +395,13 @@ export const useLibraryStore = defineStore('library', () => {
           songHash: hash,
         })
         invalidatePlaylistCache(playlistId)
+        // 更新歌单歌曲数量
+        if (pl.songCount !== undefined && pl.songCount > 0) {
+          pl.songCount--
+        }
+        if (playlistId === activePlaylistId.value) {
+          void loadActivePlaylistSongs()
+        }
         return false
       } else {
         await invoke('add_song_to_playlist', {
@@ -393,6 +409,13 @@ export const useLibraryStore = defineStore('library', () => {
           songHash: hash,
         })
         invalidatePlaylistCache(playlistId)
+        // 更新歌单歌曲数量
+        if (pl.songCount !== undefined) {
+          pl.songCount++
+        }
+        if (playlistId === activePlaylistId.value) {
+          void loadActivePlaylistSongs()
+        }
         return true
       }
     } catch (error) {
@@ -417,6 +440,13 @@ export const useLibraryStore = defineStore('library', () => {
         songHash: hash,
       })
       invalidatePlaylistCache(playlistId)
+      // 更新歌单歌曲数量
+      if (pl.songCount !== undefined && pl.songCount > 0) {
+        pl.songCount--
+      }
+      if (playlistId === activePlaylistId.value) {
+        void loadActivePlaylistSongs()
+      }
     } catch (error) {
       console.error('从歌单移除歌曲失败:', error)
     }
@@ -572,6 +602,22 @@ async function scanMusicFolder(path: string, forceRefresh = false) {
     }
   }
 
+  function removeSongFromLibrary(songId: string) {
+    const idx = playlist.value.findIndex((s) => s.id === songId)
+    if (idx !== -1) {
+      const updated = [...playlist.value]
+      updated.splice(idx, 1)
+      playlist.value = updated
+    }
+
+    const activeIdx = activePlaylistSongList.value.findIndex((s) => s.id === songId)
+    if (activeIdx !== -1) {
+      const updated = [...activePlaylistSongList.value]
+      updated.splice(activeIdx, 1)
+      activePlaylistSongList.value = updated
+    }
+  }
+
   async function autoLoadMusicLibrary(): Promise<{ success: boolean; error?: string }> {
     const savedPath = getMusicLibraryPath()
     if (!savedPath) {
@@ -653,6 +699,7 @@ async function scanMusicFolder(path: string, forceRefresh = false) {
     defaultPlaylist,
     customPlaylists,
     filteredCustomPlaylists,
+    playlistContentVersion,
     // 搜索
     searchQuery,
     filteredActivePlaylistSongs,
@@ -680,5 +727,6 @@ async function scanMusicFolder(path: string, forceRefresh = false) {
     setMetadataSource,
     refreshMetadata,
     updateSongLocalMetadata,
+    removeSongFromLibrary,
   }
 })

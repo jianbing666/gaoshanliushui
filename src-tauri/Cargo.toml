@@ -37,6 +37,8 @@ hex = "0.4"
 # Memory feature: 同步 SQLite 库 (bundled 静态链接, 无系统依赖)
 # 编译时间比 tauri-plugin-sql (拉入 sqlx) 短 ~3-5 倍
 rusqlite = { version = "0.32", features = ["bundled"] }
+tauri-plugin-media = "0.1.1"
+tauri-plugin-clipboard-manager = "2.3.2"
 
 [features]
 default = ["custom-protocol"]

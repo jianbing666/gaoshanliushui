@@ -9,10 +9,14 @@ import type { ThemeMode, BackgroundSettings } from '@/types/song'
 import { useShortcutConfig } from '@/composables/useShortcutConfig'
 import { useAutoLaunch } from '@/composables/useAutoLaunch'
 import { ref, onMounted, onUnmounted } from 'vue'
+import { useUIStore } from '@/stores/uiStore'
+import ChevronRightIcon from '@/components/icons/ChevronRightIcon.vue'
+import ChevronDownIcon from '@/components/icons/ChevronDownIcon.vue'
 
 const settings = useSettingsStore()
 const library = useLibraryStore()
 const audio = useAudioStore()
+const ui = useUIStore()
 
 const themeOptions: { value: ThemeMode; label: string }[] = [
   { value: 'light', label: '浅色' },
@@ -274,19 +278,41 @@ onUnmounted(() => {
       ? 'bg-white/50 dark:bg-gray-900/50'
       : 'bg-white/90 dark:bg-gray-900/90'
   ">
-    <div class="px-5 py-4 border-b border-gray-200/50 dark:border-gray-700/50 flex items-center gap-3">
+    <div class="px-5 py-4 border-b border-gray-200/50 dark:border-gray-700/50 flex items-center justify-between">
       <div>
         <h2 class="text-gray-900 dark:text-white text-base font-semibold">设置</h2>
         <p class="text-gray-500 dark:text-gray-400 text-xs">个性化你的播放器</p>
       </div>
+      <button
+        class="p-1.5 rounded-md hover:bg-gray-200/60 dark:hover:bg-gray-700/60 text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white transition-colors"
+        title="关闭"
+        @click="ui.toggleSettingsPanel()"
+      >
+        <ChevronRightIcon :size="18" />
+      </button>
     </div>
 
-    <div class="flex-1 overflow-y-auto scrollbar-hide px-5 py-4 space-y-6">
+    <div class="flex-1 overflow-y-auto scrollbar-hide px-5 py-4 space-y-4">
       <!-- 外观 -->
       <div class="space-y-3">
-        <h3 class="text-gray-900 dark:text-white text-sm font-semibold">外观</h3>
+        <button
+          class="w-full flex items-center justify-between text-left"
+          @click="settings.toggleSettingsSection('appearance')"
+        >
+          <h3 class="text-gray-900 dark:text-white text-sm font-semibold">外观</h3>
+          <ChevronDownIcon
+            v-if="settings.isSettingsSectionExpanded('appearance')"
+            :size="16"
+            class="text-gray-400 dark:text-gray-500"
+          />
+          <ChevronRightIcon
+            v-else
+            :size="16"
+            class="text-gray-400 dark:text-gray-500"
+          />
+        </button>
 
-        <div class="space-y-4">
+        <div v-if="settings.isSettingsSectionExpanded('appearance')" class="space-y-4">
           <div>
             <p class="text-gray-500 dark:text-gray-400 text-xs mb-2">主题模式</p>
             <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-1 flex gap-1">
@@ -310,9 +336,24 @@ onUnmounted(() => {
 
       <!-- 音乐库 -->
       <div class="space-y-3">
-        <h3 class="text-gray-900 dark:text-white text-sm font-semibold">音乐库</h3>
+        <button
+          class="w-full flex items-center justify-between text-left"
+          @click="settings.toggleSettingsSection('library')"
+        >
+          <h3 class="text-gray-900 dark:text-white text-sm font-semibold">音乐库</h3>
+          <ChevronDownIcon
+            v-if="settings.isSettingsSectionExpanded('library')"
+            :size="16"
+            class="text-gray-400 dark:text-gray-500"
+          />
+          <ChevronRightIcon
+            v-else
+            :size="16"
+            class="text-gray-400 dark:text-gray-500"
+          />
+        </button>
 
-        <div class="space-y-3">
+        <div v-if="settings.isSettingsSectionExpanded('library')" class="space-y-3">
           <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
             <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">当前文件夹</p>
             <p class="text-sm text-gray-900 dark:text-white truncate">
@@ -414,9 +455,24 @@ onUnmounted(() => {
 
       <!-- 系统 -->
       <div class="space-y-3">
-        <h3 class="text-gray-900 dark:text-white text-sm font-semibold">系统</h3>
+        <button
+          class="w-full flex items-center justify-between text-left"
+          @click="settings.toggleSettingsSection('system')"
+        >
+          <h3 class="text-gray-900 dark:text-white text-sm font-semibold">系统</h3>
+          <ChevronDownIcon
+            v-if="settings.isSettingsSectionExpanded('system')"
+            :size="16"
+            class="text-gray-400 dark:text-gray-500"
+          />
+          <ChevronRightIcon
+            v-else
+            :size="16"
+            class="text-gray-400 dark:text-gray-500"
+          />
+        </button>
 
-        <div class="space-y-2">
+        <div v-if="settings.isSettingsSectionExpanded('system')" class="space-y-2">
           <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
             <div class="flex items-center justify-between">
               <div>
@@ -580,9 +636,24 @@ onUnmounted(() => {
 
       <!-- 数据管理 -->
       <div class="space-y-3">
-        <h3 class="text-gray-900 dark:text-white text-sm font-semibold">数据管理</h3>
+        <button
+          class="w-full flex items-center justify-between text-left"
+          @click="settings.toggleSettingsSection('data')"
+        >
+          <h3 class="text-gray-900 dark:text-white text-sm font-semibold">数据管理</h3>
+          <ChevronDownIcon
+            v-if="settings.isSettingsSectionExpanded('data')"
+            :size="16"
+            class="text-gray-400 dark:text-gray-500"
+          />
+          <ChevronRightIcon
+            v-else
+            :size="16"
+            class="text-gray-400 dark:text-gray-500"
+          />
+        </button>
 
-        <div class="space-y-2">
+        <div v-if="settings.isSettingsSectionExpanded('data')" class="space-y-2">
           <!-- 当前数据目录 -->
           <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
             <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">
@@ -660,17 +731,33 @@ onUnmounted(() => {
 
       <!-- 快捷键 -->
       <div class="space-y-3">
-        <div class="flex items-center justify-between">
-          <h3 class="text-gray-900 dark:text-white text-sm font-semibold">快捷键</h3>
-          <button
-            class="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
-            @click="resetAllToDefault"
-          >
-            恢复默认
-          </button>
-        </div>
+        <button
+          class="w-full flex items-center justify-between text-left"
+          @click="settings.toggleSettingsSection('shortcuts')"
+        >
+          <div class="flex items-center justify-between flex-1">
+            <h3 class="text-gray-900 dark:text-white text-sm font-semibold">快捷键</h3>
+            <button
+              v-if="settings.isSettingsSectionExpanded('shortcuts')"
+              class="text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors"
+              @click.stop="resetAllToDefault"
+            >
+              恢复默认
+            </button>
+          </div>
+          <ChevronDownIcon
+            v-if="settings.isSettingsSectionExpanded('shortcuts')"
+            :size="16"
+            class="text-gray-400 dark:text-gray-500 ml-2"
+          />
+          <ChevronRightIcon
+            v-else
+            :size="16"
+            class="text-gray-400 dark:text-gray-500 ml-2"
+          />
+        </button>
 
-        <div class="space-y-2">
+        <div v-if="settings.isSettingsSectionExpanded('shortcuts')" class="space-y-2">
           <div
             v-for="shortcut in shortcuts"
             :key="shortcut.id"
@@ -732,9 +819,24 @@ onUnmounted(() => {
 
       <!-- 背景图片 -->
       <div class="space-y-3">
-        <h3 class="text-gray-900 dark:text-white text-sm font-semibold">背景图片</h3>
+        <button
+          class="w-full flex items-center justify-between text-left"
+          @click="settings.toggleSettingsSection('background')"
+        >
+          <h3 class="text-gray-900 dark:text-white text-sm font-semibold">背景图片</h3>
+          <ChevronDownIcon
+            v-if="settings.isSettingsSectionExpanded('background')"
+            :size="16"
+            class="text-gray-400 dark:text-gray-500"
+          />
+          <ChevronRightIcon
+            v-else
+            :size="16"
+            class="text-gray-400 dark:text-gray-500"
+          />
+        </button>
 
-        <div class="space-y-4">
+        <div v-if="settings.isSettingsSectionExpanded('background')" class="space-y-4">
           <div class="flex items-center gap-1 bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-1">
             <button
               v-for="option in backgroundModeOptions"
@@ -887,13 +989,15 @@ onUnmounted(() => {
         </div>
       </div>
     </div>
-  </aside>
 
-  <MigrateDataModal
-    v-if="showMigrateModal"
-    @close="showMigrateModal = false"
-    @completed="showMigrateModal = false"
-  />
+    <Teleport to="body">
+      <MigrateDataModal
+        v-if="showMigrateModal"
+        @close="showMigrateModal = false"
+        @completed="showMigrateModal = false"
+      />
+    </Teleport>
+  </aside>
 </template>
 
 <style scoped>

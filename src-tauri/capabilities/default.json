@@ -5,6 +5,13 @@
   "permissions": [
     "dialog:allow-open",
     "dialog:allow-save",
+    "dialog:allow-confirm",
+    "dialog:allow-ask",
+    "dialog:allow-message",
+    "media:default",
+    "clipboard-manager:default",
+    "clipboard-manager:allow-read-text",
+    "clipboard-manager:allow-write-text",
     "global-shortcut:default",
     "autostart:default",
     "core:default",

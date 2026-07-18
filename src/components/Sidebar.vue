@@ -124,6 +124,7 @@ const useVirtualList = computed(() => library.filteredActivePlaylistSongs.length
           <VirtualSongList
             v-if="useVirtualList"
             :songs="library.filteredActivePlaylistSongs"
+            :playlist-id="library.activePlaylistId"
             @play="playFilteredSong"
           >
             <template #default="{ song, index, fillHeight }">
@@ -131,6 +132,7 @@ const useVirtualList = computed(() => library.filteredActivePlaylistSongs.length
                 :song="song"
                 :index="index"
                 :fill-height="fillHeight"
+                :playlist-id="library.activePlaylistId"
                 @play="playFilteredSong"
               />
             </template>
@@ -141,13 +143,13 @@ const useVirtualList = computed(() => library.filteredActivePlaylistSongs.length
               :key="song.id"
               :song="song"
               :index="index"
+              :playlist-id="library.activePlaylistId"
               @play="playFilteredSong"
             />
           </template>
         </template>
         <div v-else class="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-400 text-sm">
           <template v-if="library.searchQuery.trim()">
-            <span class="text-2xl mb-2">🔍</span>
             <p>没有找到匹配的歌曲</p>
           </template>
           <template v-else>

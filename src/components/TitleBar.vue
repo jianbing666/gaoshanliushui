@@ -7,9 +7,9 @@ import SettingsIcon from '@/components/icons/SettingsIcon.vue'
 import BarChart3Icon from '@/components/icons/BarChart3Icon.vue'
 import DownloadIcon from '@/components/icons/DownloadIcon.vue'
 import MemoryIcon from '@/components/icons/MemoryIcon.vue'
+import EqualizerIcon from '@/components/icons/EqualizerIcon.vue'
 
 const props = defineProps<{
-  showSettings: boolean
   showMiniModeButton?: boolean
   showSidebarButton?: boolean
 }>()
@@ -53,9 +53,7 @@ function closeWindow() {
 }
 
 const emit = defineEmits<{
-  (e: 'toggleSettings'): void
   (e: 'toggleMiniMode'): void
-  (e: 'toggleMemory'): void
 }>()
 </script>
 
@@ -153,6 +151,18 @@ const emit = defineEmits<{
           <BarChart3Icon :size="16" />
         </button>
 
+        <!-- 均衡器按钮 -->
+        <button
+          class="w-8 h-8 flex items-center justify-center rounded-md transition-colors"
+          :class="ui.showEqualizerPanel
+            ? 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400'
+            : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-200'"
+          title="均衡器"
+          @click="ui.toggleRightPanel('equalizer')"
+        >
+          <EqualizerIcon :size="16" />
+        </button>
+
         <!-- Memory feature - 高山流水 v1.1: 记忆按钮 (统计左、设置右) -->
         <button
           class="w-8 h-8 flex items-center justify-center rounded-md transition-colors"
@@ -160,7 +170,7 @@ const emit = defineEmits<{
             ? 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400'
             : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-200'"
           title="回忆"
-          @click="emit('toggleMemory')"
+          @click="ui.toggleMemoryDrawer()"
         >
           <MemoryIcon :size="16" />
         </button>
@@ -168,11 +178,11 @@ const emit = defineEmits<{
         <!-- 设置按钮 -->
         <button
           class="w-8 h-8 flex items-center justify-center rounded-md transition-colors"
-          :class="props.showSettings
+          :class="ui.showSettings
             ? 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400'
             : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-200'"
           title="设置"
-          @click="emit('toggleSettings')"
+          @click="ui.toggleSettingsPanel()"
         >
           <SettingsIcon :size="16" />
         </button>

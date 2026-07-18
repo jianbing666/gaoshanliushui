@@ -4,13 +4,14 @@ import { useLibraryStore } from '@/stores/libraryStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useHistoryStore } from '@/stores/historyStore'
-import { ref, watch, onMounted, onUnmounted, computed, nextTick, defineAsyncComponent, markRaw } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick, defineAsyncComponent, markRaw } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import Sidebar from '@/components/Sidebar.vue'
 import Player from '@/components/Player.vue'
 import ControlBar from '@/components/ControlBar.vue'
 import SongContextMenu from '@/components/SongContextMenu.vue'
+import PlaylistContextMenu from '@/components/PlaylistContextMenu.vue'
 import TitleBar from '@/components/TitleBar.vue'
 import HistoryDrawer from '@/components/HistoryDrawer.vue'
 import Maximize2Icon from '@/components/icons/Maximize2Icon.vue'
@@ -34,8 +35,11 @@ import { syncShortcutsToBackend } from '@/utils/syncShortcuts'
 const SettingsPanel = markRaw(defineAsyncComponent(() => import('@/components/SettingsPanel.vue')))
 const StatsPanel = markRaw(defineAsyncComponent(() => import('@/components/StatsPanel.vue')))
 const DownloadPanel = markRaw(defineAsyncComponent(() => import('@/components/DownloadPanel.vue')))
+const EqualizerPanel = markRaw(defineAsyncComponent(() => import('@/components/EqualizerPanel.vue')))
 const MemoryDrawer = markRaw(defineAsyncComponent(() => import('@/components/MemoryDrawer.vue')))
 const CreatePlaylistModal = markRaw(defineAsyncComponent(() => import('@/components/CreatePlaylistModal.vue')))
+const ConfirmDialog = markRaw(defineAsyncComponent(() => import('@/components/ConfirmDialog.vue')))
+const InputContextMenu = markRaw(defineAsyncComponent(() => import('@/components/InputContextMenu.vue')))
 const EditSongMetadata = markRaw(defineAsyncComponent(() => import('@/components/EditSongMetadata.vue')))
 
 const audio = useAudioStore()
@@ -44,7 +48,6 @@ const ui = useUIStore()
 const settings = useSettingsStore()
 const history = useHistoryStore()
 const appWindow = getCurrentWindow()
-const showSettings = ref(false)
 const autoLoadError = ref<string | null>(null)
 
 // 极致性能 + 多入口统一: 托盘菜单/全局快捷键/媒体键/迷你模式控制
@@ -56,65 +59,7 @@ const miniWindowWidth = ref(640)
 const miniWindowHeight = ref(120)
 const isCompactMiniMode = computed(() => miniWindowWidth.value < 480)
 
-// BUG 2 修复: 右侧面板用单一 component :is 渲染
-//   替代 v-if/v-else-if 链, 保证 Transition 动画 + 同侧互斥正确触发
-type RightPanelKey = 'settings' | 'stats' | 'download' | 'memory' | null
-const activeRightPanel = computed<RightPanelKey>(() => {
-  if (showSettings.value) return 'settings'
-  if (ui.showStatsPanel) return 'stats'
-  if (ui.showDownloadPanel) return 'download'
-  if (ui.showMemoryDrawer) return 'memory'
-  return null
-})
-
 let unlistenWindowShow: UnlistenFn | null = null
-
-// 切换设置面板显示/隐藏
-// BUG 1 修复: 用直接赋值关闭其他面板, 不再用 toggle (避免状态锁定)
-function toggleSettings() {
-  if (!showSettings.value) {
-    showSettings.value = true
-    // 收起其他右侧面板 (用 closeAllRightPanels 直接置 false)
-    ui.closeAllRightPanels()
-  } else {
-    showSettings.value = false
-  }
-}
-
-// Memory feature - 高山流水 v1.1: 切换记忆抽屉
-// BUG 1 修复: 同上, 改用 closeAllRightPanels
-function toggleMemory() {
-  if (!ui.showMemoryDrawer) {
-    showSettings.value = false
-    ui.closeAllRightPanels()
-    ui.showMemoryDrawer = true
-    // 通知 App.vue 已经处理, 防止 watch 重复触发
-    window.dispatchEvent(new CustomEvent('ui:memory-opened'))
-  } else {
-    ui.showMemoryDrawer = false
-  }
-}
-
-// 监听统计面板展开: 收起设置
-watch(() => ui.showStatsPanel, (newVal) => {
-  if (newVal && showSettings.value) {
-    showSettings.value = false
-  }
-})
-
-// 监听下载面板展开: 收起设置
-watch(() => ui.showDownloadPanel, (newVal) => {
-  if (newVal && showSettings.value) {
-    showSettings.value = false
-  }
-})
-
-// Memory feature - 高山流水 v1.1: 监听记忆抽屉展开, 收起设置
-watch(() => ui.showMemoryDrawer, (newVal) => {
-  if (newVal && showSettings.value) {
-    showSettings.value = false
-  }
-})
 
 // 切换迷你模式
 function toggleMiniMode() {
@@ -149,6 +94,14 @@ function handleMiniResize() {
 // 阶段 4.4: 启动时序优化 - 关键路径 first, 非关键路径 idle
 // 首屏渲染完成后再加载音乐库 + 注册 IPC 监听, 避免阻塞首帧
 onMounted(async () => {
+  // 关键路径 0: 禁用 WebView2 默认右键菜单 (防止刷新/另存为/检查元素等)
+  // 开发者后门: 按住 Shift 键右键时, 不阻止默认行为, 可打开原生菜单(含"检查")
+  document.addEventListener('contextmenu', (e) => {
+    if (!e.shiftKey) {
+      e.preventDefault()
+    }
+  })
+
   // 关键路径 1: 立即让首屏可见
   await nextTick()
 
@@ -176,7 +129,7 @@ onMounted(async () => {
       const result = await library.autoLoadMusicLibrary()
       if (!result.success && result.error) {
         autoLoadError.value = `音乐库路径已失效：${result.error}\n请在设置面板中重新选择目录`
-        showSettings.value = true
+        ui.toggleSettingsPanel()
       }
 
       // 2.5 加载播放历史 (从 SQLite, 若为空则从 localStorage 迁移)
@@ -256,12 +209,9 @@ onUnmounted(() => {
     <!-- 自定义标题栏（仅非迷你模式显示） -->
     <TitleBar
       v-if="!ui.isMiniMode"
-      :show-settings="showSettings"
       :show-mini-mode-button="true"
       :show-sidebar-button="true"
-      @toggle-settings="toggleSettings"
       @toggle-mini-mode="toggleMiniMode"
-      @toggle-memory="toggleMemory"
     />
 
     <!-- 主内容区域：Flex 水平三栏布局（非迷你模式） -->
@@ -306,17 +256,17 @@ onUnmounted(() => {
       </main>
 
       <!-- 右侧面板：设置 / 统计 / 下载 / 回忆（互斥，挤压式） -->
-      <!-- BUG 2 修复: 用 component :is + Transition 单根节点, 保证 slide-fade 动画 + 同侧互斥
-           keep-alive 包裹, 切换面板时不销毁组件, 避免重复 setup + 重渲染 -->
+      <!-- 单一状态管理: ui.activeRightPanel 直接控制当前显示的面板 -->
       <Transition name="slide-fade" mode="out-in">
         <keep-alive>
           <component
-            :is="activeRightPanel === 'settings' ? SettingsPanel
-                : activeRightPanel === 'stats' ? StatsPanel
-                : activeRightPanel === 'download' ? DownloadPanel
-                : activeRightPanel === 'memory' ? MemoryDrawer
+            :is="ui.activeRightPanel === 'settings' ? SettingsPanel
+                : ui.activeRightPanel === 'stats' ? StatsPanel
+                : ui.activeRightPanel === 'download' ? DownloadPanel
+                : ui.activeRightPanel === 'memory' ? MemoryDrawer
+                : ui.activeRightPanel === 'equalizer' ? EqualizerPanel
                 : 'div'"
-            :key="activeRightPanel || 'none'"
+            :key="ui.activeRightPanel || 'none'"
             class="shrink-0"
           />
         </keep-alive>
@@ -494,9 +444,16 @@ onUnmounted(() => {
 
     <!-- 全局右键菜单（单例） -->
     <SongContextMenu v-if="!ui.isMiniMode" />
+    <PlaylistContextMenu v-if="!ui.isMiniMode" />
 
     <!-- 创建歌单弹窗 -->
     <CreatePlaylistModal v-if="!ui.isMiniMode" />
+
+    <!-- 通用确认对话框 -->
+    <ConfirmDialog v-if="!ui.isMiniMode" />
+
+    <!-- 输入框右键菜单 -->
+    <InputContextMenu v-if="!ui.isMiniMode" />
 
     <!-- 编辑歌曲元数据浮窗 -->
     <EditSongMetadata
