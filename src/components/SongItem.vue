@@ -79,7 +79,7 @@ function onCoverError(e: Event) {
     >
       <img
         v-if="song.cover_path"
-        :src="library.getCoverUrl(song.cover_path)"
+        :src="library.getCoverThumbUrl(song.cover_path, song.cover_thumb_path)"
         :alt="song.title"
         class="w-full h-full object-cover"
         loading="lazy"

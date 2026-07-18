@@ -51,18 +51,16 @@ function sampleSpectrum() {
   }
   analyserNode.getByteFrequencyData(dataArray)
 
-  // 提取 64 个关键频率点（均匀采样）
+  // 提取 64 个关键频率点（均匀采样）- 直接修改数组元素, 避免创建新数组
   const step = Math.floor(bufferLength / 64)
-  const newSpectrumData: number[] = []
+  const arr = spectrumData.value
   for (let i = 0; i < 64; i++) {
     const index = i * step
     const value = dataArray[index] || 0
     // 转换为高度百分比（增强视觉效果）
-    const normalizedValue = Math.max(10, (value / 255) * 100)
-    newSpectrumData.push(normalizedValue)
+    arr[i] = Math.max(10, (value / 255) * 100)
   }
-
-  spectrumData.value = newSpectrumData
+  spectrumData.value = arr
 }
 
 // 启动频谱动画循环（使用 setTimeout 控制帧率）

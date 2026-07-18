@@ -4,7 +4,7 @@ import { useLibraryStore } from '@/stores/libraryStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useHistoryStore } from '@/stores/historyStore'
-import { ref, onMounted, onUnmounted, computed, nextTick, defineAsyncComponent, markRaw } from 'vue'
+import { ref, onMounted, onUnmounted, computed, nextTick, defineAsyncComponent, markRaw, watch } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import Sidebar from '@/components/Sidebar.vue'
@@ -60,10 +60,21 @@ const miniWindowHeight = ref(120)
 const isCompactMiniMode = computed(() => miniWindowWidth.value < 480)
 
 let unlistenWindowShow: UnlistenFn | null = null
+let hiddenTimer: ReturnType<typeof setTimeout> | null = null
 
 // 切换迷你模式
 function toggleMiniMode() {
   ui.setMiniMode(!ui.isMiniMode)
+}
+
+// 执行内存回收
+function doCompactMemory() {
+  try {
+    library.compactMemory()
+    history.releaseFullHistory()
+  } catch (e) {
+    console.warn('[Memory] 内存回收失败:', e)
+  }
 }
 
 // 迷你模式窗口控制
@@ -89,6 +100,19 @@ function handleMiniResize() {
     miniWindowHeight.value = window.innerHeight
   }
 }
+
+// 进入迷你模式时触发内存回收
+watch(
+  () => ui.isMiniMode,
+  (isMini) => {
+    if (isMini) {
+      // 延迟一点执行, 避免动画卡顿
+      setTimeout(() => {
+        doCompactMemory()
+      }, 1000)
+    }
+  }
+)
 
 // 启动时自动加载音乐库
 // 阶段 4.4: 启动时序优化 - 关键路径 first, 非关键路径 idle
@@ -153,12 +177,23 @@ onMounted(async () => {
 // 极致性能: 窗口隐藏(最小化/切到后台/最小化到托盘)时
 //   1. 恢复 AudioContext (浏览器自动挂起, 必须手动 resume)
 //   2. 暂停所有非必要后台动画 (频谱 setTimeout / 背景轮播 / 封面旋转)
-// 重新可见时, 1+2 反向恢复
+//   3. 隐藏超过 5 分钟后触发内存回收
+// 重新可见时, 反向恢复
 function handleVisibilityChange() {
   if (document.hidden) {
     // 窗口隐藏: 暂停频谱采样循环、背景轮播定时器, 让 CPU/GPU 进入空闲
     settings.pauseAllBackgroundAnimations()
+    // 5 分钟后触发内存回收
+    if (hiddenTimer) clearTimeout(hiddenTimer)
+    hiddenTimer = setTimeout(() => {
+      doCompactMemory()
+    }, 5 * 60 * 1000)
   } else {
+    // 清除隐藏超时定时器
+    if (hiddenTimer) {
+      clearTimeout(hiddenTimer)
+      hiddenTimer = null
+    }
     // 页面重新可见时:
     //   1. 恢复音频上下文 (浏览器在 hidden 时自动挂起)
     //   2. 恢复所有后台动画
@@ -257,19 +292,18 @@ onUnmounted(() => {
 
       <!-- 右侧面板：设置 / 统计 / 下载 / 回忆（互斥，挤压式） -->
       <!-- 单一状态管理: ui.activeRightPanel 直接控制当前显示的面板 -->
+      <!-- 不使用 keep-alive 以节省内存, 低频面板每次打开重新渲染 -->
       <Transition name="slide-fade" mode="out-in">
-        <keep-alive>
-          <component
-            :is="ui.activeRightPanel === 'settings' ? SettingsPanel
-                : ui.activeRightPanel === 'stats' ? StatsPanel
-                : ui.activeRightPanel === 'download' ? DownloadPanel
-                : ui.activeRightPanel === 'memory' ? MemoryDrawer
-                : ui.activeRightPanel === 'equalizer' ? EqualizerPanel
-                : 'div'"
-            :key="ui.activeRightPanel || 'none'"
-            class="shrink-0"
-          />
-        </keep-alive>
+        <component
+          :is="ui.activeRightPanel === 'settings' ? SettingsPanel
+              : ui.activeRightPanel === 'stats' ? StatsPanel
+              : ui.activeRightPanel === 'download' ? DownloadPanel
+              : ui.activeRightPanel === 'memory' ? MemoryDrawer
+              : ui.activeRightPanel === 'equalizer' ? EqualizerPanel
+              : 'div'"
+          :key="ui.activeRightPanel || 'none'"
+          class="shrink-0"
+        />
       </Transition>
     </div>
 

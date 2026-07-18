@@ -44,33 +44,53 @@ let currentPlayStartAudioTime = 0
 // 是否已从 SQLite 加载完成
 let dbLoaded = false
 
+interface SongBasicInfo {
+  title: string
+  artist: string
+  album: string
+  cover_path: string | null
+  duration: number
+}
+
+interface DailyStat {
+  count: number
+  totalDuration: number
+  completedCount: number
+}
+
 export const useHistoryStore = defineStore('history', () => {
   // ========== 历史记录数据 ==========
+  // 展示用历史记录 (去重, 最多 500 条, 用于历史抽屉)
   const playHistory = ref<PlayHistoryItem[]>([])
-  const fullPlayHistory = ref<PlayHistoryItem[]>([])
 
   // ========== 预聚合索引 (启动时构建一次, 后续增量更新) ==========
-  // 设计目标: 6 个统计 computed 从 O(n) 全量扫描 -> O(1) 读桶 / O(唯一歌曲数) 找最值
-  // 数据规模: max 10000 条
-  // 写入约束: shallowRef 整体替换, 避免深 Proxy 重建
+  // 设计目标: 内存占用最小化, 仅保留聚合数据, 完整记录按需从 SQLite 加载
 
-  // 按日分桶: { 'YYYY-MM-DD': PlayHistoryItem[] }
-  const playHistoryByDay = shallowRef<Record<string, PlayHistoryItem[]>>({})
+  // 按日统计聚合: { 'YYYY-MM-DD': { count, totalDuration, completedCount } }
+  const dailyStats = shallowRef<Record<string, DailyStat>>({})
   // 按歌曲计数: { songId: count }
   const songPlayCount = shallowRef<Record<string, number>>({})
   // 按歌曲累计时长: { songId: totalPlayedSeconds }
   const songPlayDuration = shallowRef<Record<string, number>>({})
+  // 歌曲基本信息 (每首歌只存一份, 用于统计展示): { songId: SongBasicInfo }
+  const songInfoMap = shallowRef<Record<string, SongBasicInfo>>({})
+  // 完整历史记录是否已加载到内存 (懒加载标记)
+  const fullHistoryLoaded = ref(false)
+  // 完整历史记录 (按需加载, 默认空数组)
+  const fullPlayHistory = ref<PlayHistoryItem[]>([])
 
   // 模块级累计变量 (computed 不直接读, 避免每次重建数组)
   let totalPlayedDuration = 0
   let totalCompletedCount = 0
   let totalUniqueSongs = 0
+  let totalPlayCount = 0
 
   // ========== 从 SQLite 加载 ==========
   async function loadFromDb() {
     if (dbLoaded) return
     try {
-      const records = await invoke<any[]>('get_play_history', { limit: MAX_FULL_HISTORY_ITEMS })
+      // 只加载最近的记录用于构建展示历史和聚合索引 (最多 2000 条, 足够构建统计索引)
+      const records = await invoke<any[]>('get_play_history', { limit: 2000 })
       if (records && records.length > 0) {
         // 转换为前端 PlayHistoryItem 格式
         const items: PlayHistoryItem[] = records.map((r) => ({
@@ -87,7 +107,6 @@ export const useHistoryStore = defineStore('history', () => {
           completed: r.completed,
         }))
 
-        fullPlayHistory.value = items
         // 构建去重的展示历史 (每首歌只保留最新一条)
         const seen = new Set<string>()
         const displayItems: PlayHistoryItem[] = []
@@ -100,9 +119,58 @@ export const useHistoryStore = defineStore('history', () => {
         }
         playHistory.value = displayItems
 
-        // 重建索引
-        buildStatsIndex()
+        // 从 SQLite 获取统计聚合数据 (更准确)
+        try {
+          const stats = await invoke<any>('get_play_history_stats')
+          if (stats) {
+            totalPlayCount = stats.total_count || 0
+            totalPlayedDuration = stats.total_duration || 0
+            totalCompletedCount = stats.total_completed || 0
+            totalUniqueSongs = stats.unique_songs || 0
+            // 按日统计
+            if (stats.by_day) {
+              const byDay: Record<string, DailyStat> = {}
+              for (const d of stats.by_day) {
+                byDay[d.day] = {
+                  count: d.count,
+                  totalDuration: d.total_duration,
+                  completedCount: d.completed_count,
+                }
+              }
+              dailyStats.value = byDay
+            }
+            // 按歌曲计数和时长 (top 100 + playHistory 中的歌曲)
+            if (stats.by_song) {
+              const countMap: Record<string, number> = {}
+              const durMap: Record<string, number> = {}
+              const infoMap: Record<string, SongBasicInfo> = {}
+              for (const s of stats.by_song) {
+                countMap[s.song_hash] = s.count
+                durMap[s.song_hash] = s.total_duration
+                infoMap[s.song_hash] = {
+                  title: s.title,
+                  artist: s.artist,
+                  album: s.album,
+                  cover_path: s.cover_path || null,
+                  duration: s.duration,
+                }
+              }
+              songPlayCount.value = countMap
+              songPlayDuration.value = durMap
+              songInfoMap.value = infoMap
+            }
+            dbLoaded = true
+            fullHistoryLoaded.value = false
+            return
+          }
+        } catch (_) {
+          // SQLite 统计接口不可用, 回退到从记录构建
+        }
+
+        // 回退: 从部分记录构建索引 (可能不完整, 但启动快)
+        buildStatsIndexFromItems(items)
         dbLoaded = true
+        fullHistoryLoaded.value = false
         return
       }
 
@@ -112,18 +180,49 @@ export const useHistoryStore = defineStore('history', () => {
         await migrateFromLocalStorage(localFull)
       } else {
         // 完全没有数据, 直接用空的
-        fullPlayHistory.value = []
         playHistory.value = []
-        buildStatsIndex()
+        buildStatsIndexFromItems([])
       }
       dbLoaded = true
     } catch (e) {
       console.warn('[History] 从 SQLite 加载失败, 回退到 localStorage:', e)
       // 回退到 localStorage
       playHistory.value = loadPlayHistory()
-      fullPlayHistory.value = loadFullPlayHistory()
-      buildStatsIndex()
+      const localFull = loadFullPlayHistory()
+      buildStatsIndexFromItems(localFull)
+      fullPlayHistory.value = localFull
+      fullHistoryLoaded.value = true
       dbLoaded = true
+    }
+  }
+
+  // 确保完整历史记录已加载 (需要时才调用)
+  async function ensureFullHistoryLoaded(): Promise<void> {
+    if (fullHistoryLoaded.value) return
+    try {
+      const records = await invoke<any[]>('get_play_history', { limit: MAX_FULL_HISTORY_ITEMS })
+      if (records && records.length > 0) {
+        fullPlayHistory.value = records.map((r) => ({
+          id: r.id,
+          songId: r.song_hash,
+          title: r.title,
+          artist: r.artist,
+          album: r.album,
+          duration: r.duration,
+          cover_path: r.cover_path ? r.cover_path : null,
+          file_path: r.song_path,
+          playedAt: r.played_at,
+          playedDuration: r.played_duration,
+          completed: r.completed,
+        }))
+      } else {
+        fullPlayHistory.value = []
+      }
+      fullHistoryLoaded.value = true
+    } catch (e) {
+      console.warn('[History] 加载完整历史失败:', e)
+      fullPlayHistory.value = []
+      fullHistoryLoaded.value = true
     }
   }
 
@@ -145,8 +244,7 @@ export const useHistoryStore = defineStore('history', () => {
       }))
       await invoke('batch_add_play_history', { records })
 
-      // 加载到内存
-      fullPlayHistory.value = localItems
+      // 构建展示历史和聚合索引
       const seen = new Set<string>()
       const displayItems: PlayHistoryItem[] = []
       for (const item of localItems) {
@@ -157,61 +255,80 @@ export const useHistoryStore = defineStore('history', () => {
         }
       }
       playHistory.value = displayItems
-      buildStatsIndex()
+      buildStatsIndexFromItems(localItems)
+      fullPlayHistory.value = localItems
+      fullHistoryLoaded.value = true
     } catch (e) {
       console.warn('[History] 迁移 localStorage 数据失败:', e)
       fullPlayHistory.value = localItems
       playHistory.value = loadPlayHistory()
-      buildStatsIndex()
+      buildStatsIndexFromItems(localItems)
+      fullHistoryLoaded.value = true
     }
   }
 
   // ========== 索引构建 ==========
-  function buildStatsIndex() {
-    const byDay: Record<string, PlayHistoryItem[]> = {}
+  function buildStatsIndexFromItems(items: PlayHistoryItem[]) {
+    const byDay: Record<string, DailyStat> = {}
     const count: Record<string, number> = {}
     const duration: Record<string, number> = {}
+    const infoMap: Record<string, SongBasicInfo> = {}
     const uniqueIds = new Set<string>()
+    let localTotalDuration = 0
+    let localTotalCompleted = 0
 
-    for (const item of fullPlayHistory.value) {
-      // 按日分桶
+    for (const item of items) {
+      // 按日统计聚合
       const d = new Date(item.playedAt)
       const dayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-      if (!byDay[dayKey]) byDay[dayKey] = []
-      byDay[dayKey].push(item)
+      if (!byDay[dayKey]) {
+        byDay[dayKey] = { count: 0, totalDuration: 0, completedCount: 0 }
+      }
+      byDay[dayKey].count++
+      byDay[dayKey].totalDuration += item.playedDuration
+      if (item.completed) byDay[dayKey].completedCount++
 
-      // 计数
+      // 按歌曲计数
       count[item.songId] = (count[item.songId] || 0) + 1
-      // 累计时长
+      // 按歌曲累计时长
       duration[item.songId] = (duration[item.songId] || 0) + item.playedDuration
-      // 总时长
-      totalPlayedDuration += item.playedDuration
-      // 完整播放
-      if (item.completed) totalCompletedCount++
-      // 唯一
+      // 歌曲基本信息 (只存一份)
+      if (!infoMap[item.songId]) {
+        infoMap[item.songId] = {
+          title: item.title,
+          artist: item.artist,
+          album: item.album,
+          cover_path: item.cover_path,
+          duration: item.duration,
+        }
+      }
+
+      // 累计变量
+      localTotalDuration += item.playedDuration
+      if (item.completed) localTotalCompleted++
       uniqueIds.add(item.songId)
     }
 
-    // 排序每个桶 (按 playedAt 降序)
-    for (const k of Object.keys(byDay)) {
-      byDay[k].sort((a, b) => b.playedAt - a.playedAt)
-    }
-
-    playHistoryByDay.value = byDay
+    dailyStats.value = byDay
     songPlayCount.value = count
     songPlayDuration.value = duration
+    songInfoMap.value = infoMap
+    totalPlayedDuration = localTotalDuration
+    totalCompletedCount = localTotalCompleted
     totalUniqueSongs = uniqueIds.size
+    totalPlayCount = items.length
   }
 
   function rebuildStatsIndex() {
     totalPlayedDuration = 0
     totalCompletedCount = 0
     totalUniqueSongs = 0
-    buildStatsIndex()
+    totalPlayCount = 0
+    dailyStats.value = {}
+    songPlayCount.value = {}
+    songPlayDuration.value = {}
+    songInfoMap.value = {}
   }
-
-  // 启动时同步构建一次
-  buildStatsIndex()
 
   // ========== 历史记录操作 ==========
 
@@ -266,24 +383,27 @@ export const useHistoryStore = defineStore('history', () => {
     currentHistoryItem.playedDuration = playedDuration
     currentHistoryItem.completed = playedDuration >= currentHistoryItem.duration * 0.8
 
-    // 1. 添加到完整播放记录 (不去重, 用于统计)
-    fullPlayHistory.value.unshift({ ...currentHistoryItem })
-    if (fullPlayHistory.value.length > MAX_FULL_HISTORY_ITEMS) {
-      fullPlayHistory.value = fullPlayHistory.value.slice(0, MAX_FULL_HISTORY_ITEMS)
-    }
-    saveFullPlayHistory(fullPlayHistory.value)
+    const item = currentHistoryItem
 
-    // 2. 更新展示用历史记录 (去重, 同一首歌只保留最新一次)
-    playHistory.value = playHistory.value.filter((item) => item.songId !== currentHistoryItem!.songId)
-    playHistory.value.unshift({ ...currentHistoryItem })
+    // 1. 更新展示用历史记录 (去重, 同一首歌只保留最新一次)
+    playHistory.value = playHistory.value.filter((i) => i.songId !== item.songId)
+    playHistory.value.unshift({ ...item })
     if (playHistory.value.length > MAX_HISTORY_ITEMS) {
       playHistory.value = playHistory.value.slice(0, MAX_HISTORY_ITEMS)
     }
     savePlayHistory(playHistory.value)
 
+    // 2. 如果完整历史已加载到内存, 同步更新 (懒加载模式下默认不加载)
+    if (fullHistoryLoaded.value) {
+      fullPlayHistory.value.unshift({ ...item })
+      if (fullPlayHistory.value.length > MAX_FULL_HISTORY_ITEMS) {
+        fullPlayHistory.value = fullPlayHistory.value.slice(0, MAX_FULL_HISTORY_ITEMS)
+      }
+      saveFullPlayHistory(fullPlayHistory.value)
+    }
+
     // 3. 异步写入 SQLite
     if (dbLoaded) {
-      const item = currentHistoryItem
       invoke('add_play_history', {
         record: {
           id: item.id,
@@ -302,14 +422,25 @@ export const useHistoryStore = defineStore('history', () => {
     }
 
     // 4. 增量更新预聚合索引
-    const item = currentHistoryItem
     const d = new Date(item.playedAt)
     const dayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
 
-    const dayBucket = playHistoryByDay.value[dayKey] ? [...playHistoryByDay.value[dayKey]] : []
-    dayBucket.unshift({ ...item })
-    playHistoryByDay.value = { ...playHistoryByDay.value, [dayKey]: dayBucket }
+    // 更新 dailyStats
+    const oldDayStat = dailyStats.value[dayKey]
+    const newDayStat = oldDayStat
+      ? {
+          count: oldDayStat.count + 1,
+          totalDuration: oldDayStat.totalDuration + item.playedDuration,
+          completedCount: oldDayStat.completedCount + (item.completed ? 1 : 0),
+        }
+      : {
+          count: 1,
+          totalDuration: item.playedDuration,
+          completedCount: item.completed ? 1 : 0,
+        }
+    dailyStats.value = { ...dailyStats.value, [dayKey]: newDayStat }
 
+    // 更新按歌曲统计
     const oldCount = songPlayCount.value[item.songId] || 0
     const newCount = oldCount + 1
     songPlayCount.value = {
@@ -321,6 +452,22 @@ export const useHistoryStore = defineStore('history', () => {
       [item.songId]: (songPlayDuration.value[item.songId] || 0) + item.playedDuration,
     }
 
+    // 更新歌曲基本信息 (首次出现时添加)
+    if (oldCount === 0) {
+      songInfoMap.value = {
+        ...songInfoMap.value,
+        [item.songId]: {
+          title: item.title,
+          artist: item.artist,
+          album: item.album,
+          cover_path: item.cover_path,
+          duration: item.duration,
+        },
+      }
+    }
+
+    // 更新累计变量
+    totalPlayCount++
     totalPlayedDuration += item.playedDuration
     if (item.completed) totalCompletedCount++
     if (oldCount === 0) totalUniqueSongs++
@@ -334,6 +481,7 @@ export const useHistoryStore = defineStore('history', () => {
   function clearPlayHistory() {
     playHistory.value = []
     fullPlayHistory.value = []
+    fullHistoryLoaded.value = false
     savePlayHistory(playHistory.value)
     saveFullPlayHistory(fullPlayHistory.value)
     rebuildStatsIndex()
@@ -350,39 +498,63 @@ export const useHistoryStore = defineStore('history', () => {
   function removeHistoryItem(id: string) {
     // 从展示记录中删除
     const idx = playHistory.value.findIndex((item) => item.id === id)
+    let removed: PlayHistoryItem | null = null
     if (idx !== -1) {
+      removed = playHistory.value[idx]
       playHistory.value.splice(idx, 1)
       savePlayHistory(playHistory.value)
     }
 
-    // 从完整记录中删除 (同时更新预聚合索引)
-    const fullIdx = fullPlayHistory.value.findIndex((item) => item.id === id)
-    if (fullIdx !== -1) {
-      const removed = fullPlayHistory.value[fullIdx]
-      fullPlayHistory.value.splice(fullIdx, 1)
-      saveFullPlayHistory(fullPlayHistory.value)
+    // 如果完整历史已加载, 也从中删除
+    if (fullHistoryLoaded.value) {
+      const fullIdx = fullPlayHistory.value.findIndex((item) => item.id === id)
+      if (fullIdx !== -1) {
+        removed = fullPlayHistory.value[fullIdx]
+        fullPlayHistory.value.splice(fullIdx, 1)
+        saveFullPlayHistory(fullPlayHistory.value)
+      }
+    }
 
-      // 增量回滚预聚合
+    // 如果找到了被删除的项, 增量回滚预聚合
+    if (removed) {
       const d = new Date(removed.playedAt)
       const dayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-      const bucket = playHistoryByDay.value[dayKey]
-      if (bucket) {
-        playHistoryByDay.value = {
-          ...playHistoryByDay.value,
-          [dayKey]: bucket.filter((i) => i.id !== id),
+      const dayStat = dailyStats.value[dayKey]
+      if (dayStat) {
+        const newCount = Math.max(0, dayStat.count - 1)
+        const newDuration = Math.max(0, dayStat.totalDuration - removed.playedDuration)
+        const newCompleted = Math.max(0, dayStat.completedCount - (removed.completed ? 1 : 0))
+        if (newCount === 0) {
+          const newStats = { ...dailyStats.value }
+          delete newStats[dayKey]
+          dailyStats.value = newStats
+        } else {
+          dailyStats.value = {
+            ...dailyStats.value,
+            [dayKey]: { count: newCount, totalDuration: newDuration, completedCount: newCompleted },
+          }
         }
       }
       const oldCount = songPlayCount.value[removed.songId] || 0
       const newCount = Math.max(0, oldCount - 1)
-      songPlayCount.value = {
-        ...songPlayCount.value,
-        [removed.songId]: newCount,
+      if (newCount === 0) {
+        const newCountMap = { ...songPlayCount.value }
+        delete newCountMap[removed.songId]
+        songPlayCount.value = newCountMap
+        const newDurMap = { ...songPlayDuration.value }
+        delete newDurMap[removed.songId]
+        songPlayDuration.value = newDurMap
+        const newInfoMap = { ...songInfoMap.value }
+        delete newInfoMap[removed.songId]
+        songInfoMap.value = newInfoMap
+      } else {
+        songPlayCount.value = { ...songPlayCount.value, [removed.songId]: newCount }
+        songPlayDuration.value = {
+          ...songPlayDuration.value,
+          [removed.songId]: Math.max(0, (songPlayDuration.value[removed.songId] || 0) - removed.playedDuration),
+        }
       }
-      const newDuration = Math.max(0, (songPlayDuration.value[removed.songId] || 0) - removed.playedDuration)
-      songPlayDuration.value = {
-        ...songPlayDuration.value,
-        [removed.songId]: newDuration,
-      }
+      totalPlayCount = Math.max(0, totalPlayCount - 1)
       totalPlayedDuration = Math.max(0, totalPlayedDuration - removed.playedDuration)
       if (removed.completed) totalCompletedCount = Math.max(0, totalCompletedCount - 1)
       if (newCount === 0) totalUniqueSongs = Math.max(0, totalUniqueSongs - 1)
@@ -397,48 +569,33 @@ export const useHistoryStore = defineStore('history', () => {
   // ========== 统计查询工具 ==========
 
   /**
-   * 获取某一时间段内的播放记录 (基于按日分桶索引, O(桶数) 而非 O(全量))
+   * 获取某一时间段内的统计汇总 (基于 dailyStats, O(天数) 而非 O(全量))
    */
-  function getHistoryInRange(startTime: number, endTime: number): PlayHistoryItem[] {
-    const result: PlayHistoryItem[] = []
+  function getStatsInRange(startTime: number, endTime: number): { count: number; totalDuration: number; completedCount: number } {
+    let count = 0
+    let totalDuration = 0
+    let completedCount = 0
     const start = new Date(startTime)
     const end = new Date(endTime)
     for (let d = new Date(start.getFullYear(), start.getMonth(), start.getDate()); d.getTime() < end.getTime(); d.setDate(d.getDate() + 1)) {
       const dayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
-      const bucket = playHistoryByDay.value[dayKey]
-      if (bucket) {
-        for (const item of bucket) {
-          if (item.playedAt >= startTime && item.playedAt < endTime) {
-            result.push(item)
-          }
-        }
+      const stat = dailyStats.value[dayKey]
+      if (stat) {
+        count += stat.count
+        totalDuration += stat.totalDuration
+        completedCount += stat.completedCount
       }
-    }
-    return result
-  }
-
-  /**
-   * 汇总桶内数据
-   */
-  function summarizeBucket(items: PlayHistoryItem[]): { count: number; totalDuration: number; completedCount: number } {
-    let count = 0
-    let totalDuration = 0
-    let completedCount = 0
-    for (const item of items) {
-      count++
-      totalDuration += item.playedDuration
-      if (item.completed) completedCount++
     }
     return { count, totalDuration, completedCount }
   }
 
   // ========== 6 个统计计算属性 ==========
 
-  // 今天的统计 (O(1) 直接读桶)
+  // 今天的统计 (O(1) 直接读 dailyStats)
   const todayStats = computed(() => {
     const now = new Date()
     const dayKey = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
-    return summarizeBucket(playHistoryByDay.value[dayKey] || [])
+    return dailyStats.value[dayKey] || { count: 0, totalDuration: 0, completedCount: 0 }
   })
 
   // 本月统计
@@ -446,7 +603,7 @@ export const useHistoryStore = defineStore('history', () => {
     const now = new Date()
     const startOfMonth = new Date(now.getFullYear(), now.getMonth(), 1).getTime()
     const endOfMonth = new Date(now.getFullYear(), now.getMonth() + 1, 1).getTime()
-    return summarizeBucket(getHistoryInRange(startOfMonth, endOfMonth))
+    return getStatsInRange(startOfMonth, endOfMonth)
   })
 
   // 本年统计
@@ -454,7 +611,7 @@ export const useHistoryStore = defineStore('history', () => {
     const now = new Date()
     const startOfYear = new Date(now.getFullYear(), 0, 1).getTime()
     const endOfYear = new Date(now.getFullYear() + 1, 0, 1).getTime()
-    return summarizeBucket(getHistoryInRange(startOfYear, endOfYear))
+    return getStatsInRange(startOfYear, endOfYear)
   })
 
   // 听歌之最: 单曲循环次数最多的歌 (O(唯一歌曲数))
@@ -468,8 +625,9 @@ export const useHistoryStore = defineStore('history', () => {
       }
     }
     if (!maxId) return null
-    const item = fullPlayHistory.value.find((i) => i.songId === maxId)
-    return item ? { song: item, count: maxCount } : null
+    const info = songInfoMap.value[maxId]
+    if (!info) return null
+    return { song: info as PlayHistoryItem, count: maxCount }
   })
 
   // 听歌之最: 总播放时长最久的歌
@@ -483,13 +641,14 @@ export const useHistoryStore = defineStore('history', () => {
       }
     }
     if (!maxId) return null
-    const item = fullPlayHistory.value.find((i) => i.songId === maxId)
-    return item ? { song: item, duration: maxDuration } : null
+    const info = songInfoMap.value[maxId]
+    if (!info) return null
+    return { song: info as PlayHistoryItem, duration: maxDuration }
   })
 
   // 全部时间统计 (直接读模块级累计变量)
   const allTimeStats = computed(() => ({
-    count: fullPlayHistory.value.length,
+    count: totalPlayCount,
     totalDuration: totalPlayedDuration,
     completedCount: totalCompletedCount,
     uniqueSongs: totalUniqueSongs,
@@ -556,6 +715,8 @@ export const useHistoryStore = defineStore('history', () => {
    */
   async function exportStatsReport(): Promise<boolean> {
     try {
+      // 导出前确保完整历史已加载 (用于完整统计)
+      await ensureFullHistoryLoaded()
       const markdown = generateStatsMarkdown()
       const now = new Date()
       const dateStr = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, '0')}-${String(now.getDate()).padStart(2, '0')}`
@@ -569,9 +730,6 @@ export const useHistoryStore = defineStore('history', () => {
       })
 
       if (filePath) {
-        // BUG 7 修复: 改用 Rust 命令写文件
-        //   - tauri-plugin-fs 未在 capabilities 中授权, writeTextFile 会静默失败
-        //   - 通过 invoke('write_text_file') 绕过 fs plugin 权限限制
         await invoke('write_text_file', {
           path: filePath,
           content: markdown,
@@ -582,6 +740,14 @@ export const useHistoryStore = defineStore('history', () => {
     } catch (e) {
       console.error('[Stats] 导出统计报告失败:', e)
       return false
+    }
+  }
+
+  // 释放完整历史记录 (节省内存)
+  function releaseFullHistory() {
+    if (fullHistoryLoaded.value) {
+      fullPlayHistory.value = []
+      fullHistoryLoaded.value = false
     }
   }
 
@@ -602,6 +768,8 @@ export const useHistoryStore = defineStore('history', () => {
     clearPlayHistory,
     removeHistoryItem,
     loadFromDb,
+    ensureFullHistoryLoaded,
+    releaseFullHistory,
     // 报告
     generateStatsMarkdown,
     exportStatsReport,

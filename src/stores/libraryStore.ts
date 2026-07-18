@@ -172,6 +172,49 @@ export const useLibraryStore = defineStore('library', () => {
     return url
   }
 
+  function getCoverThumbUrl(coverPath: string | null, thumbPath: string | null | undefined): string {
+    if (thumbPath) {
+      let url = coverUrlCache.get(thumbPath)
+      if (url === undefined) {
+        url = convertFileSrc(thumbPath)
+        coverUrlCache.set(thumbPath, url)
+      }
+      return url
+    }
+    return getCoverUrl(coverPath)
+  }
+
+  // ========== 内存回收 ==========
+  function compactMemory() {
+    // 保留当前播放歌曲的音频 URL, 清空其他
+    const current = currentSong.value
+    const keepAudio = current ? current.file_path : ''
+    audioUrlCache.forEach((_, key) => {
+      if (key !== keepAudio) {
+        audioUrlCache.delete(key)
+      }
+    })
+
+    // 封面 URL 缓存保留最近使用的 100 个
+    if (coverUrlCache.size > 100) {
+      let count = 0
+      const toDelete: string[] = []
+      coverUrlCache.forEach((_, key) => {
+        count++
+        if (count > 100) toDelete.push(key)
+      })
+      toDelete.forEach((k) => coverUrlCache.delete(k))
+    }
+
+    // 歌单歌曲缓存只保留当前激活的
+    const activeId = activePlaylistId.value
+    playlistSongCache.forEach((_, key) => {
+      if (key !== activeId) {
+        playlistSongCache.delete(key)
+      }
+    })
+  }
+
   // ========== 歌单管理 ==========
   // 从后端加载歌单列表
   async function loadPlaylistsFromDb() {
@@ -707,6 +750,7 @@ async function scanMusicFolder(path: string, forceRefresh = false) {
     findSongById,
     getAudioUrl,
     getCoverUrl,
+    getCoverThumbUrl,
     // 歌单方法
     loadPlaylistsFromDb,
     loadPlaylistSongs,
@@ -728,5 +772,7 @@ async function scanMusicFolder(path: string, forceRefresh = false) {
     refreshMetadata,
     updateSongLocalMetadata,
     removeSongFromLibrary,
+    // 内存管理
+    compactMemory,
   }
 })

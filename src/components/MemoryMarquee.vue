@@ -15,7 +15,15 @@ const isPaused = computed(() => !audio.isPlaying)
 const isHovered = ref(false)
 
 // ========== 数据源 ==========
-const tags = computed(() => memory.currentShortTags)
+// 限制最多显示 30 个标签, 减少 DOM 节点
+const MAX_TAGS = 30
+const tags = computed(() => {
+  const t = memory.currentShortTags
+  if (t.length <= MAX_TAGS) return t
+  // 超出时随机选取 MAX_TAGS 个
+  const shuffled = [...t].sort(() => Math.random() - 0.5)
+  return shuffled.slice(0, MAX_TAGS)
+})
 
 // 6 行轮询分配，每条标签仅出现一次
 const ROWS = 6

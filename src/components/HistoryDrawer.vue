@@ -103,7 +103,7 @@ function onCoverError(e: Event) {
               <div class="w-10 h-10 rounded bg-gray-200/70 dark:bg-gray-700/70 shrink-0 overflow-hidden">
                 <img
                   v-if="(song as PlayHistoryItem).cover_path"
-                  :src="library.getCoverUrl((song as PlayHistoryItem).cover_path as string)"
+                  :src="library.getCoverThumbUrl((song as PlayHistoryItem).cover_path as string, (song as any).cover_thumb_path)"
                   :alt="(song as PlayHistoryItem).title"
                   class="w-full h-full object-cover"
                   loading="lazy"
@@ -152,7 +152,7 @@ function onCoverError(e: Event) {
             <div class="w-10 h-10 rounded bg-gray-200/70 dark:bg-gray-700/70 shrink-0 overflow-hidden">
               <img
                 v-if="item.cover_path"
-                :src="library.getCoverUrl(item.cover_path)"
+                :src="library.getCoverThumbUrl(item.cover_path, (item as any).cover_thumb_path)"
                 :alt="item.title"
                 class="w-full h-full object-cover"
                 loading="lazy"
