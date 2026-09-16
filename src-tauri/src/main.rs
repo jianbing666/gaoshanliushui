@@ -20,6 +20,7 @@ use commands::history;
 use commands::app_config;
 use commands::data_dir;
 use commands::song;
+use commands::loudnorm;
 use tauri_plugin_media::MediaExt;
 
 use std::sync::Mutex;
@@ -173,6 +174,8 @@ fn main() {
             data_dir::migrate_data,
             // 歌曲管理
             song::delete_song,
+            // 阶段三: 批量响度归一化
+            loudnorm::normalize_songs_loudness,
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

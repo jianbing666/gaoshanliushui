@@ -5,6 +5,7 @@ import { useAudioStore } from '@/stores/audioStore'
 import MigrateDataModal from './MigrateDataModal.vue'
 import { open } from '@tauri-apps/plugin-dialog'
 import { invoke } from '@tauri-apps/api/core'
+import { listen } from '@tauri-apps/api/event'
 import type { ThemeMode, BackgroundSettings } from '@/types/song'
 import { useShortcutConfig } from '@/composables/useShortcutConfig'
 import { useAutoLaunch } from '@/composables/useAutoLaunch'
@@ -170,6 +171,104 @@ function handleMinimizeToTrayToggle() {
 
 function handleShowSpectrumToggle() {
   settings.setShowSpectrum(!settings.showSpectrum)
+}
+
+// 音量均衡开关
+function handleLoudnessToggle() {
+  settings.setLoudnessNormalization(!settings.loudnessNormalization)
+}
+
+// 测量模式切换: 标准 RMS / 高精度 LUFS
+function handleLoudnessModeChange(mode: 'rms' | 'lufs') {
+  settings.setLoudnessMode(mode)
+}
+
+// ========== 批量响度归一化（离线，独立于实时开关） ==========
+/** 批量卡片是否展开 */
+const showBatchLoudnorm = ref(false)
+const batchRunning = ref(false)
+/** 二次确认中待处理的路径列表；null 表示未在确认状态 */
+const batchConfirmPaths = ref<string[] | null>(null)
+/** 当前正在处理的文件进度 */
+const batchCurrent = ref<{ index: number; total: number; file: string } | null>(null)
+/** 最近一次单文件错误信息（用于轻提示） */
+const batchLastError = ref<string | null>(null)
+/** 整批结束后的结果摘要 */
+const batchSummary = ref<string | null>(null)
+/** 事件取消监听函数 */
+let unlistenLoudnorm: (() => void) | null = null
+
+onMounted(async () => {
+  unlistenLoudnorm = await listen<{
+    index: number
+    total: number
+    file: string
+    status: string
+    message?: string
+  }>('loudnorm://progress', (event) => {
+    const payload = event.payload
+    if (payload.status === 'start') {
+      batchCurrent.value = { index: payload.index, total: payload.total, file: payload.file }
+    } else if (payload.status === 'error') {
+      batchLastError.value = payload.message ?? '处理失败'
+    } else if (payload.status === 'finished') {
+      batchRunning.value = false
+      batchSummary.value = payload.message ?? '处理完成'
+      // 同步曲库（文件被替换：新指纹、时长、封面等），回忆指纹已由后端迁移
+      if (library.folderPath) {
+        library.scanMusicFolder(library.folderPath, false).catch(console.error)
+      }
+    }
+  })
+})
+
+onUnmounted(() => {
+  unlistenLoudnorm?.()
+})
+
+/** 准备处理全部歌曲：收集曲库文件路径并进入二次确认 */
+function prepareBatchAll() {
+  if (batchRunning.value) return
+  const paths = library.playlist.map((song) => song.file_path).filter(Boolean)
+  if (paths.length === 0) return
+  batchLastError.value = null
+  batchSummary.value = null
+  batchConfirmPaths.value = paths
+}
+
+/** 准备处理选定文件：系统多选对话框后进入二次确认 */
+async function prepareBatchPick() {
+  if (batchRunning.value) return
+  const selected = await open({
+    multiple: true,
+    filters: [{ name: 'MP3 音频', extensions: ['mp3'] }],
+  })
+  if (Array.isArray(selected) && selected.length > 0) {
+    batchLastError.value = null
+    batchSummary.value = null
+    batchConfirmPaths.value = selected
+  }
+}
+
+function cancelBatchConfirm() {
+  batchConfirmPaths.value = null
+}
+
+/** 确认开始：调用后端批量命令 */
+async function confirmStartBatch() {
+  const paths = batchConfirmPaths.value
+  if (!paths || batchRunning.value) return
+  batchConfirmPaths.value = null
+  batchRunning.value = true
+  batchCurrent.value = null
+  try {
+    await invoke<number>('normalize_songs_loudness', { paths, targetI: -14 })
+  } catch (e) {
+    console.error('批量响度归一化失败', e)
+  } finally {
+    batchRunning.value = false
+    batchCurrent.value = null
+  }
 }
 
 // BUG 3 修复: 设置页面的「显示记忆标签」开关已移除
@@ -487,7 +586,7 @@ onUnmounted(() => {
               >
                 <div
                   class="absolute top-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform"
-                  :class="autoLaunch ? 'translate-x-5' : 'translate-x-0.5'"
+                  :class="autoLaunch ? 'translate-x-[22px]' : 'translate-x-0.5'"
                 ></div>
               </button>
             </div>
@@ -506,7 +605,7 @@ onUnmounted(() => {
               >
                 <div
                   class="absolute top-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform"
-                  :class="settings.minimizeToTray ? 'translate-x-5' : 'translate-x-0.5'"
+                  :class="settings.minimizeToTray ? 'translate-x-[22px]' : 'translate-x-0.5'"
                 ></div>
               </button>
             </div>
@@ -525,7 +624,7 @@ onUnmounted(() => {
               >
                 <div
                   class="absolute top-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform"
-                  :class="settings.showSpectrum ? 'translate-x-5' : 'translate-x-0.5'"
+                  :class="settings.showSpectrum ? 'translate-x-[22px]' : 'translate-x-0.5'"
                 ></div>
               </button>
             </div>
@@ -556,6 +655,122 @@ onUnmounted(() => {
               >
                 {{ opt.label }}
               </button>
+            </div>
+          </div>
+
+          <!-- 音量均衡（实时） -->
+          <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3 space-y-2">
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-gray-900 dark:text-white text-sm font-medium">音量均衡</p>
+                <p class="text-gray-500 dark:text-gray-400 text-xs">实时调节不同歌曲的音量差异</p>
+              </div>
+              <button
+                class="relative w-10 h-5 rounded-full transition-colors shrink-0"
+                :class="settings.loudnessNormalization ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
+                @click="handleLoudnessToggle"
+              >
+                <div
+                  class="absolute top-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform"
+                  :class="settings.loudnessNormalization ? 'translate-x-[22px]' : 'translate-x-0.5'"
+                ></div>
+              </button>
+            </div>
+            <!-- 测量方式: 标准 RMS / 高精度 LUFS（仅开关启用时显示） -->
+            <div v-if="settings.loudnessNormalization" class="space-y-1.5">
+              <p class="text-gray-500 dark:text-gray-400 text-xs">高精度按 EBU R128 标准测量，略增 CPU</p>
+              <div class="bg-white/60 dark:bg-gray-900/40 rounded-lg p-1 flex gap-1">
+                <button
+                  v-for="opt in [
+                    { value: 'rms', label: '标准' },
+                    { value: 'lufs', label: '高精度' }
+                  ]"
+                  :key="opt.value"
+                  class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
+                  :class="
+                    settings.loudnessMode === opt.value
+                      ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                  "
+                  @click="handleLoudnessModeChange(opt.value as 'rms' | 'lufs')"
+                >
+                  {{ opt.label }}
+                </button>
+              </div>
+            </div>
+          </div>
+
+          <!-- 批量响度归一化（离线，独立于实时开关） -->
+          <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3 space-y-2">
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-gray-900 dark:text-white text-sm font-medium">批量响度归一化</p>
+                <p class="text-gray-500 dark:text-gray-400 text-xs">按 EBU R128（-14 LUFS）离线处理并替换原文件</p>
+              </div>
+              <button
+                class="p-1 rounded transition-colors shrink-0 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
+                :class="showBatchLoudnorm ? 'rotate-180' : ''"
+                @click="showBatchLoudnorm = !showBatchLoudnorm"
+              >
+                <ChevronDownIcon class="w-4 h-4" />
+              </button>
+            </div>
+
+            <div v-if="showBatchLoudnorm" class="space-y-2">
+              <!-- 操作按钮 -->
+              <div v-if="!batchConfirmPaths && !batchRunning" class="flex gap-2">
+                <button
+                  class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium bg-white dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  @click="prepareBatchAll"
+                >
+                  全部歌曲
+                </button>
+                <button
+                  class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium bg-white dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                  @click="prepareBatchPick"
+                >
+                  选择文件
+                </button>
+              </div>
+
+              <!-- 二次确认 -->
+              <div v-if="batchConfirmPaths" class="space-y-2">
+                <p class="text-xs text-amber-600 dark:text-amber-400 leading-relaxed">
+                  将处理 {{ batchConfirmPaths.length }} 首歌曲并替换原文件，建议先暂停播放并自行备份；回忆关联会自动迁移。
+                </p>
+                <div class="flex gap-2">
+                  <button
+                    class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium bg-blue-500 dark:bg-blue-600 text-white hover:bg-blue-600 dark:hover:bg-blue-700 transition-colors"
+                    @click="confirmStartBatch"
+                  >
+                    开始处理
+                  </button>
+                  <button
+                    class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium bg-white dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors"
+                    @click="cancelBatchConfirm"
+                  >
+                    取消
+                  </button>
+                </div>
+              </div>
+
+              <!-- 处理进度 -->
+              <div v-if="batchRunning && batchCurrent" class="space-y-1">
+                <p class="text-xs text-gray-900 dark:text-white">
+                  正在处理 {{ batchCurrent.index + 1 }}/{{ batchCurrent.total }}
+                </p>
+                <div class="w-full h-1 bg-white/60 dark:bg-gray-900/40 rounded-full overflow-hidden">
+                  <div
+                    class="h-full bg-blue-500 dark:bg-blue-600 rounded-full transition-all duration-300"
+                    :style="{ width: ((batchCurrent.index + 1) / batchCurrent.total * 100) + '%' }"
+                  ></div>
+                </div>
+                <p class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ batchCurrent.file }}</p>
+              </div>
+
+              <!-- 结果 / 错误轻提示 -->
+              <p v-if="batchSummary" class="text-xs text-green-600 dark:text-green-400">{{ batchSummary }}</p>
+              <p v-if="batchLastError" class="text-xs text-red-500 dark:text-red-400 truncate">最近失败：{{ batchLastError }}</p>
             </div>
           </div>
 
@@ -597,7 +812,7 @@ onUnmounted(() => {
               >
                 <div
                   class="absolute top-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform"
-                  :class="settings.sleepTimerEnabled ? 'translate-x-5' : 'translate-x-0.5'"
+                  :class="settings.sleepTimerEnabled ? 'translate-x-[22px]' : 'translate-x-0.5'"
                 ></div>
               </button>
             </div>

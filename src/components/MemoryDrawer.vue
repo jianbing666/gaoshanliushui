@@ -246,7 +246,7 @@ function handleEditMetadata() {
       >
         <div
           class="absolute top-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform"
-          :class="settings.showMemoryTags ? 'translate-x-4' : 'translate-x-0.5'"
+          :class="settings.showMemoryTags ? 'translate-x-[18px]' : 'translate-x-0.5'"
         ></div>
       </button>
     </div>

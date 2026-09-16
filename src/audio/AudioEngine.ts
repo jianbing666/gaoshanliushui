@@ -13,8 +13,10 @@
  *   - 强制唤醒: forceWake() 显式 await audioContext.resume()
  *   - onended 清理: 手动 stop 前先 audioSourceNode.onended = null
  *
- * 音频链路 (v1.2.0 + EQ):
- *   AudioBufferSourceNode → Equalizer(10段) → AnalyserNode → GainNode → Destination
+ * 音频链路 (v1.2.0 + EQ + 响度均衡):
+ *   AudioBufferSourceNode → Equalizer(10段) → AnalyserNode
+ *     → [响度均衡启用时: LoudnessGain → Limiter]
+ *     → GainNode(用户音量) → Destination
  *
  * 调用入口(由 audioStore.ts 注入):
  *   - audioStore 调 engine.playFromOffset(0, song, onStart)
@@ -25,6 +27,8 @@
  */
 
 import { equalizer } from './Equalizer'
+import { loudnessNormalizer } from './LoudnessNormalizer'
+import type { LoudnessMode } from './LoudnessNormalizer'
 
 export class AudioEngine {
   // ========== 模块级状态(Web Audio 单例) ==========
@@ -66,6 +70,10 @@ export class AudioEngine {
    *  防止旧 source 停止过程中发出任何声音, 也防止新 source 启动前的静音状态被误恢复 */
   private isMutedForSwitch = false
 
+  /** 响度均衡启用标记（由 audioStore 同步设置页开关）
+   *  context 初始化前先拨动开关时仅记录标记, init() 建链后按标记接入 */
+  private loudnessEnabled = false
+
   // ========== 回调(由 audioStore 注入) ==========
   private _onEnded: (() => void) | null = null
   private _onStart: (() => void) | null = null
@@ -90,6 +98,11 @@ export class AudioEngine {
       this.gainNode.connect(this.audioContext.destination)
 
       equalizer.init(this.audioContext, this.analyserNode)
+
+      // 建链完成: 若开关此前已打开（context 未建时只存了标记），立即接入响度链路
+      if (this.loudnessEnabled) {
+        loudnessNormalizer.start(this.analyserNode, this.gainNode)
+      }
     }
   }
 
@@ -232,6 +245,8 @@ export class AudioEngine {
         this.gainNode.gain.setValueAtTime(this.currentVolume, this.audioContext.currentTime)
       }
       this.isMutedForSwitch = false
+      // 复位响度测量: 切歌/seek 后不沿用上一段内容的补偿增益（未启用时为 no-op）
+      loudnessNormalizer.reset()
     } catch (error) {
       console.error('[Audio] AudioBufferSourceNode 启动失败:', error)
       this.audioSourceNode = null
@@ -359,6 +374,30 @@ export class AudioEngine {
   }
 
   /**
+   * 开关响度均衡（由 audioStore 监听设置页开关后调用）
+   * context 尚未初始化时仅保存标记，init() 建链时按标记接入；
+   * 已初始化则立即改链接入 / 断开恢复
+   */
+  setLoudnessEnabled(value: boolean): void {
+    this.loudnessEnabled = value
+    if (this.audioContext && this.analyserNode && this.gainNode) {
+      if (value) {
+        loudnessNormalizer.start(this.analyserNode, this.gainNode)
+      } else {
+        loudnessNormalizer.stop(this.analyserNode, this.gainNode)
+      }
+    }
+  }
+
+  /**
+   * 设置响度测量模式（RMS 标准 / LUFS 高精度）
+   * 直接转发给 normalizer：未启用时仅记录，start() 建链时按该模式测量；启用中立即切换
+   */
+  setLoudnessMode(mode: LoudnessMode): void {
+    loudnessNormalizer.setMode(mode)
+  }
+
+  /**
    * 获取 AnalyserNode(供频谱组件使用)
    */
   getAnalyserNode(): AnalyserNode | null {
@@ -413,11 +452,15 @@ export class AudioEngine {
   /**
    * 断开频谱分析链路(低功耗模式下节省 CPU)
    * 注意: 同时会绕过均衡器, 直接 source → gain
+   * 响度均衡启用时一并断开响度链路（analyser 已无输入，停测量、恢复 analyser → gain）
    */
   disconnectAnalyser(): void {
     if (this.audioSourceNode && this.analyserNode && this.gainNode && this.audioContext) {
       try {
         equalizer.disconnect()
+        if (this.loudnessEnabled) {
+          loudnessNormalizer.stop(this.analyserNode, this.gainNode)
+        }
         this.audioSourceNode.connect(this.gainNode)
       } catch (e) {
         // 忽略断开失败
@@ -427,12 +470,16 @@ export class AudioEngine {
 
   /**
    * 重新连接频谱分析链路 (同时恢复均衡器)
+   * 响度均衡启用时一并重新接入响度链路
    */
   reconnectAnalyser(): void {
     if (this.audioSourceNode && this.analyserNode && this.gainNode && this.audioContext) {
       try {
         this.audioSourceNode.disconnect()
         equalizer.reconnectSource(this.audioSourceNode)
+        if (this.loudnessEnabled) {
+          loudnessNormalizer.start(this.analyserNode, this.gainNode)
+        }
       } catch (e) {
         // 忽略重连失败
       }

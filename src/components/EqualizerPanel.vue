@@ -83,7 +83,7 @@ onMounted(() => {
           >
             <div
               class="absolute top-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform"
-              :class="eqEnabled ? 'translate-x-5' : 'translate-x-0.5'"
+              :class="eqEnabled ? 'translate-x-[22px]' : 'translate-x-0.5'"
             ></div>
           </button>
         </div>

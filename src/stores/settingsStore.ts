@@ -3,6 +3,7 @@ import { ref, computed, watch, markRaw } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import type { ThemeMode, BackgroundSettings, FontSettings, FontFamily, DataDirInfo, FileUsage } from '@/types/song'
+import type { LoudnessMode } from '@/audio/LoudnessNormalizer'
 import { loadSettings, saveSettings, getSystemTheme } from '@/utils/storage'
 
 /**
@@ -223,6 +224,19 @@ export const useSettingsStore = defineStore('settings', () => {
   function resumeAllBackgroundAnimations() {
     spectrumPaused.value = false
     startBackgroundSlideshow()
+  }
+
+  // ========== 音量均衡(响度归一化) ==========
+  // 开关默认关闭; mode: rms 标准低开销 / lufs 高精度(EBU R128 AudioWorklet)
+  const loudnessNormalization = ref<boolean>(Boolean(saved.loudnessNormalization ?? false))
+  const loudnessMode = ref<LoudnessMode>(saved.loudnessMode === 'lufs' ? 'lufs' : 'rms')
+
+  function setLoudnessNormalization(value: boolean) {
+    loudnessNormalization.value = value
+  }
+
+  function setLoudnessMode(mode: LoudnessMode) {
+    loudnessMode.value = mode
   }
 
   // ========== 最小化到托盘 ==========
@@ -455,8 +469,8 @@ export const useSettingsStore = defineStore('settings', () => {
   // ========== 持久化(防抖) ==========
   let settingsSaveTimer: ReturnType<typeof setTimeout> | null = null
   watch(
-    [theme, background, minimizeToTray, fontSettings, showSpectrum, spectrumQuality, downloadOutputDir, showMemoryTags, memoryExportDir, expandedSettingsSections],
-    ([th, bg, mt, fs, spectrum, spectrumQualityVal, dlDir, showMemTags, memDir, expandedSections]) => {
+    [theme, background, minimizeToTray, fontSettings, showSpectrum, spectrumQuality, downloadOutputDir, showMemoryTags, memoryExportDir, expandedSettingsSections, loudnessNormalization, loudnessMode],
+    ([th, bg, mt, fs, spectrum, spectrumQualityVal, dlDir, showMemTags, memDir, expandedSections, loudnessNorm, loudMode]) => {
       if (settingsSaveTimer) {
         clearTimeout(settingsSaveTimer)
       }
@@ -472,6 +486,8 @@ export const useSettingsStore = defineStore('settings', () => {
           showMemoryTags: showMemTags,
           memoryExportDir: memDir,
           expandedSettingsSections: Array.from(expandedSections as Set<string>),
+          loudnessNormalization: loudnessNorm,
+          loudnessMode: loudMode,
         })
       }, 300)
     },
@@ -529,6 +545,11 @@ export const useSettingsStore = defineStore('settings', () => {
     // Memory feature - 高山流水 v1.1: 弹幕显示开关
     showMemoryTags,
     setShowMemoryTags,
+    // 音量均衡
+    loudnessNormalization,
+    setLoudnessNormalization,
+    loudnessMode,
+    setLoudnessMode,
     // 托盘
     minimizeToTray,
     setMinimizeToTray,

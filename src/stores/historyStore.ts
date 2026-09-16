@@ -809,13 +809,12 @@ export const useHistoryStore = defineStore('history', () => {
    *
    * 心跳定时器由 window.setInterval 创建, 闭包持有 AudioEngine 与当前历史项引用。
    * 正常路径 (切歌/暂停/自然播完) 都会经 endHistoryRecord 停表, 但若组件先行卸载
-   * 而此后不再发生任何播放事件, 定时器将无人清理。此处兜底停表并释放引用:
-   *   - 有进行中的记录 → 走 endHistoryRecord 结算并落库终态
-   *   - 无记录 → 仅强制停表 (endHistoryRecord 已提前停表, 此调用为幂等保险)
+   * 而此后不再发生任何播放事件, 定时器将无人清理。此处兜底:
+   *   - endHistoryRecord 内部已无条件调用 stopHeartbeat, 并处理结算 + 落库
+   *   - 剩余为直接置空, 防御 endHistoryRecord 因各种原因未置空时的引用残留
    */
   function disposeHistory() {
     endHistoryRecord()
-    stopHeartbeat()
     currentHistoryItem = null
     currentEngine = null
   }
