@@ -8,6 +8,7 @@ import { html5AudioPlayer } from '@/audio/HTML5AudioPlayer'
 import { loadSettings, saveSettings } from '@/utils/storage'
 import { useLibraryStore } from './libraryStore'
 import { useHistoryStore } from './historyStore'
+import { useSettingsStore } from './settingsStore'
 import { mediaControls, PlaybackStatus } from 'tauri-plugin-media-api'
 
 /**
@@ -39,6 +40,7 @@ const saved = loadSettings()
 export const useAudioStore = defineStore('audio', () => {
   const library = useLibraryStore()
   const history = useHistoryStore()
+  const settings = useSettingsStore()
 
   // ========== 播放状态 ==========
   const isPlaying = ref(false)
@@ -103,6 +105,20 @@ export const useAudioStore = defineStore('audio', () => {
   //   - 切歌前在播放 → 加载完自动播放
   //   - 切歌前暂停 → 加载完保持暂停
   //   - 通过 stopPlayback() 中 gain.gain = 0 实现静音切换, 无重叠/重复播放
+
+  /**
+   * 切歌收尾: 本次操作未选中新歌时 (顺序模式在首/尾越界, shuffle 抽到同一首),
+   * 说明不会再有新歌去触发 currentSong watcher 的收尾流程, 必须在此显式处理:
+   *   - 释放切歌锁 isSwitchingSong (否则 isPlaying watcher 会被永久跳过)
+   *   - 结束历史记录 (否则心跳定时器不会停止, 会持续持有引擎/记录引用并每 15s 写库)
+   */
+  function settleIfNoSongChanged(startIndex: number) {
+    if (library.currentIndex !== startIndex) return
+    isPlaying.value = false
+    isSwitchingSong.value = false
+    history.endHistoryRecord(audioEngine)
+  }
+
   function next() {
     const songs = activeSongs.value
     if (songs.length === 0) return
@@ -112,6 +128,8 @@ export const useAudioStore = defineStore('audio', () => {
     const wasPlaying = isPlaying.value
     pendingPlay.value = wasPlaying
     isPlaying.value = false
+    // 记录切歌前索引, 用于判断本次是否真的产生了新歌
+    const startIndex = library.currentIndex
 
     if (loopMode.value === 'single') {
       currentTime.value = 0
@@ -129,6 +147,7 @@ export const useAudioStore = defineStore('audio', () => {
         shuffleHistory.value.shift()
       }
       library.currentIndex = getRandomIndex()
+      settleIfNoSongChanged(startIndex)
       return
     }
 
@@ -140,6 +159,7 @@ export const useAudioStore = defineStore('audio', () => {
       library.currentIndex = activeIndexToGlobal(0)
     }
 
+    settleIfNoSongChanged(startIndex)
     void invoke('clean_renderer_memory').catch(() => {})
   }
 
@@ -190,6 +210,8 @@ export const useAudioStore = defineStore('audio', () => {
     const wasPlaying = isPlaying.value
     pendingPlay.value = wasPlaying
     isPlaying.value = false
+    // 记录切歌前索引, 用于判断本次是否真的产生了新歌
+    const startIndex = library.currentIndex
 
     if (loopMode.value === 'single') {
       currentTime.value = 0
@@ -208,6 +230,7 @@ export const useAudioStore = defineStore('audio', () => {
       } else {
         library.currentIndex = getRandomIndex()
       }
+      settleIfNoSongChanged(startIndex)
       return
     }
 
@@ -219,6 +242,7 @@ export const useAudioStore = defineStore('audio', () => {
       library.currentIndex = activeIndexToGlobal(songs.length - 1)
     }
 
+    settleIfNoSongChanged(startIndex)
     void invoke('clean_renderer_memory').catch(() => {})
   }
 
@@ -433,6 +457,9 @@ export const useAudioStore = defineStore('audio', () => {
         audioEngine.stopPlayback()
         stopTimeUpdate()
         currentTime.value = 0
+        // 切歌即结束上一首的记录 (幂等): 保证任何"停旧播新"路径都不会遗留心跳定时器
+        // 与旧记录引用; 即使新歌加载失败, 播放时长也已正确结算
+        history.endHistoryRecord(audioEngine)
 
         // 第 2 步: 初始化 AudioContext + 加载 Web Audio buffer (主链路, 优先)
         audioEngine.init(volume.value)
@@ -523,6 +550,25 @@ export const useAudioStore = defineStore('audio', () => {
       audioEngine.setVolume(vol)
       html5AudioPlayer.setVolume(0)
     }
+  )
+
+  // ========== 响度均衡开关: 同步到音频引擎 ==========
+  // immediate: store 初始化早于 AudioEngine.init，开关状态先以标记位保存，建链后自动接入
+  watch(
+    () => settings.loudnessNormalization,
+    (enabled) => {
+      audioEngine.setLoudnessEnabled(enabled)
+    },
+    { immediate: true }
+  )
+
+  // ========== 响度测量模式: 同步到 normalizer ==========
+  watch(
+    () => settings.loudnessMode,
+    (mode) => {
+      audioEngine.setLoudnessMode(mode)
+    },
+    { immediate: true }
   )
 
   // 持久化 volume / loopMode

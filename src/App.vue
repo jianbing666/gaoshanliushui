@@ -233,6 +233,8 @@ onUnmounted(() => {
   document.removeEventListener('freeze', handlePageFreeze as EventListener)
   unlistenWindowShow?.()
   resizeObserver?.disconnect()
+  // 全局清理播放历史心跳定时器, 释放其对 AudioEngine / 历史项的闭包引用
+  history.disposeHistory()
 })
 </script>
 

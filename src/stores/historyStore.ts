@@ -430,10 +430,11 @@ export const useHistoryStore = defineStore('history', () => {
    * 在切歌 / 暂停 / 睡眠定时器触发等时机调用
    */
   function endHistoryRecord(audioEngine?: AudioEngine) {
+    // 先无条件停表: 由代码保证 "心跳定时器非空 ⇒ 存在活动记录" 的不变式,
+    // 不依赖命中下方 early return 的分支恰好持表
+    stopHeartbeat()
     if (!currentHistoryItem) return
 
-    // 停止心跳 (终态由本次 upsert 写入)
-    stopHeartbeat()
     const engine = audioEngine ?? currentEngine ?? undefined
 
     // 优先使用 audioContext 时间差 (更准确, 不会受系统挂起影响)
@@ -803,6 +804,22 @@ export const useHistoryStore = defineStore('history', () => {
     }
   }
 
+  /**
+   * 全局清理: 应用卸载/窗口销毁时调用
+   *
+   * 心跳定时器由 window.setInterval 创建, 闭包持有 AudioEngine 与当前历史项引用。
+   * 正常路径 (切歌/暂停/自然播完) 都会经 endHistoryRecord 停表, 但若组件先行卸载
+   * 而此后不再发生任何播放事件, 定时器将无人清理。此处兜底停表并释放引用:
+   *   - 有进行中的记录 → 走 endHistoryRecord 结算并落库终态
+   *   - 无记录 → 仅强制停表 (endHistoryRecord 已提前停表, 此调用为幂等保险)
+   */
+  function disposeHistory() {
+    endHistoryRecord()
+    stopHeartbeat()
+    currentHistoryItem = null
+    currentEngine = null
+  }
+
   // 释放完整历史记录 (节省内存)
   function releaseFullHistory() {
     if (fullHistoryLoaded.value) {
@@ -831,6 +848,7 @@ export const useHistoryStore = defineStore('history', () => {
     loadFromDb,
     ensureFullHistoryLoaded,
     releaseFullHistory,
+    disposeHistory,
     // 报告
     generateStatsMarkdown,
     exportStatsReport,
