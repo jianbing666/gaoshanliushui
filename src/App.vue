@@ -129,8 +129,17 @@ onMounted(async () => {
   // 关键路径 1: 立即让首屏可见
   await nextTick()
 
+  // 关键路径 1.5: 立即从 SQLite 加载播放历史 (不等空闲时段)
+  //   旧实现放在 requestIdleCallback 中, 启动后立刻播放的歌曲
+  //   会因 dbLoaded=false 只写 localStorage, 产生落库竞态。
+  //   loadFromDb 内部为异步 IPC, 此处不 await, 不阻塞后续 UI 初始化。
+  void history.loadFromDb().catch((e) => console.warn('[App] 加载历史记录失败:', e))
+
   // 关键路径 2: 注册可见性监听 (轻量, 不阻塞)
   document.addEventListener('visibilitychange', handleVisibilityChange)
+  // Page Lifecycle: 页面被系统冻结/恢复 (比 visibilitychange 更强的挂起状态)
+  document.addEventListener('resume', handlePageResume as EventListener)
+  document.addEventListener('freeze', handlePageFreeze as EventListener)
 
   // 关键路径 3: 启动 ResizeObserver (cheap, 但仍放首屏后)
   resizeObserver = new ResizeObserver(handleMiniResize)
@@ -154,13 +163,6 @@ onMounted(async () => {
       if (!result.success && result.error) {
         autoLoadError.value = `音乐库路径已失效：${result.error}\n请在设置面板中重新选择目录`
         ui.toggleSettingsPanel()
-      }
-
-      // 2.5 加载播放历史 (从 SQLite, 若为空则从 localStorage 迁移)
-      try {
-        await history.loadFromDb()
-      } catch (e) {
-        console.warn('[App] 加载历史记录失败:', e)
       }
 
       // 3. 注册 Tauri 窗口显示事件 (IPC 通道建立, ~50ms)
@@ -197,9 +199,26 @@ function handleVisibilityChange() {
     // 页面重新可见时:
     //   1. 恢复音频上下文 (浏览器在 hidden 时自动挂起)
     //   2. 恢复所有后台动画
+    //   3. 播放状态对账: 后台期间若 onended 被节流/冻结吞掉,
+    //      此处补走"自然播完"流程 (落历史 + 自动切歌)
     audio.resumeAudioContext()
     settings.resumeAllBackgroundAnimations()
+    void audio.reconcilePlaybackState()
   }
+}
+
+// Page Lifecycle API: 页面进入 frozen 状态 (隐藏约 5 分钟后系统可能冻结 JS)
+// freeze 时定时器/音频回调已被挂起, 无需处理; 关键是 resume 后对账。
+function handlePageFreeze() {
+  // 预留: 冻结前若需要 flush 任何状态可在此处理 (历史心跳无法在冻结时运行,
+  // 已通过"开始即落库 + 15s 心跳"保证最多丢失 15s 数据)
+}
+
+function handlePageResume() {
+  // 从 frozen 恢复: 唤醒 AudioContext, 并补对账被吞掉的播放结束事件
+  audio.resumeAudioContext()
+  settings.resumeAllBackgroundAnimations()
+  void audio.reconcilePlaybackState()
 }
 
 // 阶段 3.7: 封面加载失败静默隐藏
@@ -210,6 +229,8 @@ function onCoverError(e: Event) {
 
 onUnmounted(() => {
   document.removeEventListener('visibilitychange', handleVisibilityChange)
+  document.removeEventListener('resume', handlePageResume as EventListener)
+  document.removeEventListener('freeze', handlePageFreeze as EventListener)
   unlistenWindowShow?.()
   resizeObserver?.disconnect()
 })

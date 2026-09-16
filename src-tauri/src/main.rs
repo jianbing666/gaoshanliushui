@@ -158,6 +158,7 @@ fn main() {
             // 播放历史记录
             history::get_play_history,
             history::add_play_history,
+            history::upsert_play_history,
             history::batch_add_play_history,
             history::update_play_history,
             history::delete_play_history,

@@ -36,6 +36,8 @@ export class AudioEngine {
   /** 当前播放歌曲的 AudioBuffer(仅保留一首) */
   private currentBuffer: AudioBuffer | null = null
   private currentBufferUrl: string | null = null
+  /** 当前播放歌曲的 ID (引擎内部维护, 用于 LRU 槽位降级时正确标注) */
+  private currentSongId: string | null = null
   /** 当前播放歌曲的 URL */
   private currentUrl: string | null = null
 
@@ -43,6 +45,12 @@ export class AudioEngine {
   private prevBuffer: AudioBuffer | null = null
   private prevBufferUrl: string | null = null
   private prevSongId: string | null = null
+
+  /**
+   * 异步加载序号 (防止并发 fetch/decode 乱序污染缓存槽)
+   * 每次发起新加载 +1, 解码完成后若序号已过期则不写入 current/prev 槽
+   */
+  private bufferLoadSeq = 0
 
   /** 暂停时的播放位置(秒),用于恢复播放 */
   private pausedOffset = 0
@@ -90,11 +98,19 @@ export class AudioEngine {
    * 阶段 3.3: 支持 LRU, 切回上一首 < 50ms
    * @param url 音频文件 URL
    * @param songId 歌曲 ID,用于 prev 槽匹配(防止 ID 复用错位)
-   * @param currentSongId 当前播放歌曲 ID,用于 prev 槽降级时记录
+   *
+   * 2026-09 修复:
+   *   - prev 槽提升为 current 时, 先用局部变量保存 prev 引用再做降级,
+   *     修复"点击上一首却播放旧 current 音频"的引用覆盖 Bug
+   *   - currentSongId 由引擎内部维护, 降级时标注不再依赖外部传参
+   *   - bufferLoadSeq 防止并发加载乱序完成时污染缓存槽
    */
-  async getAudioBuffer(url: string, songId: string, currentSongId?: string): Promise<AudioBuffer | null> {
+  async getAudioBuffer(url: string, songId: string): Promise<AudioBuffer | null> {
     // 命中 current
     if (this.currentBuffer && this.currentBufferUrl === url) {
+      this.currentSongId = songId
+      // 使任何在途的旧加载失效, 防止其完成后污染缓存槽
+      this.bufferLoadSeq++
       return this.currentBuffer
     }
 
@@ -102,36 +118,51 @@ export class AudioEngine {
 
     // 命中 prev(切回上一首)
     if (songId && this.prevBuffer && this.prevSongId === songId && this.prevBufferUrl === url) {
+      // 槽位发生调整, 使在途加载失效
+      this.bufferLoadSeq++
+      // 先保存要提升的 prev buffer 引用 (若先覆盖 prevBuffer 会丢失它!)
+      const promotedBuffer = this.prevBuffer
+
       // current 降级为 prev
       if (this.currentBuffer) {
         this.prevBuffer = this.currentBuffer
         this.prevBufferUrl = this.currentBufferUrl
-        this.prevSongId = currentSongId ?? null
+        this.prevSongId = this.currentSongId
+      } else {
+        this.prevBuffer = null
+        this.prevBufferUrl = null
+        this.prevSongId = null
       }
+
       // prev 提升为 current
-      this.currentBuffer = this.prevBuffer
+      this.currentBuffer = promotedBuffer
       this.currentBufferUrl = url
-      // 清空 prev 槽
-      this.prevBuffer = null
-      this.prevBufferUrl = null
-      this.prevSongId = null
+      this.currentSongId = songId
       return this.currentBuffer
     }
 
+    const reqId = ++this.bufferLoadSeq
     try {
       const response = await fetch(url)
       if (!response.ok) return null
       const arrayBuffer = await response.arrayBuffer()
       const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer)
 
-      // 旧的 current 降级为 prev
+      // 并发保护: 解码期间又发起了更新的加载, 本次结果已过期,
+      // 不写入缓存槽 (调用方也会通过世代令牌丢弃本次播放)
+      if (reqId !== this.bufferLoadSeq) {
+        return audioBuffer
+      }
+
+      // 旧的 current 降级为 prev (songId 用引擎内部记录, 保证标注正确)
       if (this.currentBuffer) {
         this.prevBuffer = this.currentBuffer
         this.prevBufferUrl = this.currentBufferUrl
-        this.prevSongId = currentSongId ?? null
+        this.prevSongId = this.currentSongId
       }
       this.currentBuffer = audioBuffer
       this.currentBufferUrl = url
+      this.currentSongId = songId
 
       return audioBuffer
     } catch (error) {
@@ -345,8 +376,10 @@ export class AudioEngine {
    * 清除音频缓存(AudioBuffer)
    */
   clearCache(): void {
+    this.bufferLoadSeq++
     this.currentBuffer = null
     this.currentBufferUrl = null
+    this.currentSongId = null
     this.currentUrl = null
     this.prevBuffer = null
     this.prevBufferUrl = null

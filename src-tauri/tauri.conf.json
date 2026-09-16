@@ -24,7 +24,8 @@
         "alwaysOnTop": false,
         "center": true,
         "dragDropEnabled": false,
-        "devtools": false
+        "devtools": false,
+        "additionalBrowserArgs": "--disable-features=msWebOOUI,msPdfOOUI,msSmartScreenProtection --autoplay-policy=no-user-gesture-required --disable-background-timer-throttling --disable-renderer-backgrounding --disable-backgrounding-occluded-windows"
       }
     ],
     "security": {

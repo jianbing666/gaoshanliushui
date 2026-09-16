@@ -152,6 +152,60 @@ pub async fn add_play_history(
     .await
 }
 
+/// 添加或更新一条播放历史记录 (按 id 幂等 upsert)
+///
+/// 2026-09 新增, 用于"开始即落库 + 播放中心跳增量更新时长"机制:
+///   - 播放开始: upsert 一条 played_duration=0 的记录
+///   - 播放中每 15s: upsert 最新累计时长
+///   - 播放结束: upsert 终态时长
+/// 多次调用/乱序到达都安全, 同一 id 最终为最后一次写入的状态。
+#[tauri::command]
+pub async fn upsert_play_history(
+    app: AppHandle,
+    record: HistoryRecord,
+) -> Result<(), String> {
+    db::run_db(&app, move |conn| {
+        conn.execute(
+            "INSERT INTO play_history
+                (id, song_hash, song_path, title, artist, album, duration, cover_path,
+                 played_at, played_duration, completed)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11)
+             ON CONFLICT(id) DO UPDATE SET
+                played_duration = excluded.played_duration,
+                completed       = excluded.completed",
+            params![
+                record.id,
+                record.song_hash,
+                record.song_path,
+                record.title,
+                record.artist,
+                record.album,
+                record.duration,
+                record.cover_path,
+                record.played_at,
+                record.played_duration,
+                if record.completed { 1 } else { 0 },
+            ],
+        )
+        .map_err(|e| format!("upsert 历史记录失败: {}", e))?;
+
+        // 清理超过 10000 条的旧记录 (保留最新的 10000 条)
+        conn.execute(
+            "DELETE FROM play_history
+             WHERE id NOT IN (
+                 SELECT id FROM play_history
+                 ORDER BY played_at DESC
+                 LIMIT 10000
+             )",
+            [],
+        )
+        .map_err(|e| format!("清理旧历史记录失败: {}", e))?;
+
+        Ok(())
+    })
+    .await
+}
+
 /// 批量添加播放历史记录 (用于从 localStorage 迁移)
 #[tauri::command]
 pub async fn batch_add_play_history(

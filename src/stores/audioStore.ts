@@ -318,6 +318,8 @@ export const useAudioStore = defineStore('audio', () => {
     isPlaying.value = false
     audioEngine.pausePlayback()
     stopTimeUpdate()
+    // 与 pause() 保持一致: 暂停即结束本次历史记录 (否则暂停时长会被计入播放时长)
+    history.endHistoryRecord(audioEngine)
   }
 
   async function forceTogglePlay() {
@@ -339,7 +341,8 @@ export const useAudioStore = defineStore('audio', () => {
   }
 
   // ========== 播放结束回调 ==========
-  audioEngine.setOnEnded(() => {
+  // 自然播放结束的统一处理 (onended 与后台恢复对账共用, 避免逻辑分叉)
+  function handleNaturalEnded() {
     stopTimeUpdate()
     // 自然播放结束: 累加一次历史时长
     history.endHistoryRecord(audioEngine)
@@ -363,7 +366,34 @@ export const useAudioStore = defineStore('audio', () => {
 
     // 列表循环末尾 / shuffle: 走 nextAuto (自然播放完, 自动播放下一首)
     nextAuto()
-  })
+  }
+
+  audioEngine.setOnEnded(handleNaturalEnded)
+
+  /**
+   * 播放状态对账 (窗口从后台/冻结恢复时调用)
+   *
+   * 背景: WebView2 在窗口隐藏时可能节流甚至冻结 JS 主线程,
+   *   AudioBufferSourceNode.onended 事件会被延迟或漏派发,
+   *   表现为"界面显示播放中, 实际歌曲已播完且没有自动切歌/落历史".
+   *
+   * 检测: isPlaying=true 但引擎已无 source 且当前时间已到达歌曲结尾
+   *   → 判定为漏派发, 补走一次自然结束流程 (落历史 + 自动切歌)
+   */
+  async function reconcilePlaybackState() {
+    await audioEngine.forceWake()
+    if (!isPlaying.value) return
+
+    const engState = audioEngine.state
+    if (engState.hasSource || engState.isPaused) return
+
+    const t = audioEngine.getCurrentTime()
+    const dur = duration.value || currentSong.value?.duration || 0
+    if (dur > 0 && t >= dur - 1) {
+      console.info('[audioStore] 检测到后台漏派发的播放结束, 执行状态对账')
+      handleNaturalEnded()
+    }
+  }
 
   // ========== 播放时间更新定时器 ==========
   let timeUpdateInterval: number | null = null
@@ -386,17 +416,17 @@ export const useAudioStore = defineStore('audio', () => {
   }
 
   // ========== 当前播放歌曲变化: 加载并自动播放 ==========
-  let isLoadingSong = false
+  // 切歌加载世代令牌: currentSong 每次变化 +1。
+  // 旧实现用 isLoadingSong 布尔锁, 加载期间的切歌请求会被直接丢弃,
+  // 异步加载完成后播放的是过期目标 (一种"选 A 播 B"竞态)。
+  // 现在每次变化都进入加载, await 后校验令牌, 只有最新一次生效。
+  let loadGeneration = 0
 
   watch(
     () => currentSong.value,
     async (song) => {
       if (!song) return
-      if (isLoadingSong) return
-      isLoadingSong = true
-
-      // 记录播放意图 (在异步加载前就保存, 防止中间状态变化)
-      const shouldAutoPlay = isPlaying.value || pendingPlay.value
+      const myGen = ++loadGeneration
 
       try {
         // 第 1 步: 立即停止旧播放 + 静音 (AudioEngine 三层静音防护)
@@ -407,7 +437,11 @@ export const useAudioStore = defineStore('audio', () => {
         // 第 2 步: 初始化 AudioContext + 加载 Web Audio buffer (主链路, 优先)
         audioEngine.init(volume.value)
         const audioUrl = library.getAudioUrl(song.file_path)
-        const audioBuffer = await audioEngine.getAudioBuffer(audioUrl, song.id, library.currentSong?.id)
+        const audioBuffer = await audioEngine.getAudioBuffer(audioUrl, song.id)
+
+        // await 期间用户又切了歌: 本次加载已过期, 放弃播放
+        // (最新一次 watch 调用持有最新令牌, 会完成实际播放)
+        if (myGen !== loadGeneration || currentSong.value?.id !== song.id) return
 
         if (audioBuffer) {
           audioEngine.setCurrentUrl(audioUrl)
@@ -417,6 +451,8 @@ export const useAudioStore = defineStore('audio', () => {
         //    放在 Web Audio 之后, 不阻塞主播放链路
         html5AudioPlayer.setVolume(0)
         html5AudioPlayer.load(song.file_path).then(() => {
+          // 加载完成时可能已切到别的歌, 校验后再写 MediaSession
+          if (myGen !== loadGeneration || currentSong.value?.id !== song.id) return
           html5AudioPlayer.setVolume(0)
           html5AudioPlayer.setMediaSession(
             song.title,
@@ -427,8 +463,9 @@ export const useAudioStore = defineStore('audio', () => {
           console.warn('[audioStore] HTML5 Audio 加载失败 (不影响播放):', e)
         })
 
-        // 第 4 步: 根据播放意图决定是否自动播放
-        if (audioBuffer && shouldAutoPlay) {
+        // 第 4 步: 根据当前播放状态决定是否自动播放
+        //   (加载期间用户按了播放也能被捕捉到, 不再依赖加载前快照)
+        if (audioBuffer && (isPlaying.value || pendingPlay.value)) {
           pendingPlay.value = false
           // 先设 isPlaying = true (此时 isSwitchingSong 仍为 true, isPlaying watcher 会跳过, 不会重复播放)
           isPlaying.value = true
@@ -447,12 +484,12 @@ export const useAudioStore = defineStore('audio', () => {
           pendingPlay.value = false
         }
       } catch (e) {
+        // 只有最新一次加载失败才重置状态, 过期调用的错误静默丢弃
+        if (myGen !== loadGeneration) return
         console.error('[audioStore] 加载歌曲失败:', e)
         isSwitchingSong.value = false
         pendingPlay.value = false
         isPlaying.value = false
-      } finally {
-        isLoadingSong = false
       }
     }
   )
@@ -467,6 +504,11 @@ export const useAudioStore = defineStore('audio', () => {
         await audioEngine.resumePlayback()
         startTimeUpdate()
         void html5AudioPlayer.play()
+        // 暂停时历史记录已结束, 恢复播放需要新开一条记录
+        // (切歌自动播放路径由 playFromOffset 的 onStart 回调负责, 不走这里)
+        if (currentSong.value) {
+          history.startHistoryRecordIfAbsent(currentSong.value, audioEngine)
+        }
       } else {
         audioEngine.pausePlayback()
         stopTimeUpdate()
@@ -692,6 +734,7 @@ export const useAudioStore = defineStore('audio', () => {
     forcePrevious,
     // 引擎生命周期
     resumeAudioContext: () => audioEngine.resumeContext(),
+    reconcilePlaybackState,
     clearAudioBufferCache: () => audioEngine.clearCache(),
     disconnectAnalyser: () => audioEngine.disconnectAnalyser(),
     reconnectAnalyser: () => audioEngine.reconnectAnalyser(),

@@ -41,6 +41,11 @@ import type { AudioEngine } from '@/audio/AudioEngine'
 let currentHistoryItem: PlayHistoryItem | null = null
 // 播放开始的 audioContext 时间 (用于计算 playedDuration, 比 wall-clock 更精确)
 let currentPlayStartAudioTime = 0
+// 当前记录关联的音频引擎 (心跳定时器读取时钟用)
+let currentEngine: AudioEngine | null = null
+// 心跳定时器: 播放中每 15s 把累计时长增量落库, 崩溃/冻结最多丢失 15s
+let heartbeatTimer: number | null = null
+const HEARTBEAT_INTERVAL_MS = 15000
 // 是否已从 SQLite 加载完成
 let dbLoaded = false
 
@@ -333,15 +338,49 @@ export const useHistoryStore = defineStore('history', () => {
   // ========== 历史记录操作 ==========
 
   /**
+   * 将一条记录以 upsert 方式写入 SQLite (幂等, 可乱序调用)
+   */
+  function upsertRecordToDb(item: PlayHistoryItem) {
+    if (!dbLoaded) return
+    invoke('upsert_play_history', {
+      record: {
+        id: item.id,
+        song_hash: item.songId,
+        song_path: item.file_path,
+        title: item.title,
+        artist: item.artist,
+        album: item.album,
+        duration: item.duration,
+        cover_path: item.cover_path || '',
+        played_at: item.playedAt,
+        played_duration: Math.round(item.playedDuration),
+        completed: item.completed,
+      },
+    }).catch((e) => console.warn('[History] upsert SQLite 失败:', e))
+  }
+
+  function stopHeartbeat() {
+    if (heartbeatTimer !== null) {
+      clearInterval(heartbeatTimer)
+      heartbeatTimer = null
+    }
+  }
+
+  /**
    * 开始记录播放历史
    * @param song 当前播放的歌曲
-   * @param audioEngine 音频引擎实例,用于读取 audioContext.currentTime 计算播放时长
+   * @param engine 音频引擎实例,用于读取 audioContext.currentTime 计算播放时长
+   *
+   * 2026-09 加固:
+   *   - 开始即向 SQLite upsert 一条 0 秒记录 (应用中途崩溃/被杀也不丢)
+   *   - 播放中每 15s 心跳增量更新时长 (WebView 后台冻结恢复后也有数据)
+   *   - 结束时再 upsert 终态
    */
-  function startHistoryRecord(song: Song, audioEngine: AudioEngine) {
+  function startHistoryRecord(song: Song, engine: AudioEngine) {
     // 先结束上一首歌的记录
-    endHistoryRecord(audioEngine)
+    endHistoryRecord(engine)
 
-    const context = audioEngine.getAudioContext()
+    const context = engine.getAudioContext()
 
     currentHistoryItem = {
       id: generateId('history'),
@@ -358,6 +397,32 @@ export const useHistoryStore = defineStore('history', () => {
     }
     // 记录 audioContext 起始时间 (精确到 AudioContext 时钟)
     currentPlayStartAudioTime = context ? context.currentTime : Date.now() / 1000
+    currentEngine = engine
+
+    // 开始即落库 (0 秒占位记录, 后续靠心跳和结束 upsert 补全)
+    upsertRecordToDb(currentHistoryItem)
+
+    // 心跳: 定时把最新播放时长写入 DB
+    stopHeartbeat()
+    heartbeatTimer = window.setInterval(() => {
+      if (!currentHistoryItem || !currentEngine) return
+      const ctx = currentEngine.getAudioContext()
+      currentHistoryItem.playedDuration = ctx
+        ? Math.max(0, ctx.currentTime - currentPlayStartAudioTime)
+        : Math.max(0, (Date.now() - currentHistoryItem.playedAt) / 1000)
+      currentHistoryItem.completed =
+        currentHistoryItem.playedDuration >= currentHistoryItem.duration * 0.8
+      upsertRecordToDb(currentHistoryItem)
+    }, HEARTBEAT_INTERVAL_MS)
+  }
+
+  /**
+   * 仅当当前没有进行中的记录时才开始记录
+   * 用于"暂停后恢复播放"场景 (暂停时记录已结束, 恢复需新开一条)
+   */
+  function startHistoryRecordIfAbsent(song: Song, engine: AudioEngine) {
+    if (currentHistoryItem) return
+    startHistoryRecord(song, engine)
   }
 
   /**
@@ -367,10 +432,14 @@ export const useHistoryStore = defineStore('history', () => {
   function endHistoryRecord(audioEngine?: AudioEngine) {
     if (!currentHistoryItem) return
 
+    // 停止心跳 (终态由本次 upsert 写入)
+    stopHeartbeat()
+    const engine = audioEngine ?? currentEngine ?? undefined
+
     // 优先使用 audioContext 时间差 (更准确, 不会受系统挂起影响)
     let playedDuration: number
-    if (audioEngine) {
-      const context = audioEngine.getAudioContext()
+    if (engine) {
+      const context = engine.getAudioContext()
       if (context) {
         playedDuration = context.currentTime - currentPlayStartAudioTime
       } else {
@@ -379,11 +448,20 @@ export const useHistoryStore = defineStore('history', () => {
     } else {
       playedDuration = (Date.now() - currentHistoryItem.playedAt) / 1000
     }
+    // 防御: 时钟异常/后台冻结期间漏切歌可能得到负值或超长值, 钳制到 [0, 歌曲总时长]
+    playedDuration = Math.max(0, playedDuration)
+    if (currentHistoryItem.duration > 0) {
+      playedDuration = Math.min(playedDuration, currentHistoryItem.duration)
+    }
 
     currentHistoryItem.playedDuration = playedDuration
     currentHistoryItem.completed = playedDuration >= currentHistoryItem.duration * 0.8
 
     const item = currentHistoryItem
+
+    // 清空活动记录状态 (在 upsert 发出前完成, 避免心跳交叉)
+    currentHistoryItem = null
+    currentEngine = null
 
     // 1. 更新展示用历史记录 (去重, 同一首歌只保留最新一次)
     playHistory.value = playHistory.value.filter((i) => i.songId !== item.songId)
@@ -402,24 +480,8 @@ export const useHistoryStore = defineStore('history', () => {
       saveFullPlayHistory(fullPlayHistory.value)
     }
 
-    // 3. 异步写入 SQLite
-    if (dbLoaded) {
-      invoke('add_play_history', {
-        record: {
-          id: item.id,
-          song_hash: item.songId,
-          song_path: item.file_path,
-          title: item.title,
-          artist: item.artist,
-          album: item.album,
-          duration: item.duration,
-          cover_path: item.cover_path || '',
-          played_at: item.playedAt,
-          played_duration: item.playedDuration,
-          completed: item.completed,
-        },
-      }).catch((e) => console.warn('[History] 写入 SQLite 失败:', e))
-    }
+    // 3. 写入 SQLite 终态 (开始时已 upsert 过 0 秒占位, 此处幂等更新为终态)
+    upsertRecordToDb(item)
 
     // 4. 增量更新预聚合索引
     const d = new Date(item.playedAt)
@@ -471,8 +533,6 @@ export const useHistoryStore = defineStore('history', () => {
     totalPlayedDuration += item.playedDuration
     if (item.completed) totalCompletedCount++
     if (oldCount === 0) totalUniqueSongs++
-
-    currentHistoryItem = null
   }
 
   /**
@@ -764,6 +824,7 @@ export const useHistoryStore = defineStore('history', () => {
     longestPlayedSong,
     // 操作
     startHistoryRecord,
+    startHistoryRecordIfAbsent,
     endHistoryRecord,
     clearPlayHistory,
     removeHistoryItem,
