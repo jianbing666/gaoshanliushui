@@ -158,6 +158,8 @@ fn main() {
             export::write_text_file,
             // 播放历史记录
             history::get_play_history,
+            history::get_display_history,
+            history::get_play_history_stats,
             history::add_play_history,
             history::upsert_play_history,
             history::batch_add_play_history,

@@ -60,6 +60,7 @@ const miniWindowHeight = ref(120)
 const isCompactMiniMode = computed(() => miniWindowWidth.value < 480)
 
 let unlistenWindowShow: UnlistenFn | null = null
+let unlistenMigrate: UnlistenFn | null = null
 let hiddenTimer: ReturnType<typeof setTimeout> | null = null
 
 // 切换迷你模式
@@ -134,6 +135,16 @@ onMounted(async () => {
   //   会因 dbLoaded=false 只写 localStorage, 产生落库竞态。
   //   loadFromDb 内部为异步 IPC, 此处不 await, 不阻塞后续 UI 初始化。
   void history.loadFromDb().catch((e) => console.warn('[App] 加载历史记录失败:', e))
+
+  // 数据目录迁移完成后, 后端已重连到新库, 前端内存中的展示历史/统计需重新拉取,
+  // 否则统计页停留在旧库口径 (弹窗关闭后本监听仍在 App 级生效)
+  listen('data:migrate-progress', (event: any) => {
+    if (event.payload?.stage === 'completed') {
+      void history.reloadFromDb()
+    }
+  })
+    .then((un) => { unlistenMigrate = un })
+    .catch((e) => console.warn('[App] 注册迁移进度监听失败:', e))
 
   // 关键路径 2: 注册可见性监听 (轻量, 不阻塞)
   document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -232,6 +243,7 @@ onUnmounted(() => {
   document.removeEventListener('resume', handlePageResume as EventListener)
   document.removeEventListener('freeze', handlePageFreeze as EventListener)
   unlistenWindowShow?.()
+  unlistenMigrate?.()
   resizeObserver?.disconnect()
   // 全局清理播放历史心跳定时器, 释放其对 AudioEngine / 历史项的闭包引用
   history.disposeHistory()

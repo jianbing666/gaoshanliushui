@@ -91,89 +91,89 @@ export const useHistoryStore = defineStore('history', () => {
   let totalPlayCount = 0
 
   // ========== 从 SQLite 加载 ==========
+  /**
+   * Rust HistoryRecord → 前端 PlayHistoryItem
+   */
+  function mapRecord(r: any): PlayHistoryItem {
+    return {
+      id: r.id,
+      songId: r.song_hash,
+      title: r.title,
+      artist: r.artist,
+      album: r.album,
+      duration: r.duration,
+      cover_path: r.cover_path ? r.cover_path : null,
+      file_path: r.song_path,
+      playedAt: r.played_at,
+      playedDuration: r.played_duration,
+      completed: r.completed,
+    }
+  }
+
+  /**
+   * 应用 Rust 全量聚合结果到预聚合索引 (统计页唯一权威数据源)
+   * 口径与后端一致: 仅含 played_duration >= 1s 的有效播放
+   */
+  function applyDbStats(stats: any) {
+    totalPlayCount = stats.total_count || 0
+    totalPlayedDuration = stats.total_duration || 0
+    totalCompletedCount = stats.total_completed || 0
+    totalUniqueSongs = stats.unique_songs || 0
+
+    const byDay: Record<string, DailyStat> = {}
+    for (const d of stats.by_day ?? []) {
+      byDay[d.day] = {
+        count: d.count,
+        totalDuration: d.total_duration,
+        completedCount: d.completed_count,
+      }
+    }
+    dailyStats.value = byDay
+
+    // 全量按歌曲分组 (后端不做 top N 截断, 最多 10000 条记录, 分组数有限)
+    const countMap: Record<string, number> = {}
+    const durMap: Record<string, number> = {}
+    const infoMap: Record<string, SongBasicInfo> = {}
+    for (const s of stats.by_song ?? []) {
+      countMap[s.song_hash] = s.count
+      durMap[s.song_hash] = s.total_duration
+      infoMap[s.song_hash] = {
+        title: s.title,
+        artist: s.artist,
+        album: s.album,
+        cover_path: s.cover_path || null,
+        duration: s.duration,
+      }
+    }
+    songPlayCount.value = countMap
+    songPlayDuration.value = durMap
+    songInfoMap.value = infoMap
+  }
+
   async function loadFromDb() {
     if (dbLoaded) return
     try {
-      // 只加载最近的记录用于构建展示历史和聚合索引 (最多 2000 条, 足够构建统计索引)
-      const records = await invoke<any[]>('get_play_history', { limit: 2000 })
-      if (records && records.length > 0) {
-        // 转换为前端 PlayHistoryItem 格式
-        const items: PlayHistoryItem[] = records.map((r) => ({
-          id: r.id,
-          songId: r.song_hash,
-          title: r.title,
-          artist: r.artist,
-          album: r.album,
-          duration: r.duration,
-          cover_path: r.cover_path ? r.cover_path : null,
-          file_path: r.song_path,
-          playedAt: r.played_at,
-          playedDuration: r.played_duration,
-          completed: r.completed,
-        }))
+      // 1. 展示历史: SQL 层已按"每首歌最新一条"去重 (最多 500 首), 不受全量条数截断
+      const displayRecords = await invoke<any[]>('get_display_history', {
+        limit: MAX_HISTORY_ITEMS,
+      })
 
-        // 构建去重的展示历史 (每首歌只保留最新一条)
-        const seen = new Set<string>()
-        const displayItems: PlayHistoryItem[] = []
-        for (const item of items) {
-          if (!seen.has(item.songId)) {
-            seen.add(item.songId)
-            displayItems.push(item)
-            if (displayItems.length >= MAX_HISTORY_ITEMS) break
-          }
-        }
-        playHistory.value = displayItems
+      if (displayRecords && displayRecords.length > 0) {
+        playHistory.value = displayRecords.map(mapRecord)
 
-        // 从 SQLite 获取统计聚合数据 (更准确)
+        // 2. 统计聚合: 全表 SQL, 与统计页口径一致 (仅 >=1s 有效播放)
+        //    时区偏移取本地分钟 (UTC+8 为 -480), 保证按日分桶落在本地日历日
+        const tzOffsetMinutes = -new Date().getTimezoneOffset()
         try {
-          const stats = await invoke<any>('get_play_history_stats')
-          if (stats) {
-            totalPlayCount = stats.total_count || 0
-            totalPlayedDuration = stats.total_duration || 0
-            totalCompletedCount = stats.total_completed || 0
-            totalUniqueSongs = stats.unique_songs || 0
-            // 按日统计
-            if (stats.by_day) {
-              const byDay: Record<string, DailyStat> = {}
-              for (const d of stats.by_day) {
-                byDay[d.day] = {
-                  count: d.count,
-                  totalDuration: d.total_duration,
-                  completedCount: d.completed_count,
-                }
-              }
-              dailyStats.value = byDay
-            }
-            // 按歌曲计数和时长 (top 100 + playHistory 中的歌曲)
-            if (stats.by_song) {
-              const countMap: Record<string, number> = {}
-              const durMap: Record<string, number> = {}
-              const infoMap: Record<string, SongBasicInfo> = {}
-              for (const s of stats.by_song) {
-                countMap[s.song_hash] = s.count
-                durMap[s.song_hash] = s.total_duration
-                infoMap[s.song_hash] = {
-                  title: s.title,
-                  artist: s.artist,
-                  album: s.album,
-                  cover_path: s.cover_path || null,
-                  duration: s.duration,
-                }
-              }
-              songPlayCount.value = countMap
-              songPlayDuration.value = durMap
-              songInfoMap.value = infoMap
-            }
-            dbLoaded = true
-            fullHistoryLoaded.value = false
-            return
-          }
-        } catch (_) {
-          // SQLite 统计接口不可用, 回退到从记录构建
+          const stats = await invoke<any>('get_play_history_stats', { tzOffsetMinutes })
+          applyDbStats(stats)
+        } catch (e) {
+          // 统计命令异常时降级: 用最近 2000 条内存聚合 (可能不完整), 但必须显式告警
+          console.warn('[History] get_play_history_stats 不可用, 统计降级为最近 2000 条聚合:', e)
+          const recent = await invoke<any[]>('get_play_history', { limit: 2000 }).catch(() => [])
+          buildStatsIndexFromItems((recent ?? []).map(mapRecord))
         }
 
-        // 回退: 从部分记录构建索引 (可能不完整, 但启动快)
-        buildStatsIndexFromItems(items)
         dbLoaded = true
         fullHistoryLoaded.value = false
         return
@@ -199,6 +199,16 @@ export const useHistoryStore = defineStore('history', () => {
       fullHistoryLoaded.value = true
       dbLoaded = true
     }
+  }
+
+  /**
+   * 重新从数据库加载展示历史与统计 (数据目录迁移完成后调用)
+   */
+  async function reloadFromDb() {
+    dbLoaded = false
+    fullHistoryLoaded.value = false
+    fullPlayHistory.value = []
+    await loadFromDb()
   }
 
   // 确保完整历史记录已加载 (需要时才调用)
@@ -241,11 +251,12 @@ export const useHistoryStore = defineStore('history', () => {
         title: item.title,
         artist: item.artist,
         album: item.album,
-        duration: item.duration,
+        duration: Math.round(item.duration) || 0,
         cover_path: item.cover_path || '',
         played_at: item.playedAt,
-        played_duration: item.playedDuration,
-        completed: item.completed,
+        // Rust 侧字段为 i64, 浮点秒会导致整批反序列化失败, 必须取整
+        played_duration: Math.max(0, Math.round(item.playedDuration)),
+        completed: Boolean(item.completed),
       }))
       await invoke('batch_add_play_history', { records })
 
@@ -273,6 +284,10 @@ export const useHistoryStore = defineStore('history', () => {
   }
 
   // ========== 索引构建 ==========
+  /**
+   * 从记录数组内存聚合 (降级回退 / localStorage 迁移路径使用)
+   * 口径与 Rust get_play_history_stats 一致: playedDuration < 1s 的记录不计入任何统计
+   */
   function buildStatsIndexFromItems(items: PlayHistoryItem[]) {
     const byDay: Record<string, DailyStat> = {}
     const count: Record<string, number> = {}
@@ -281,8 +296,13 @@ export const useHistoryStore = defineStore('history', () => {
     const uniqueIds = new Set<string>()
     let localTotalDuration = 0
     let localTotalCompleted = 0
+    let localTotalCount = 0
 
     for (const item of items) {
+      // 与后端同口径: <1s 视为误触/崩溃占位, 不构成一次有效播放
+      if (item.playedDuration < 1) continue
+
+      localTotalCount++
       // 按日统计聚合
       const d = new Date(item.playedAt)
       const dayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
@@ -321,7 +341,7 @@ export const useHistoryStore = defineStore('history', () => {
     totalPlayedDuration = localTotalDuration
     totalCompletedCount = localTotalCompleted
     totalUniqueSongs = uniqueIds.size
-    totalPlayCount = items.length
+    totalPlayCount = localTotalCount
   }
 
   function rebuildStatsIndex() {
@@ -459,6 +479,21 @@ export const useHistoryStore = defineStore('history', () => {
     currentHistoryItem.completed = playedDuration >= currentHistoryItem.duration * 0.8
 
     const item = currentHistoryItem
+
+    // 短会话治理: <1s 视为误触切歌/异常中止, 不构成一次有效播放。
+    // 不进入展示历史/完整历史/统计索引, 并删除开始时写入的 0 秒占位记录,
+    // 与 Rust get_play_history_stats 的 played_duration >= 1 口径保持一致
+    // (正常 completed 记录时长必然 >= 曲长*0.8, 不可能命中此分支)。
+    if (playedDuration < 1) {
+      currentHistoryItem = null
+      currentEngine = null
+      if (dbLoaded) {
+        invoke('delete_play_history', { id: item.id }).catch((e) =>
+          console.warn('[History] 删除短会话占位记录失败:', e)
+        )
+      }
+      return
+    }
 
     // 清空活动记录状态 (在 upsert 发出前完成, 避免心跳交叉)
     currentHistoryItem = null
@@ -845,6 +880,7 @@ export const useHistoryStore = defineStore('history', () => {
     clearPlayHistory,
     removeHistoryItem,
     loadFromDb,
+    reloadFromDb,
     ensureFullHistoryLoaded,
     releaseFullHistory,
     disposeHistory,
