@@ -10,6 +10,7 @@
 // 仅替换可执行文件的调用来源。
 
 use std::path::Path;
+use std::sync::OnceLock;
 use std::time::Duration;
 
 use regex::Regex;
@@ -71,17 +72,51 @@ pub struct VideoInfo {
     pub duration: u64,
 }
 
+// ========== 正则复用 ==========
+//
+// 这些正则都是固定模式, 编译结果可以全局复用。原实现每次调用都 Regex::new,
+// 属于与业务无关的重复开销。
+
+/// Windows 非法文件名字符
+static ILLEGAL_CHARS_RE: OnceLock<Regex> = OnceLock::new();
+/// 半角英文括号及其中内容
+static EN_PAREN_RE: OnceLock<Regex> = OnceLock::new();
+/// 纯 BV 号
+static BV_ONLY_RE: OnceLock<Regex> = OnceLock::new();
+/// URL 中的 BV 号
+static BV_IN_URL_RE: OnceLock<Regex> = OnceLock::new();
+/// av 号
+static AV_RE: OnceLock<Regex> = OnceLock::new();
+
+fn illegal_chars_re() -> &'static Regex {
+    ILLEGAL_CHARS_RE.get_or_init(|| Regex::new("[\\\\/:*?\"<>|]").expect("非法字符正则非法"))
+}
+
+fn en_paren_re() -> &'static Regex {
+    EN_PAREN_RE.get_or_init(|| Regex::new("\\([^)]*\\)").expect("括号正则非法"))
+}
+
+fn bv_only_re() -> &'static Regex {
+    BV_ONLY_RE.get_or_init(|| Regex::new("^BV([a-zA-Z0-9]+)$").expect("BV 号正则非法"))
+}
+
+fn bv_in_url_re() -> &'static Regex {
+    BV_IN_URL_RE.get_or_init(|| Regex::new("(BV[a-zA-Z0-9]{10})").expect("URL BV 正则非法"))
+}
+
+fn av_re() -> &'static Regex {
+    AV_RE.get_or_init(|| Regex::new("av(\\d+)").expect("av 号正则非法"))
+}
+
 /// 文件名清洗（去除 Windows 非法字符与括号内容）
 fn sanitize_filename(name: &str) -> String {
     if name.is_empty() {
         return String::from("未知");
     }
     // 去除 Windows 非法字符
-    let illegal = Regex::new("[\\\\/:*?\"<>|]").unwrap();
-    let cleaned = illegal.replace_all(name, "").to_string();
+    let cleaned = illegal_chars_re().replace_all(name, "").to_string();
     // 去除半角英文括号及其中内容
-    let en_paren = Regex::new("\\([^)]*\\)").unwrap();
-    let cleaned = en_paren.replace_all(&cleaned, "").to_string();
+    let cleaned = en_paren_re().replace_all(&cleaned, "").to_string();
     let trimmed = cleaned.trim().chars().take(80).collect::<String>();
     if trimmed.is_empty() {
         String::from("未知")
@@ -97,30 +132,39 @@ fn extract_bvid(input: &str) -> Result<String, String> {
         return Err(String::from("链接不能为空"));
     }
     // 直接是 BV 号
-    let bv_re = Regex::new("^BV([a-zA-Z0-9]+)$").unwrap();
-    if let Some(c) = bv_re.captures(trimmed) {
+    if let Some(c) = bv_only_re().captures(trimmed) {
         return Ok(format!("BV{}", &c[1]));
     }
     // 包含 bilibili.com/video/BVxxxx
-    let url_re = Regex::new("(BV[a-zA-Z0-9]{10})").unwrap();
-    if let Some(c) = url_re.captures(trimmed) {
+    if let Some(c) = bv_in_url_re().captures(trimmed) {
         return Ok(c[1].to_string());
     }
     // 也兼容 av 号
-    let av_re = Regex::new("av(\\d+)").unwrap();
-    if let Some(c) = av_re.captures(trimmed) {
+    if let Some(c) = av_re().captures(trimmed) {
         return Ok(format!("av{}", &c[1]));
     }
     Err(String::from("无法识别有效的视频链接"))
 }
 
 /// 获取视频信息（B 站 /x/web-interface/view）
-async fn fetch_video_info(bvid: &str, client: &reqwest::Client) -> Result<serde_json::Value, String> {
-    let url = format!("https://api.bilibili.com/x/web-interface/view?bvid={}", bvid);
+async fn fetch_video_info(
+    bvid: &str,
+    client: &reqwest::Client,
+) -> Result<serde_json::Value, String> {
+    let url = format!(
+        "https://api.bilibili.com/x/web-interface/view?bvid={}",
+        bvid
+    );
     let resp = client
         .get(&url)
-        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36")
-        .header("Referer", format!("https://www.bilibili.com/video/{}", bvid))
+        .header(
+            "User-Agent",
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        )
+        .header(
+            "Referer",
+            format!("https://www.bilibili.com/video/{}", bvid),
+        )
         .timeout(Duration::from_secs(15))
         .send()
         .await
@@ -157,7 +201,10 @@ async fn fetch_audio_and_cover(
     let resp = client
         .get(&url)
         .header("User-Agent", "Mozilla/5.0")
-        .header("Referer", format!("https://www.bilibili.com/video/{}", bvid))
+        .header(
+            "Referer",
+            format!("https://www.bilibili.com/video/{}", bvid),
+        )
         .timeout(Duration::from_secs(15))
         .send()
         .await
@@ -224,10 +271,7 @@ pub async fn parse_bilibili_url(url: String) -> Result<VideoInfo, String> {
         .unwrap_or("未知标题")
         .to_string();
 
-    let duration = info
-        .get("duration")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0);
+    let duration = info.get("duration").and_then(|v| v.as_u64()).unwrap_or(0);
 
     let mut cover_url = info
         .get("pic")
@@ -249,9 +293,9 @@ pub async fn parse_bilibili_url(url: String) -> Result<VideoInfo, String> {
 /// 进度事件 payload
 #[derive(Debug, Clone, Serialize)]
 struct DownloadProgress {
-    stage: String,        // "parsing" | "downloading_audio" | "converting" | "downloading_cover" | "done" | "error"
+    stage: String, // "parsing" | "downloading_audio" | "converting" | "downloading_cover" | "done" | "error"
     message: String,
-    percent: u8,          // 0-100
+    percent: u8, // 0-100
 }
 
 /// 通过 Tauri sidecar 机制执行 FFmpeg
@@ -264,10 +308,7 @@ struct DownloadProgress {
 /// 返回执行是否成功（success）。错误信息从 stderr 解码。
 /// 这里使用 `output()` 一次性执行,与原 `Command::new(...).status()` 行为等价（丢弃 stdout），
 /// 不破坏前端进度事件流；如需解析 stderr 实现真实转码进度,可改为 `spawn()` + `CommandEvent::Stderr` 监听。
-async fn run_ffmpeg_sidecar(
-    app: &AppHandle,
-    args: Vec<String>,
-) -> Result<bool, String> {
+async fn run_ffmpeg_sidecar(app: &AppHandle, args: Vec<String>) -> Result<bool, String> {
     // sidecar("ffmpeg") 会由 Tauri 解析为内置 ffmpeg 的实际路径并执行。
     // 在 dev 与打包后均可工作：dev 时位于 src-tauri/binaries/，打包时随安装包分发到应用资源目录。
     let command = app
@@ -284,8 +325,19 @@ async fn run_ffmpeg_sidecar(
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         // 仅返回末尾 200 字符以避免错误信息过长
-        let tail: String = stderr.chars().rev().take(200).collect::<String>().chars().rev().collect();
-        return Err(format!("ffmpeg 转换失败 (exit={}): {}", output.status.code().unwrap_or(-1), tail));
+        let tail: String = stderr
+            .chars()
+            .rev()
+            .take(200)
+            .collect::<String>()
+            .chars()
+            .rev()
+            .collect();
+        return Err(format!(
+            "ffmpeg 转换失败 (exit={}): {}",
+            output.status.code().unwrap_or(-1),
+            tail
+        ));
     }
 
     Ok(true)
@@ -326,9 +378,11 @@ pub async fn download_bilibili_music(
     }
 
     // 探测 sidecar 是否可用,缺失即提前报错
-    app.shell()
-        .sidecar("ffmpeg")
-        .map_err(|_| String::from("未找到内置 ffmpeg，请确认 src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe 存在"))?;
+    app.shell().sidecar("ffmpeg").map_err(|_| {
+        String::from(
+            "未找到内置 ffmpeg，请确认 src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe 存在",
+        )
+    })?;
 
     let client = reqwest::Client::builder()
         .timeout(Duration::from_secs(60))
@@ -376,9 +430,7 @@ pub async fn download_bilibili_music(
 
     // 跳过已存在
     if mp3_path.exists() {
-        let size = std::fs::metadata(&mp3_path)
-            .map(|m| m.len())
-            .unwrap_or(0);
+        let size = std::fs::metadata(&mp3_path).map(|m| m.len()).unwrap_or(0);
         if size > 100 * 1024 {
             emit_progress("done", "文件已存在，跳过下载", 100);
             return Ok(mp3_path.to_string_lossy().to_string());
@@ -466,10 +518,7 @@ pub async fn download_bilibili_music(
     let cover_path_clone = cover_path.clone();
     let final_singer_clone = final_singer.clone();
     let final_song_clone = final_song.clone();
-    let video_duration_secs = info
-        .get("duration")
-        .and_then(|v| v.as_u64())
-        .unwrap_or(0) as i64;
+    let video_duration_secs = info.get("duration").and_then(|v| v.as_u64()).unwrap_or(0) as i64;
 
     tokio::spawn(async move {
         let _ = save_downloaded_song_to_db(
@@ -497,8 +546,8 @@ async fn save_downloaded_song_to_db(
     duration_secs: i64,
 ) -> Result<(), String> {
     // 计算内容哈希
-    let song_hash = compute_content_hash(mp3_path)
-        .ok_or_else(|| "计算 content_hash 失败".to_string())?;
+    let song_hash =
+        compute_content_hash(mp3_path).ok_or_else(|| "计算 content_hash 失败".to_string())?;
 
     let song_path_str = mp3_path.to_string_lossy().to_string();
     let cover_path_str = if cover_path.exists() {
@@ -600,22 +649,29 @@ async fn download_stream(
     save_path: &Path,
 ) -> Result<(), String> {
     let mut headers = reqwest::header::HeaderMap::new();
+    // User-Agent 是静态字面量, from_static 不会失败
     headers.insert(
-        "User-Agent",
-        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
-            .parse()
-            .unwrap(),
+        reqwest::header::USER_AGENT,
+        reqwest::header::HeaderValue::from_static(
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36",
+        ),
     );
-    headers.insert("Referer", referer.parse().unwrap());
+
+    // Referer 来自调用方传入的链接, 属于运行时可失败路径。
+    // release 构建开启了 panic = "abort", 这里绝不能 unwrap —— 否则一个畸形链接
+    // 就会让整个应用直接退出。
+    let referer_value = reqwest::header::HeaderValue::from_str(referer)
+        .map_err(|e| format!("Referer 非法: {}", e))?;
+    headers.insert(reqwest::header::REFERER, referer_value);
 
     // 断点续传
     if let Ok(meta) = std::fs::metadata(save_path) {
         let size = meta.len();
         if size > 0 {
-            headers.insert(
-                "Range",
-                format!("bytes={}-", size).parse().unwrap(),
-            );
+            // 同样走运行时可失败路径, 不 unwrap
+            let range = reqwest::header::HeaderValue::from_str(&format!("bytes={}-", size))
+                .map_err(|e| format!("Range 头非法: {}", e))?;
+            headers.insert(reqwest::header::RANGE, range);
         }
     }
 
@@ -672,4 +728,76 @@ async fn download_stream(
     }
 
     Ok(())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_sanitize_filename_removes_illegal_chars() {
+        assert_eq!(sanitize_filename("a/b:c*d?e\"f<g>h|i"), "abcdefghi");
+        assert_eq!(sanitize_filename("周杰伦 - 晴天"), "周杰伦 - 晴天");
+    }
+
+    #[test]
+    fn test_sanitize_filename_strips_english_parens() {
+        assert_eq!(sanitize_filename("歌名(cover:某某)"), "歌名");
+        // 中文全角括号不在清理范围内
+        assert_eq!(sanitize_filename("歌名（备注）"), "歌名（备注）");
+    }
+
+    #[test]
+    fn test_sanitize_filename_falls_back_to_unknown() {
+        assert_eq!(sanitize_filename(""), "未知");
+        // 清洗后只剩空白的同样回退
+        assert_eq!(sanitize_filename("///"), "未知");
+    }
+
+    #[test]
+    fn test_sanitize_filename_truncates_to_80_chars() {
+        let long = "歌".repeat(200);
+        assert_eq!(sanitize_filename(&long).chars().count(), 80);
+    }
+
+    #[test]
+    fn test_extract_bvid_accepts_multiple_forms() {
+        assert_eq!(extract_bvid("BV1xx411c7mD").unwrap(), "BV1xx411c7mD");
+        assert_eq!(
+            extract_bvid("https://www.bilibili.com/video/BV1xx411c7mD?share_source=copy").unwrap(),
+            "BV1xx411c7mD"
+        );
+        assert_eq!(extract_bvid("av12345").unwrap(), "av12345");
+    }
+
+    #[test]
+    fn test_extract_bvid_rejects_invalid_input() {
+        assert!(extract_bvid("").is_err());
+        assert!(extract_bvid("随便一段文字").is_err());
+    }
+
+    /// 正则必须全局复用同一实例, 而不是每次调用重新编译
+    #[test]
+    fn test_regexes_are_reused() {
+        assert!(std::ptr::eq(
+            illegal_chars_re() as *const Regex,
+            illegal_chars_re() as *const Regex
+        ));
+        assert!(std::ptr::eq(
+            bv_only_re() as *const Regex,
+            bv_only_re() as *const Regex
+        ));
+        assert!(std::ptr::eq(
+            en_paren_re() as *const Regex,
+            en_paren_re() as *const Regex
+        ));
+        assert!(std::ptr::eq(
+            bv_in_url_re() as *const Regex,
+            bv_in_url_re() as *const Regex
+        ));
+        assert!(std::ptr::eq(
+            av_re() as *const Regex,
+            av_re() as *const Regex
+        ));
+    }
 }

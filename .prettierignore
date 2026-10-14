@@ -1,0 +1,10 @@
+# 依赖与构建产物
+node_modules/
+dist/
+
+# Rust 侧由 rustfmt 负责, 不交给 prettier
+src-tauri/
+
+# 锁文件与文档不做格式化, 避免无意义的大 diff
+package-lock.json
+*.md

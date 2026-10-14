@@ -21,7 +21,8 @@ const props = withDefaults(
   {
     speed: 30,
     duration: undefined,
-  },
+    textClass: '',
+  }
 )
 
 const containerRef = ref<HTMLElement | null>(null)
@@ -74,7 +75,7 @@ watch(
   () => props.text,
   () => {
     measure()
-  },
+  }
 )
 </script>
 
@@ -100,19 +101,21 @@ watch(
     </p>
 
     <!-- 动态滚动: 文本溢出时, 两份内容无缝循环 -->
-    <div
-      v-else
-      class="relative whitespace-nowrap"
-      :key="animKey"
-    >
+    <div v-else :key="animKey" class="relative whitespace-nowrap">
       <div
         class="flex w-max scrolling-track"
         :style="{ animationDuration: `${computedDuration}s` }"
       >
-        <span :class="textClass || 'text-lg'" class="text-gray-600 dark:text-gray-400 pr-12 shrink-0">
+        <span
+          :class="textClass || 'text-lg'"
+          class="text-gray-600 dark:text-gray-400 pr-12 shrink-0"
+        >
           {{ text }}
         </span>
-        <span :class="textClass || 'text-lg'" class="text-gray-600 dark:text-gray-400 pr-12 shrink-0">
+        <span
+          :class="textClass || 'text-lg'"
+          class="text-gray-600 dark:text-gray-400 pr-12 shrink-0"
+        >
           {{ text }}
         </span>
       </div>

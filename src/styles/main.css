@@ -5,7 +5,7 @@
 /* 自定义样式 */
 :root {
   /* 字体变量 - 由 JavaScript 动态设置 */
-  --font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+  --font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
   --font-size: 14px;
 
   font-family: var(--font-family);
@@ -68,20 +68,20 @@ body {
 }
 
 /* 播放进度条样式 - 浅色模式 */
-input[type="range"] {
+input[type='range'] {
   -webkit-appearance: none;
   appearance: none;
   background: transparent;
   cursor: pointer;
 }
 
-input[type="range"]::-webkit-slider-runnable-track {
+input[type='range']::-webkit-slider-runnable-track {
   background: rgba(0, 0, 0, 0.2);
   height: 4px;
   border-radius: 2px;
 }
 
-input[type="range"]::-webkit-slider-thumb {
+input[type='range']::-webkit-slider-thumb {
   -webkit-appearance: none;
   appearance: none;
   background: #1a1a1a;
@@ -92,11 +92,11 @@ input[type="range"]::-webkit-slider-thumb {
 }
 
 /* 深色模式下的进度条 */
-.dark input[type="range"]::-webkit-slider-runnable-track {
+.dark input[type='range']::-webkit-slider-runnable-track {
   background: rgba(255, 255, 255, 0.2);
 }
 
-.dark input[type="range"]::-webkit-slider-thumb {
+.dark input[type='range']::-webkit-slider-thumb {
   background: #fff;
 }
 
@@ -108,6 +108,15 @@ input[type="range"]::-webkit-slider-thumb {
 
 .cover-rotating.paused {
   animation-play-state: paused;
+}
+
+/*
+  旋转期间才提升为合成层。
+  恒定 will-change 会让暂停中的唱片一直占着一张 256x256 纹理（还带 shadow），
+  按需提升则只在真正旋转时付出代价，同时避免首帧因临时建层而抖动。
+*/
+.cover-rotating:not(.paused) {
+  will-change: transform;
 }
 
 @keyframes rotate {
@@ -123,4 +132,40 @@ input[type="range"]::-webkit-slider-thumb {
 .glass-effect {
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
+}
+
+/* ========== 动画基线 ========== */
+/*
+  统一时长 / 缓动令牌。
+  此前各处硬编码 0.1~0.3s 与 ease-out/ease-in，同一交互在两处手感不一致。
+  能被 CSS 与组件复用的只有这几个，组件里用 var() 引用。
+*/
+:root {
+  --motion-duration-fast: 120ms;
+  --motion-duration-base: 200ms;
+  --motion-duration-drawer: 300ms;
+  --motion-ease-out: cubic-bezier(0.22, 0.61, 0.36, 1);
+  --motion-ease-in: cubic-bezier(0.4, 0, 1, 1);
+}
+
+/*
+  无障碍 / 低配机：尊重系统的"减少动态效果"。
+  连续动画直接停，过渡压缩到接近 0 但仍保留 transitionend 事件
+  （0.01ms 而非 0s），因此 Vue <Transition> 的钩子与依赖 transitionend
+  的逻辑不受影响。
+  例外：MemoryMarquee 自带更严格的规则（animation: none）。
+*/
+@media (prefers-reduced-motion: reduce) {
+  .cover-rotating {
+    animation: none !important;
+  }
+
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
 }

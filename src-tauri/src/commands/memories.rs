@@ -63,10 +63,7 @@ pub fn init_schema(conn: &rusqlite::Connection) -> Result<(), String> {
 
 /// 查询单条回忆
 #[tauri::command]
-pub async fn get_memory(
-    app: AppHandle,
-    song_hash: String,
-) -> Result<Option<MemoryRecord>, String> {
+pub async fn get_memory(app: AppHandle, song_hash: String) -> Result<Option<MemoryRecord>, String> {
     db::run_db(&app, move |conn| {
         let result = conn
             .query_row(
@@ -102,8 +99,8 @@ pub async fn save_memory(
     long_text: String,
 ) -> Result<MemoryRecord, String> {
     let now = db::now_ms();
-    let short_tags_json = serde_json::to_string(&short_tags)
-        .map_err(|e| format!("序列化 short_tags 失败: {}", e))?;
+    let short_tags_json =
+        serde_json::to_string(&short_tags).map_err(|e| format!("序列化 short_tags 失败: {}", e))?;
 
     db::run_db(&app, move |conn| {
         // SQLite UPSERT: 有则更新, 无则插入
@@ -152,13 +149,13 @@ pub async fn save_memory(
 
 /// 删除回忆
 #[tauri::command]
-pub async fn delete_memory(
-    app: AppHandle,
-    song_hash: String,
-) -> Result<bool, String> {
+pub async fn delete_memory(app: AppHandle, song_hash: String) -> Result<bool, String> {
     db::run_db(&app, move |conn| {
         let affected = conn
-            .execute("DELETE FROM memories WHERE song_hash = ?1", params![song_hash])
+            .execute(
+                "DELETE FROM memories WHERE song_hash = ?1",
+                params![song_hash],
+            )
             .map_err(|e| format!("删除记忆失败: {}", e))?;
         Ok(affected > 0)
     })
@@ -265,8 +262,7 @@ pub async fn export_memory(
     let target_dir = if let Some(dir) = output_dir {
         let dir_path = std::path::PathBuf::from(&dir);
         if !dir_path.exists() {
-            std::fs::create_dir_all(&dir_path)
-                .map_err(|e| format!("创建导出目录失败: {}", e))?;
+            std::fs::create_dir_all(&dir_path).map_err(|e| format!("创建导出目录失败: {}", e))?;
         }
         dir_path
     } else {
@@ -283,10 +279,9 @@ pub async fn export_memory(
         "updated_at": record.updated_at,
     });
 
-    let content = serde_json::to_string_pretty(&payload)
-        .map_err(|e| format!("序列化 JSON 失败: {}", e))?;
-    std::fs::write(&memo_path, content)
-        .map_err(|e| format!("写入文件失败: {}", e))?;
+    let content =
+        serde_json::to_string_pretty(&payload).map_err(|e| format!("序列化 JSON 失败: {}", e))?;
+    std::fs::write(&memo_path, content).map_err(|e| format!("写入文件失败: {}", e))?;
 
     Ok(memo_path.to_string_lossy().to_string())
 }

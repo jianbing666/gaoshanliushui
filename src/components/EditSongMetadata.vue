@@ -26,6 +26,10 @@ const album = ref('')
 const isClosing = ref(false)
 const saving = ref(false)
 const menuRef = ref<HTMLElement | null>(null)
+// 浮窗位置由本地状态驱动: 首帧即用 props 传入的锚点, adjustPosition 再按视口收敛
+const pos = ref({ x: props.x, y: props.y })
+// 关闭动画的延迟回调: 重新打开时需取消, 否则会把新开的浮窗一起关掉
+let closeTimer: number | null = null
 
 function resetToOriginal() {
   title.value = props.song.title
@@ -41,15 +45,23 @@ function handleClickOutside(e: MouseEvent) {
 
 function closePopup() {
   isClosing.value = true
-  setTimeout(() => {
+  if (closeTimer !== null) clearTimeout(closeTimer)
+  closeTimer = window.setTimeout(() => {
+    closeTimer = null
     emit('close')
     isClosing.value = false
   }, 100)
 }
 
+function syncFromSong() {
+  title.value = props.song.title
+  artist.value = props.song.artist
+  album.value = props.song.album
+}
+
 async function handleSave() {
   if (!props.song.content_hash) return
-  
+
   // 先更新本地 UI（乐观更新），立即关闭弹窗
   const updates = {
     title: title.value.trim(),
@@ -79,18 +91,24 @@ function handleKeydown(e: KeyboardEvent) {
 }
 
 watch(
-  () => props.visible,
-  (visible) => {
+  [() => props.visible, () => props.song.id],
+  ([visible]) => {
     if (visible) {
+      // 取消上一次关闭动画的延迟回调, 避免连续操作时浮窗被立刻关掉
+      if (closeTimer !== null) {
+        clearTimeout(closeTimer)
+        closeTimer = null
+      }
       isClosing.value = false
-      title.value = props.song.title
-      artist.value = props.song.artist
-      album.value = props.song.album
+      saving.value = false
+      pos.value = { x: props.x, y: props.y }
+      syncFromSong()
       nextTick(() => {
         adjustPosition()
       })
     }
-  }
+  },
+  { immediate: true }
 )
 
 function adjustPosition() {
@@ -106,10 +124,7 @@ function adjustPosition() {
     newY = Math.max(8, window.innerHeight - rect.height - 8)
   }
 
-  if (menuRef.value) {
-    menuRef.value.style.left = `${newX}px`
-    menuRef.value.style.top = `${newY}px`
-  }
+  pos.value = { x: newX, y: newY }
 }
 
 onMounted(() => {
@@ -118,6 +133,10 @@ onMounted(() => {
 })
 
 onUnmounted(() => {
+  if (closeTimer !== null) {
+    clearTimeout(closeTimer)
+    closeTimer = null
+  }
   document.removeEventListener('keydown', handleKeydown)
   document.removeEventListener('mousedown', handleClickOutside)
 })
@@ -133,11 +152,13 @@ onUnmounted(() => {
         'animate-menu-enter': !isClosing,
         'animate-menu-exit': isClosing,
       }"
-      :style="{ left: `${x}px`, top: `${y}px` }"
+      :style="{ left: `${pos.x}px`, top: `${pos.y}px` }"
       @click.stop
     >
       <!-- 标题栏 -->
-      <div class="flex items-center justify-between px-3 py-2 border-b border-gray-100 dark:border-gray-700/50">
+      <div
+        class="flex items-center justify-between px-3 py-2 border-b border-gray-100 dark:border-gray-700/50"
+      >
         <div class="flex items-center gap-2">
           <PencilIcon :size="14" class="text-blue-500" />
           <span class="text-sm font-medium text-gray-900 dark:text-white">编辑元数据</span>
@@ -182,7 +203,9 @@ onUnmounted(() => {
       </div>
 
       <!-- 底部按钮 -->
-      <div class="flex items-center justify-between px-3 py-2 border-t border-gray-100 dark:border-gray-700/50 bg-gray-50/50 dark:bg-gray-800/50">
+      <div
+        class="flex items-center justify-between px-3 py-2 border-t border-gray-100 dark:border-gray-700/50 bg-gray-50/50 dark:bg-gray-800/50"
+      >
         <button
           class="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-md transition-colors"
           @click="resetToOriginal"

@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, ref, onMounted, onBeforeUnmount } from 'vue'
+import { computed, ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useMemoryStore } from '@/stores/memoryStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useAudioStore } from '@/stores/audioStore'
@@ -60,6 +60,17 @@ function refresh() {
   animKey.value++
 }
 
+/*
+  标签内容变化后重启动画（refresh() 的注释一直写着"切歌后刷新动画"，
+  但此前只在 onMounted 调过一次，切歌时新标签会直接出现在滚动途中原地替换）。
+  监听的是拼接后的字符串而不是数组本身：saveMemory 回执会重新赋值 currentMemory，
+  但标签内容没变，此时不该重启弹幕。
+*/
+watch(
+  () => tags.value.join('\u0000'),
+  () => refresh()
+)
+
 onMounted(() => {
   refresh()
 })
@@ -102,7 +113,7 @@ onBeforeUnmount(() => {
             <span
               v-for="(tag, i) in row"
               :key="`${rowIdx}-${i}-${tag}`"
-              class="memory-tag inline-block mr-16 px-2 py-0.5 rounded-full text-[11px] whitespace-nowrap bg-white/40 dark:bg-black/40 backdrop-blur text-gray-700 dark:text-gray-200 border border-white/30 dark:border-white/10"
+              class="memory-tag inline-block mr-16 px-2 py-0.5 rounded-full text-[11px] whitespace-nowrap bg-white/70 dark:bg-black/55 text-gray-700 dark:text-gray-200 border border-white/30 dark:border-white/10"
             >
               {{ tag }}
             </span>
@@ -117,6 +128,11 @@ onBeforeUnmount(() => {
 .memory-marquee {
   opacity: 0.55;
   transition: opacity 0.25s ease;
+  /*
+    布局/绘制隔离：6 行弹幕的位移不再有机会让祖先元素重新布局，
+    容器尺寸也完全由自身决定（min-height 由模板给出）。
+  */
+  contain: layout paint;
 }
 
 .marquee-container {
@@ -131,6 +147,12 @@ onBeforeUnmount(() => {
   overflow: hidden;
 }
 
+/*
+  注意：标签上不再使用 backdrop-blur。
+  这里最多 30 个标签、6 条轨道同时无限位移，每帧都要重新采样并模糊其背后的
+  像素（背后还是全屏渐变 + 经过 blur() 的背景图），是播放页最贵的一处开销。
+  改用略微提高不透明度的底色，视觉差异极小，但把整条弹幕降级成纯合成动画。
+*/
 .marquee-track {
   position: absolute;
   top: 50%;

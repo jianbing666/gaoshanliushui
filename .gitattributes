@@ -1,0 +1,17 @@
+# 统一换行符处理策略
+#
+# 背景: 本项目主要在 Windows 上开发 (core.autocrlf=true), 而 CI 与协作者可能
+# 在其他平台。显式声明二进制文件可以避免 Git 对它们做换行符转换 —— 尤其是
+# 体积很大的 ffmpeg sidecar, 一旦被转换就会损坏且难以察觉。
+
+# 二进制文件: 禁止任何换行符转换与文本 diff
+*.exe   binary
+*.dll   binary
+*.ico   binary
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+
+# 锁文件: 由工具生成, 不参与 diff 统计
+package-lock.json  linguist-generated
+Cargo.lock         linguist-generated

@@ -1,7 +1,7 @@
 use std::collections::hash_map::DefaultHasher;
 use std::hash::{Hash, Hasher};
 use std::path::Path;
-use std::sync::Arc;
+use std::sync::{Arc, OnceLock};
 
 use std::borrow::Cow;
 
@@ -11,9 +11,9 @@ use lofty::tag::Accessor;
 use regex::Regex;
 use walkdir::WalkDir;
 
-use crate::commands::song_hash::compute_content_hash;
-use crate::commands::db;
 use crate::commands::data_dir;
+use crate::commands::db;
+use crate::commands::song_hash::compute_content_hash;
 use crate::models::Song;
 use tauri::{AppHandle, Emitter};
 
@@ -26,6 +26,25 @@ const COVER_IMAGE_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "gif", "bmp", "w
 /// ========== 缩略图配置 ==========
 const THUMB_WIDTH: u32 = 128;
 const THUMB_QUALITY: u8 = 75;
+
+/// 从 songs 表读出的元数据行 (数据库 → 内存的中间表示)
+///
+/// 字段顺序与 SELECT 语句逐一对应:
+/// (song_path, title, artist, album, duration, cover_path, cover_thumb_path,
+///  favorite, favorited_at, created_at)
+/// 增删列时需同步修改两处。
+type DbSongRow = (
+    String,
+    String,
+    String,
+    String,
+    i64,
+    String,
+    String,
+    bool,
+    i64,
+    i64,
+);
 
 /// 递归扫描指定文件夹下的所有音频文件，并解析元数据
 ///
@@ -165,8 +184,9 @@ pub async fn scan_music_folder(
                 .collect::<Vec<_>>()
                 .join(",");
             let query = format!(
-                "SELECT song_hash, song_path, title, artist, album, duration, cover_path 
-                 FROM songs 
+                "SELECT song_hash, song_path, title, artist, album, duration, cover_path, cover_thumb_path,
+                        favorite, favorited_at, created_at
+                 FROM songs
                  WHERE song_hash IN ({})
                  ORDER BY title ASC",
                 placeholders
@@ -199,6 +219,10 @@ pub async fn scan_music_folder(
                         row.get::<_, String>(4).map_err(|e| format!("读取 album 失败: {}", e))?,
                         row.get::<_, i64>(5).map_err(|e| format!("读取 duration 失败: {}", e))?,
                         row.get::<_, String>(6).map_err(|e| format!("读取 cover_path 失败: {}", e))?,
+                        row.get::<_, String>(7).map_err(|e| format!("读取 cover_thumb_path 失败: {}", e))?,
+                        row.get::<_, bool>(8).map_err(|e| format!("读取 favorite 失败: {}", e))?,
+                        row.get::<_, i64>(9).map_err(|e| format!("读取 favorited_at 失败: {}", e))?,
+                        row.get::<_, i64>(10).map_err(|e| format!("读取 created_at 失败: {}", e))?,
                     ));
                 }
                 result
@@ -242,23 +266,72 @@ pub async fn scan_music_folder(
 
                 // 用数据库中的数据 (含用户修正) 合并到返回结果
                 use std::collections::HashMap;
-                let db_map: HashMap<String, (String, String, String, String, i64, String)> = db_songs
+                let db_map: HashMap<String, DbSongRow> = db_songs
                     .into_iter()
-                    .map(|(hash, path, title, artist, album, dur, cover)| {
-                        (hash, (path, title, artist, album, dur, cover))
-                    })
+                    .map(
+                        |(
+                            hash,
+                            path,
+                            title,
+                            artist,
+                            album,
+                            dur,
+                            cover,
+                            thumb,
+                            favorite,
+                            favorited_at,
+                            created_at,
+                        )| {
+                            (
+                                hash,
+                                (
+                                    path,
+                                    title,
+                                    artist,
+                                    album,
+                                    dur,
+                                    cover,
+                                    thumb,
+                                    favorite,
+                                    favorited_at,
+                                    created_at,
+                                ),
+                            )
+                        },
+                    )
                     .collect();
 
                 for song in &mut merged_songs {
                     if let Some(ref hash) = song.content_hash {
-                        if let Some((_, title, artist, album, _, cover)) = db_map.get(hash) {
+                        if let Some((
+                            _,
+                            title,
+                            artist,
+                            album,
+                            _,
+                            cover,
+                            thumb,
+                            favorite,
+                            favorited_at,
+                            created_at,
+                        )) = db_map.get(hash)
+                        {
                             song.title = title.clone();
                             song.artist = artist.clone();
                             song.album = album.clone();
                             if !cover.is_empty() {
                                 song.cover_path = Some(cover.clone());
-                                song.cover_thumb_path = Some(cover.clone());
                             }
+                            // 缩略图独立赋值: 存量数据该列为空, 保持 None 让前端回退全尺寸封面
+                            song.cover_thumb_path = if thumb.is_empty() {
+                                None
+                            } else {
+                                Some(thumb.clone())
+                            };
+                            // 喜爱状态与入库时间以数据库为准 (重扫不得覆盖用户标记)
+                            song.favorite = *favorite;
+                            song.favorited_at = *favorited_at;
+                            song.created_at = *created_at;
                         }
                     }
                 }
@@ -287,11 +360,9 @@ pub async fn scan_music_folder(
 /// - 文件名解析 或 ID3 标题/艺术家/专辑
 /// - duration (lofty Probe, 仅读文件属性)
 /// - content_hash (头尾 64KB SHA-1)
+///
 /// 不做: 封面提取 + 缩略图生成（最耗时）
-fn parse_audio_file_phase1(
-    file_path: &Path,
-    use_filename_only: bool,
-) -> Result<Song, String> {
+fn parse_audio_file_phase1(file_path: &Path, use_filename_only: bool) -> Result<Song, String> {
     let file_path_str = file_path
         .to_str()
         .ok_or_else(|| format!("无效的文件路径: {:?}", file_path))?
@@ -301,6 +372,8 @@ fn parse_audio_file_phase1(
 
     // 计算 content_hash (记忆功能需要，必须阶段1就有)
     let content_hash = compute_content_hash(file_path);
+    // 首次入库时间的暂定值: 真正落库后以数据库中的 created_at 为准 (重扫不会刷新)
+    let created_at = db::now_ms();
 
     if use_filename_only {
         // 仅文件名模式: 从文件名解析 + duration
@@ -330,6 +403,9 @@ fn parse_audio_file_phase1(
             cover_path: sibling_cover.clone(),
             cover_thumb_path: sibling_cover,
             content_hash,
+            favorite: false,
+            favorited_at: 0,
+            created_at,
         });
     }
 
@@ -414,6 +490,9 @@ fn parse_audio_file_phase1(
         cover_path: sibling_cover.clone(),
         cover_thumb_path: sibling_cover,
         content_hash,
+        favorite: false,
+        favorited_at: 0,
+        created_at,
     })
 }
 
@@ -472,12 +551,21 @@ fn enrich_covers_async(
             }
         };
 
-        // 更新 songs 表的 cover_path
-        if let Some(ref cp) = cover_path {
+        // 更新 songs 表的 cover_path / cover_thumb_path
+        //
+        // 用 CASE WHEN 而不是直接覆盖: 本次未提取到封面时 (例如音频无内嵌图片)
+        // 不应把库中已有的封面路径清空。
+        let cover_value = cover_path.clone().unwrap_or_default();
+        let thumb_value = cover_thumb_path.clone().unwrap_or_default();
+        if !cover_value.is_empty() || !thumb_value.is_empty() {
             let _ = db::with_conn(|conn| {
                 conn.execute(
-                    "UPDATE songs SET cover_path = ?1, updated_at = ?2 WHERE song_path = ?3",
-                    rusqlite::params![cp, now, file_path_str],
+                    "UPDATE songs
+                     SET cover_path = CASE WHEN ?1 != '' THEN ?1 ELSE cover_path END,
+                         cover_thumb_path = CASE WHEN ?2 != '' THEN ?2 ELSE cover_thumb_path END,
+                         updated_at = ?3
+                     WHERE song_path = ?4",
+                    rusqlite::params![cover_value, thumb_value, now, file_path_str],
                 )
                 .map_err(|e| e.to_string())?;
                 Ok(())
@@ -504,6 +592,18 @@ fn enrich_covers_async(
     );
 }
 
+/// "歌手 - 歌名" 解析正则
+///
+/// 用 OnceLock 只编译一次: `parse_filename` 在扫描时按文件逐个调用, 若每次都
+/// `Regex::new`, 5000 首歌就是 5000 次正则编译 —— 这部分开销与解析结果无关,
+/// 纯属浪费。
+static FILENAME_SPLIT_RE: OnceLock<Regex> = OnceLock::new();
+
+fn filename_split_re() -> &'static Regex {
+    FILENAME_SPLIT_RE
+        .get_or_init(|| Regex::new(r"^(.+?)\s*[-–—]\s*(.+?)$").expect("文件名解析正则非法"))
+}
+
 /// 从文件名解析 "歌手 - 歌名" 格式
 fn parse_filename(file_path: &Path) -> (String, String) {
     let file_stem = match file_path.file_stem().and_then(|s| s.to_str()) {
@@ -511,10 +611,15 @@ fn parse_filename(file_path: &Path) -> (String, String) {
         None => return (String::new(), String::new()),
     };
 
-    let re = Regex::new(r"^(.+?)\s*[-–—]\s*(.+?)$").unwrap();
-    if let Some(caps) = re.captures(file_stem) {
-        let artist = caps.get(1).map(|m| m.as_str().trim().to_string()).unwrap_or_default();
-        let title = caps.get(2).map(|m| m.as_str().trim().to_string()).unwrap_or_default();
+    if let Some(caps) = filename_split_re().captures(file_stem) {
+        let artist = caps
+            .get(1)
+            .map(|m| m.as_str().trim().to_string())
+            .unwrap_or_default();
+        let title = caps
+            .get(2)
+            .map(|m| m.as_str().trim().to_string())
+            .unwrap_or_default();
         return (artist, title);
     }
 
@@ -543,7 +648,10 @@ fn extract_cover_art(file_path: &Path, song_id: &str) -> (Option<String>, Option
         None => return (None, None),
     };
 
-    let tag = match tagged_file.primary_tag().or_else(|| tagged_file.first_tag()) {
+    let tag = match tagged_file
+        .primary_tag()
+        .or_else(|| tagged_file.first_tag())
+    {
         Some(t) => t,
         None => return (None, None),
     };
@@ -658,4 +766,119 @@ fn generate_id(s: &str) -> String {
     let mut hasher = DefaultHasher::new();
     s.hash(&mut hasher);
     format!("{:x}", hasher.finish())
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn temp_dir(tag: &str) -> std::path::PathBuf {
+        let unique = format!(
+            "gaoshanliushui-scan-{}-{}",
+            tag,
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map(|d| d.as_nanos())
+                .unwrap_or(0)
+        );
+        let dir = std::env::temp_dir().join(unique);
+        std::fs::create_dir_all(&dir).expect("创建临时目录失败");
+        dir
+    }
+
+    #[test]
+    fn test_parse_filename_standard() {
+        let (artist, title) = parse_filename(Path::new("music/周杰伦 - 晴天.mp3"));
+        assert_eq!(artist, "周杰伦");
+        assert_eq!(title, "晴天");
+    }
+
+    #[test]
+    fn test_parse_filename_without_spaces() {
+        let (artist, title) = parse_filename(Path::new("music/刀酱-520AM.flac"));
+        assert_eq!(artist, "刀酱");
+        assert_eq!(title, "520AM");
+    }
+
+    #[test]
+    fn test_parse_filename_accepts_dash_variants() {
+        // 半角连字符 / 短破折号 / 长破折号都应识别
+        for sep in ["-", "–", "—"] {
+            let path = format!("music/歌手{}歌名.mp3", sep);
+            let (artist, title) = parse_filename(Path::new(&path));
+            assert_eq!(artist, "歌手", "分隔符 {:?} 未识别", sep);
+            assert_eq!(title, "歌名", "分隔符 {:?} 未识别", sep);
+        }
+    }
+
+    #[test]
+    fn test_parse_filename_keeps_extra_dashes_in_title() {
+        let (artist, title) = parse_filename(Path::new("music/歌手 - 歌名 - 现场版.mp3"));
+        assert_eq!(artist, "歌手");
+        assert_eq!(title, "歌名 - 现场版");
+    }
+
+    #[test]
+    fn test_parse_filename_without_separator_returns_empty() {
+        let (artist, title) = parse_filename(Path::new("music/单纯一个歌名.mp3"));
+        assert_eq!(artist, "");
+        assert_eq!(title, "");
+    }
+
+    #[test]
+    fn test_find_sibling_cover_prefers_earlier_extension() {
+        let dir = temp_dir("sibling");
+        std::fs::write(dir.join("song.mp3"), b"x").unwrap();
+        std::fs::write(dir.join("song.png"), b"x").unwrap();
+        std::fs::write(dir.join("song.jpg"), b"x").unwrap();
+
+        let found = find_sibling_cover_image(&dir.join("song.mp3")).expect("应找到同级封面");
+        // COVER_IMAGE_EXTENSIONS 中 jpg 在 png 之前
+        assert_eq!(found, dir.join("song.jpg").to_str().unwrap());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_find_sibling_cover_ignores_other_names() {
+        let dir = temp_dir("sibling-miss");
+        std::fs::write(dir.join("song.mp3"), b"x").unwrap();
+        std::fs::write(dir.join("other.jpg"), b"x").unwrap();
+
+        assert!(find_sibling_cover_image(&dir.join("song.mp3")).is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_find_sibling_cover_requires_image_file() {
+        let dir = temp_dir("sibling-dir");
+        std::fs::write(dir.join("song.mp3"), b"x").unwrap();
+        // 同名但却是目录, 不应被当成封面
+        std::fs::create_dir_all(dir.join("song.jpg")).unwrap();
+
+        assert!(find_sibling_cover_image(&dir.join("song.mp3")).is_none());
+
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn test_generate_id_is_stable_for_same_input() {
+        assert_eq!(
+            generate_id("D:\\Music\\a.mp3"),
+            generate_id("D:\\Music\\a.mp3")
+        );
+        assert_ne!(
+            generate_id("D:\\Music\\a.mp3"),
+            generate_id("D:\\Music\\b.mp3")
+        );
+    }
+
+    /// 解析正则必须全局复用同一实例, 而不是每次调用重新编译
+    #[test]
+    fn test_filename_regex_is_reused() {
+        let first = filename_split_re() as *const Regex;
+        let second = filename_split_re() as *const Regex;
+        assert!(std::ptr::eq(first, second), "正则应复用同一实例");
+    }
 }

@@ -20,13 +20,11 @@ pub async fn write_text_file(path: String, content: String) -> Result<(), String
     // 确保父目录存在
     if let Some(parent) = path_buf.parent() {
         if !parent.exists() {
-            fs::create_dir_all(parent)
-                .map_err(|e| format!("创建目录失败: {}", e))?;
+            fs::create_dir_all(parent).map_err(|e| format!("创建目录失败: {}", e))?;
         }
     }
 
-    fs::write(&path_buf, &content)
-        .map_err(|e| format!("写入文件失败: {}", e))?;
+    fs::write(&path_buf, &content).map_err(|e| format!("写入文件失败: {}", e))?;
 
     Ok(())
 }

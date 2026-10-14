@@ -20,11 +20,20 @@ import SkipForwardIcon from '@/components/icons/SkipForwardIcon.vue'
 import PlayIcon from '@/components/icons/PlayIcon.vue'
 import PauseIcon from '@/components/icons/PauseIcon.vue'
 import MusicIcon from '@/components/icons/MusicIcon.vue'
+import HeartIcon from '@/components/icons/HeartIcon.vue'
 
 const player = useAudioStore()
 const library = useLibraryStore()
 const settings = useSettingsStore()
 const volumeIconRef = ref<HTMLElement | null>(null)
+
+/** 切换当前播放歌曲的喜爱标记 */
+function toggleCurrentFavorite() {
+  const song = library.currentSong
+  if (song) {
+    void library.toggleSongFavorite(song)
+  }
+}
 // autoplay 被拦截时的轻提示
 const showAutoplayTip = ref(false)
 
@@ -80,7 +89,7 @@ function toggleMute() {
 
 <template>
   <div v-bind="$attrs">
-    <footer 
+    <footer
       class="backdrop-blur border-t border-gray-200/50 dark:border-gray-700/50 flex items-center px-6 gap-6 shrink-0 h-24"
       :class="
         settings.currentBackgroundUrl && settings.background.mode !== 'none'
@@ -88,143 +97,178 @@ function toggleMute() {
           : 'bg-white/80 dark:bg-gray-800/50'
       "
     >
-    <!-- 左：当前歌曲信息 -->
-    <div class="flex items-center gap-4 w-36 shrink-0">
-      <div class="w-14 h-14 rounded-lg bg-gray-200 dark:bg-gray-700 shrink-0 overflow-hidden">
-        <img
-          v-if="library.currentSong?.cover_path"
-          :src="library.getCoverUrl(library.currentSong.cover_path)"
-          :alt="library.currentSong?.title"
-          class="w-full h-full object-cover"
-        />
-        <div v-else class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500">
-          <MusicIcon :size="20" />
+      <!-- 左：当前歌曲信息 -->
+      <div class="flex items-center gap-4 w-40 shrink-0">
+        <div class="w-14 h-14 rounded-lg bg-gray-200 dark:bg-gray-700 shrink-0 overflow-hidden">
+          <img
+            v-if="library.currentSong?.cover_path"
+            :src="library.getCoverUrl(library.currentSong.cover_path)"
+            :alt="library.currentSong?.title"
+            class="w-full h-full object-cover"
+          />
+          <div
+            v-else
+            class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500"
+          >
+            <MusicIcon :size="20" />
+          </div>
+        </div>
+        <div v-if="library.currentSong" class="min-w-0">
+          <div class="flex items-center gap-1">
+            <p class="text-gray-900 dark:text-white text-sm font-medium truncate">
+              {{ library.currentSong.title }}
+            </p>
+            <button
+              class="p-1 -mr-1 rounded-md shrink-0 transition-colors"
+              :class="
+                library.currentSong.favorite
+                  ? 'text-rose-500 dark:text-rose-400 hover:text-rose-600'
+                  : 'text-gray-400 dark:text-gray-500 hover:text-rose-500 dark:hover:text-rose-400'
+              "
+              :title="library.currentSong.favorite ? '取消喜爱' : '喜爱'"
+              @click="toggleCurrentFavorite"
+            >
+              <HeartIcon :size="14" :filled="!!library.currentSong.favorite" />
+            </button>
+          </div>
+          <p class="text-gray-600 dark:text-gray-400 text-xs truncate">
+            {{ library.currentSong.artist || '未知艺术家' }}
+          </p>
+        </div>
+        <div v-else>
+          <p class="text-gray-500 dark:text-gray-500 text-sm">未选择歌曲</p>
         </div>
       </div>
-      <div class="min-w-0" v-if="library.currentSong">
-        <p class="text-gray-900 dark:text-white text-sm font-medium truncate">{{ library.currentSong.title }}</p>
-        <p class="text-gray-600 dark:text-gray-400 text-xs truncate">{{ library.currentSong.artist || '未知艺术家' }}</p>
+
+      <!-- 中：播放控制 -->
+      <div class="flex-1 flex flex-col items-center gap-2">
+        <!-- 控制按钮 -->
+        <div class="flex items-center gap-4">
+          <!-- 循环模式 -->
+          <button
+            class="p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+            :class="{ 'text-blue-500 dark:text-blue-400': player.loopMode !== 'none' }"
+            :title="loopModeLabels[player.loopMode]"
+            @click="player.toggleLoopMode"
+          >
+            <ShuffleIcon v-if="player.loopMode === 'shuffle'" :size="18" />
+            <RepeatOneIcon v-else-if="player.loopMode === 'single'" :size="18" />
+            <RepeatIcon v-else-if="player.loopMode === 'list'" :size="18" />
+            <ArrowRightIcon v-else :size="18" />
+          </button>
+
+          <!-- 上一首 -->
+          <button
+            class="p-2 rounded-lg text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+            :class="{ 'opacity-30 cursor-not-allowed': !player.hasPrev }"
+            :disabled="!player.hasPrev"
+            @click="player.prev"
+          >
+            <SkipBackIcon :size="20" />
+          </button>
+
+          <!-- 播放/暂停 -->
+          <button
+            class="w-12 h-12 bg-gray-900 dark:bg-white rounded-full flex items-center justify-center hover:bg-gray-700 dark:hover:bg-gray-200 transition-colors shadow-lg"
+            @click="player.togglePlay"
+          >
+            <PauseIcon v-if="player.isPlaying" :size="20" class="text-white dark:text-gray-900" />
+            <PlayIcon v-else :size="20" class="text-white dark:text-gray-900 ml-0.5" />
+          </button>
+
+          <!-- 下一首 -->
+          <button
+            class="p-2 rounded-lg text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
+            :class="{ 'opacity-30 cursor-not-allowed': !player.hasNext }"
+            :disabled="!player.hasNext"
+            @click="player.next"
+          >
+            <SkipForwardIcon :size="20" />
+          </button>
+        </div>
+
+        <!-- 进度条 -->
+        <div class="flex items-center gap-2 w-full max-w-xl">
+          <span class="text-gray-600 dark:text-gray-400 text-xs w-10 text-right">{{
+            formatTime(player.currentTime)
+          }}</span>
+          <input
+            type="range"
+            class="flex-1"
+            :min="0"
+            :max="player.duration || 0"
+            :value="player.currentTime"
+            step="0.1"
+            @input="onProgressInput"
+          />
+          <span class="text-gray-600 dark:text-gray-400 text-xs w-10">{{
+            formatTime(player.duration)
+          }}</span>
+        </div>
       </div>
-      <div v-else>
-        <p class="text-gray-500 dark:text-gray-500 text-sm">未选择歌曲</p>
-      </div>
-    </div>
 
-    <!-- 中：播放控制 -->
-    <div class="flex-1 flex flex-col items-center gap-2">
-      <!-- 控制按钮 -->
-      <div class="flex items-center gap-4">
-        <!-- 循环模式 -->
+      <!-- 右：音量控制 -->
+      <div class="flex items-center justify-end w-12 shrink-0">
+        <!-- 音量图标（SVG） -->
         <button
-          class="p-2 rounded-lg text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
-          :class="{ 'text-blue-500 dark:text-blue-400': player.loopMode !== 'none' }"
-          :title="loopModeLabels[player.loopMode]"
-          @click="player.toggleLoopMode"
+          ref="volumeIconRef"
+          class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
+          @click="toggleMute"
+          @mouseenter="handleVolumeIconEnter"
+          @mouseleave="handleVolumeIconLeave"
         >
-          <ShuffleIcon v-if="player.loopMode === 'shuffle'" :size="18" />
-          <RepeatOneIcon v-else-if="player.loopMode === 'single'" :size="18" />
-          <RepeatIcon v-else-if="player.loopMode === 'list'" :size="18" />
-          <ArrowRightIcon v-else :size="18" />
-        </button>
-
-        <!-- 上一首 -->
-        <button
-          class="p-2 rounded-lg text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
-          :class="{ 'opacity-30 cursor-not-allowed': !player.hasPrev }"
-          :disabled="!player.hasPrev"
-          @click="player.prev"
-        >
-          <SkipBackIcon :size="20" />
-        </button>
-
-        <!-- 播放/暂停 -->
-        <button
-          class="w-12 h-12 bg-gray-900 dark:bg-white rounded-full flex items-center justify-center hover:bg-gray-700 dark:hover:bg-gray-200 transition-colors shadow-lg"
-          @click="player.togglePlay"
-        >
-          <PauseIcon v-if="player.isPlaying" :size="20" class="text-white dark:text-gray-900" />
-          <PlayIcon v-else :size="20" class="text-white dark:text-gray-900 ml-0.5" />
-        </button>
-
-        <!-- 下一首 -->
-        <button
-          class="p-2 rounded-lg text-gray-900 dark:text-white hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
-          :class="{ 'opacity-30 cursor-not-allowed': !player.hasNext }"
-          :disabled="!player.hasNext"
-          @click="player.next"
-        >
-          <SkipForwardIcon :size="20" />
+          <svg
+            class="w-5 h-5 text-gray-900 dark:text-white"
+            viewBox="0 0 24 24"
+            fill="currentColor"
+          >
+            <!-- 静音图标 -->
+            <template v-if="player.volume === 0">
+              <path
+                d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.58-1.42 1.07-2.25 1.43v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"
+              />
+            </template>
+            <!-- 低音量图标 -->
+            <template v-else-if="player.volume < 0.5">
+              <path
+                d="M18.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM5 9v6h4l5 5V4L9 9H5z"
+              />
+            </template>
+            <!-- 高音量图标 -->
+            <template v-else>
+              <path
+                d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"
+              />
+            </template>
+          </svg>
         </button>
       </div>
+    </footer>
 
-      <!-- 进度条 -->
-      <div class="flex items-center gap-2 w-full max-w-xl">
-        <span class="text-gray-600 dark:text-gray-400 text-xs w-10 text-right">{{ formatTime(player.currentTime) }}</span>
-        <input
-          type="range"
-          class="flex-1"
-          :min="0"
-          :max="player.duration || 0"
-          :value="player.currentTime"
-          step="0.1"
-          @input="onProgressInput"
-        />
-        <span class="text-gray-600 dark:text-gray-400 text-xs w-10">{{ formatTime(player.duration) }}</span>
-      </div>
-    </div>
-
-    <!-- 右：音量控制 -->
-    <div class="flex items-center justify-end w-12 shrink-0">
-      <!-- 音量图标（SVG） -->
-      <button
-        ref="volumeIconRef"
-        class="p-2 rounded-lg hover:bg-gray-100 dark:hover:bg-gray-700 transition-colors"
-        @click="toggleMute"
-        @mouseenter="handleVolumeIconEnter"
-        @mouseleave="handleVolumeIconLeave"
-      >
-        <svg class="w-5 h-5 text-gray-900 dark:text-white" viewBox="0 0 24 24" fill="currentColor">
-          <!-- 静音图标 -->
-          <template v-if="player.volume === 0">
-            <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.58-1.42 1.07-2.25 1.43v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
-          </template>
-          <!-- 低音量图标 -->
-          <template v-else-if="player.volume < 0.5">
-            <path d="M18.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM5 9v6h4l5 5V4L9 9H5z"/>
-          </template>
-          <!-- 高音量图标 -->
-          <template v-else>
-            <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
-          </template>
-        </svg>
-      </button>
-    </div>
-  </footer>
-
-  <!-- autoplay 被拦截时的轻提示 -->
-  <Transition
-    enter-active-class="transition duration-200 ease-out"
-    enter-from-class="opacity-0 translate-y-2"
-    enter-to-class="opacity-100 translate-y-0"
-    leave-active-class="transition duration-150 ease-in"
-    leave-from-class="opacity-100 translate-y-0"
-    leave-to-class="opacity-0 translate-y-2"
-  >
-    <div
-      v-if="showAutoplayTip"
-      class="fixed bottom-28 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-gray-900/90 dark:bg-white/90 text-white dark:text-gray-900 text-sm rounded-lg shadow-lg pointer-events-none"
+    <!-- autoplay 被拦截时的轻提示 -->
+    <Transition
+      enter-active-class="transition duration-200 ease-out"
+      enter-from-class="opacity-0 translate-y-2"
+      enter-to-class="opacity-100 translate-y-0"
+      leave-active-class="transition duration-150 ease-in"
+      leave-from-class="opacity-100 translate-y-0"
+      leave-to-class="opacity-0 translate-y-2"
     >
-      点击播放按钮继续播放
-    </div>
-  </Transition>
+      <div
+        v-if="showAutoplayTip"
+        class="fixed bottom-28 left-1/2 -translate-x-1/2 z-50 px-4 py-2 bg-gray-900/90 dark:bg-white/90 text-white dark:text-gray-900 text-sm rounded-lg shadow-lg pointer-events-none"
+      >
+        点击播放按钮继续播放
+      </div>
+    </Transition>
 
-  <!-- 悬浮音量控制条 -->
-  <VolumeSlider
-    :visible="showVolumeSlider"
-    :position="volumeSliderPosition"
-    @close="closeVolumeControl"
-    @mouse-enter="handleMouseEnterSlider"
-    @mouse-leave="handleMouseLeaveSlider"
-  />
+    <!-- 悬浮音量控制条 -->
+    <VolumeSlider
+      :visible="showVolumeSlider"
+      :position="volumeSliderPosition"
+      @close="closeVolumeControl"
+      @mouse-enter="handleMouseEnterSlider"
+      @mouse-leave="handleMouseLeaveSlider"
+    />
   </div>
 </template>

@@ -4,7 +4,16 @@ import { useLibraryStore } from '@/stores/libraryStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useHistoryStore } from '@/stores/historyStore'
-import { ref, onMounted, onUnmounted, computed, nextTick, defineAsyncComponent, markRaw, watch } from 'vue'
+import {
+  ref,
+  onMounted,
+  onUnmounted,
+  computed,
+  nextTick,
+  defineAsyncComponent,
+  markRaw,
+  watch,
+} from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import Sidebar from '@/components/Sidebar.vue'
@@ -35,12 +44,20 @@ import { syncShortcutsToBackend } from '@/utils/syncShortcuts'
 const SettingsPanel = markRaw(defineAsyncComponent(() => import('@/components/SettingsPanel.vue')))
 const StatsPanel = markRaw(defineAsyncComponent(() => import('@/components/StatsPanel.vue')))
 const DownloadPanel = markRaw(defineAsyncComponent(() => import('@/components/DownloadPanel.vue')))
-const EqualizerPanel = markRaw(defineAsyncComponent(() => import('@/components/EqualizerPanel.vue')))
+const EqualizerPanel = markRaw(
+  defineAsyncComponent(() => import('@/components/EqualizerPanel.vue'))
+)
 const MemoryDrawer = markRaw(defineAsyncComponent(() => import('@/components/MemoryDrawer.vue')))
-const CreatePlaylistModal = markRaw(defineAsyncComponent(() => import('@/components/CreatePlaylistModal.vue')))
+const CreatePlaylistModal = markRaw(
+  defineAsyncComponent(() => import('@/components/CreatePlaylistModal.vue'))
+)
 const ConfirmDialog = markRaw(defineAsyncComponent(() => import('@/components/ConfirmDialog.vue')))
-const InputContextMenu = markRaw(defineAsyncComponent(() => import('@/components/InputContextMenu.vue')))
-const EditSongMetadata = markRaw(defineAsyncComponent(() => import('@/components/EditSongMetadata.vue')))
+const InputContextMenu = markRaw(
+  defineAsyncComponent(() => import('@/components/InputContextMenu.vue'))
+)
+const EditSongMetadata = markRaw(
+  defineAsyncComponent(() => import('@/components/EditSongMetadata.vue'))
+)
 
 const audio = useAudioStore()
 const library = useLibraryStore()
@@ -59,8 +76,35 @@ const miniWindowWidth = ref(640)
 const miniWindowHeight = ref(120)
 const isCompactMiniMode = computed(() => miniWindowWidth.value < 480)
 
+/** 右侧面板正在播放离开动画（用于把列宽留到 leave 结束，避免内容提前展开与面板重叠） */
+const rightPanelLeaving = ref(false)
+
+/*
+  右侧面板组件映射（null = 当前没有面板）。
+  此前这里是在模板里写五层嵌套三元 + 用 'div' 兜底，兜底的后果是：
+  关闭状态下动画槽位被一个空 div 占着，重新打开时得等它先走完 250ms 的 leave
+  面板才开始滑入 —— 那 250ms 就是"点了没反应"的顿感。
+*/
+const activeRightComponent = computed(() => {
+  switch (ui.activeRightPanel) {
+    case 'settings':
+      return SettingsPanel
+    case 'stats':
+      return StatsPanel
+    case 'download':
+      return DownloadPanel
+    case 'memory':
+      return MemoryDrawer
+    case 'equalizer':
+      return EqualizerPanel
+    default:
+      return null
+  }
+})
+
 let unlistenWindowShow: UnlistenFn | null = null
 let unlistenMigrate: UnlistenFn | null = null
+let unlistenScanComplete: UnlistenFn | null = null
 let hiddenTimer: ReturnType<typeof setTimeout> | null = null
 
 // 切换迷你模式
@@ -143,8 +187,22 @@ onMounted(async () => {
       void history.reloadFromDb()
     }
   })
-    .then((un) => { unlistenMigrate = un })
+    .then((un) => {
+      unlistenMigrate = un
+    })
     .catch((e) => console.warn('[App] 注册迁移进度监听失败:', e))
+
+  // 扫描补全封面/缩略图后同样需要重新拉取历史:
+  //   后端在封面文件缺失时会把该字段清空再下发, 而重扫正是把这些文件重新生成出来。
+  //   前端内存里的历史是启动时加载的那一份, 不重拉就会一直停在"封面已被清空"的状态,
+  //   表现为历史抽屉里部分条目明明曲库里封面正常、这里却是空白。
+  listen('scan:enrich-complete', () => {
+    void history.reloadFromDb()
+  })
+    .then((un) => {
+      unlistenScanComplete = un
+    })
+    .catch((e) => console.warn('[App] 注册扫描完成监听失败:', e))
 
   // 关键路径 2: 注册可见性监听 (轻量, 不阻塞)
   document.addEventListener('visibilitychange', handleVisibilityChange)
@@ -198,9 +256,12 @@ function handleVisibilityChange() {
     settings.pauseAllBackgroundAnimations()
     // 5 分钟后触发内存回收
     if (hiddenTimer) clearTimeout(hiddenTimer)
-    hiddenTimer = setTimeout(() => {
-      doCompactMemory()
-    }, 5 * 60 * 1000)
+    hiddenTimer = setTimeout(
+      () => {
+        doCompactMemory()
+      },
+      5 * 60 * 1000
+    )
   } else {
     // 清除隐藏超时定时器
     if (hiddenTimer) {
@@ -244,6 +305,7 @@ onUnmounted(() => {
   document.removeEventListener('freeze', handlePageFreeze as EventListener)
   unlistenWindowShow?.()
   unlistenMigrate?.()
+  unlistenScanComplete?.()
   resizeObserver?.disconnect()
   // 全局清理播放历史心跳定时器, 释放其对 AudioEngine / 历史项的闭包引用
   history.disposeHistory()
@@ -252,14 +314,21 @@ onUnmounted(() => {
 
 <template>
   <!-- 主容器：Flex 垂直布局 -->
-  <div 
-    class="flex flex-col bg-gradient-to-br from-gray-100 via-gray-50 to-gray-100 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 select-none overflow-hidden relative transition-all duration-300 ease-out"
+  <!--
+    这里刻意不再使用 transition-all:
+    根容器的 class 会在 h-screen / h-full 之间切换(迷你模式), 对根容器做
+    "所有属性" 过渡 = 每帧全应用重排; 窗口尺寸本身由 uiStore 的 rAF 动画负责,
+    CSS 侧再叠一层高度过渡只会与它打架。
+  -->
+  <div
+    class="flex flex-col bg-gradient-to-br from-gray-100 via-gray-50 to-gray-100 dark:from-gray-900 dark:via-gray-800 dark:to-gray-900 select-none overflow-hidden relative"
     :class="ui.isMiniMode ? 'h-full' : 'h-screen'"
   >
     <!-- 背景图片层 -->
     <div
       v-if="!ui.isMiniMode && settings.currentBackgroundUrl && settings.background.mode !== 'none'"
-      class="absolute inset-0 pointer-events-none"
+      class="background-layer absolute inset-0 pointer-events-none"
+      :class="{ 'is-adjusting': settings.backgroundAdjusting }"
       :style="{
         backgroundImage: `url(${settings.currentBackgroundUrl})`,
         backgroundSize: settings.background.fit === 'repeat' ? 'auto' : settings.background.fit,
@@ -312,7 +381,9 @@ onUnmounted(() => {
         >
           <div class="text-center max-w-md px-4">
             <div class="text-5xl mb-4">⚠️</div>
-            <p class="text-gray-900 dark:text-white text-sm leading-relaxed whitespace-pre-line">{{ autoLoadError }}</p>
+            <p class="text-gray-900 dark:text-white text-sm leading-relaxed whitespace-pre-line">
+              {{ autoLoadError }}
+            </p>
           </div>
         </div>
 
@@ -325,27 +396,54 @@ onUnmounted(() => {
         <ControlBar class="shrink-0" />
       </main>
 
-      <!-- 右侧面板：设置 / 统计 / 下载 / 回忆（互斥，挤压式） -->
-      <!-- 单一状态管理: ui.activeRightPanel 直接控制当前显示的面板 -->
-      <!-- 不使用 keep-alive 以节省内存, 低频面板每次打开重新渲染 -->
-      <Transition name="slide-fade" mode="out-in">
-        <component
-          :is="ui.activeRightPanel === 'settings' ? SettingsPanel
-              : ui.activeRightPanel === 'stats' ? StatsPanel
-              : ui.activeRightPanel === 'download' ? DownloadPanel
-              : ui.activeRightPanel === 'memory' ? MemoryDrawer
-              : ui.activeRightPanel === 'equalizer' ? EqualizerPanel
-              : 'div'"
-          :key="ui.activeRightPanel || 'none'"
-          class="shrink-0"
-        />
-      </Transition>
+      <!--
+        右侧面板：设置 / 统计 / 下载 / 回忆 / 均衡器（互斥，挤压式）
+        单一状态管理: ui.activeRightPanel 直接控制当前显示的面板
+        不使用 keep-alive 以节省内存, 低频面板每次打开重新渲染
+
+        结构改造（修复"面板切换时中间内容弹一下又缩回"）：
+        面板不再直接作为 flex 兄弟节点，而是放进一个"常驻列"，列内绝对定位。
+
+        原因：面板直接做 flex 兄弟时，out-in 过渡会在"旧面板离开结束"释放 320px、
+        又在"新面板进入开始"立刻占回 320px —— 中间内容因此瞬间右移再瞬间左移。
+        但五个右面板都是 320px，切换前后布局需求完全相同，根本不该动。
+
+        改完以后的三种情形：
+          - 面板之间切换：列宽恒为 20rem，中间内容一帧都不动；
+          - 打开：列宽立刻给到 20rem（同时面板开始滑入），内容一次性让位；
+          - 关闭：列宽由 rightPanelLeaving 留住，直到 leave 结束才归零，
+            所以内容是在面板滑走之后才展开，不会和面板重叠。
+      -->
+      <div
+        class="right-panel-column relative shrink-0"
+        :class="{ 'is-open': !!ui.activeRightPanel || rightPanelLeaving }"
+      >
+        <Transition
+          name="slide-fade"
+          mode="out-in"
+          @before-leave="rightPanelLeaving = true"
+          @after-leave="rightPanelLeaving = false"
+        >
+          <component
+            v-if="activeRightComponent"
+            :is="activeRightComponent"
+            :key="ui.activeRightPanel || 'none'"
+            class="absolute inset-y-0 right-0"
+          />
+        </Transition>
+      </div>
     </div>
 
     <!-- 迷你模式 -->
-    <div v-if="ui.isMiniMode" class="flex flex-col w-full min-h-screen bg-white/90 dark:bg-gray-900/90 backdrop-blur">
+    <div
+      v-if="ui.isMiniMode"
+      class="flex flex-col w-full min-h-screen bg-white/90 dark:bg-gray-900/90 backdrop-blur"
+    >
       <!-- 自定义标题栏：36px -->
-      <div style="height: 36px" class="shrink-0 flex items-center px-3 border-b border-gray-200/50 dark:border-gray-700/50">
+      <div
+        style="height: 36px"
+        class="shrink-0 flex items-center px-3 border-b border-gray-200/50 dark:border-gray-700/50"
+      >
         <!-- 左侧：应用名（可拖拽） -->
         <div class="flex-1 flex items-center h-full" data-tauri-drag-region>
           <span class="text-sm text-gray-700 dark:text-gray-300 font-medium">高山流水</span>
@@ -358,7 +456,14 @@ onUnmounted(() => {
             title="最小化"
             @click="minimizeWindow"
           >
-            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <svg
+              class="w-3.5 h-3.5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+            >
               <path d="M5 12h14"></path>
             </svg>
           </button>
@@ -376,7 +481,14 @@ onUnmounted(() => {
             title="关闭"
             @click="closeWindow"
           >
-            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+            <svg
+              class="w-3.5 h-3.5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2"
+              stroke-linecap="round"
+            >
               <path d="M18 6 6 18"></path>
               <path d="m6 6 12 12"></path>
             </svg>
@@ -389,8 +501,10 @@ onUnmounted(() => {
         <!-- 上半部分：左侧封面信息 + 中间控制按钮 + 右侧音量（横向布局） -->
         <div class="flex-1 flex items-center px-4 gap-4 min-h-0">
           <!-- 左侧：封面 + 歌曲信息 -->
-          <div class="flex items-center gap-3 shrink-0 min-w-0"
-               :style="isCompactMiniMode ? 'max-width: 180px;' : ''">
+          <div
+            class="flex items-center gap-3 shrink-0 min-w-0"
+            :style="isCompactMiniMode ? 'max-width: 180px;' : ''"
+          >
             <!-- 封面 -->
             <div class="w-12 h-12 rounded-lg bg-gray-200 dark:bg-gray-700 shrink-0 overflow-hidden">
               <img
@@ -400,7 +514,10 @@ onUnmounted(() => {
                 class="w-full h-full object-cover"
                 @error="onCoverError"
               />
-              <div v-else class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500">
+              <div
+                v-else
+                class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500"
+              >
                 <MusicIcon :size="18" />
               </div>
             </div>
@@ -421,7 +538,15 @@ onUnmounted(() => {
             <button
               class="w-7 h-7 flex items-center justify-center rounded-md text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
               :class="{ 'text-blue-500 dark:text-blue-400': audio.loopMode !== 'none' }"
-              :title="audio.loopMode === 'list' ? '列表循环' : audio.loopMode === 'single' ? '单曲循环' : audio.loopMode === 'shuffle' ? '随机播放' : '顺序播放'"
+              :title="
+                audio.loopMode === 'list'
+                  ? '列表循环'
+                  : audio.loopMode === 'single'
+                    ? '单曲循环'
+                    : audio.loopMode === 'shuffle'
+                      ? '随机播放'
+                      : '顺序播放'
+              "
               @click="audio.toggleLoopMode"
             >
               <ShuffleIcon v-if="audio.loopMode === 'shuffle'" :size="14" />
@@ -462,15 +587,25 @@ onUnmounted(() => {
 
           <!-- 右侧：音量控制（弹性宽度） -->
           <div class="flex items-center gap-2 shrink-0 w-40">
-            <svg class="w-4 h-4 text-gray-900 dark:text-gray-100 shrink-0" viewBox="0 0 24 24" fill="currentColor">
+            <svg
+              class="w-4 h-4 text-gray-900 dark:text-gray-100 shrink-0"
+              viewBox="0 0 24 24"
+              fill="currentColor"
+            >
               <template v-if="audio.volume === 0">
-                <path d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.58-1.42 1.07-2.25 1.43v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"/>
+                <path
+                  d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.58-1.42 1.07-2.25 1.43v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"
+                />
               </template>
               <template v-else-if="audio.volume < 0.5">
-                <path d="M18.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM5 9v6h4l5 5V4L9 9H5z"/>
+                <path
+                  d="M18.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM5 9v6h4l5 5V4L9 9H5z"
+                />
               </template>
               <template v-else>
-                <path d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"/>
+                <path
+                  d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"
+                />
               </template>
             </svg>
             <input
@@ -480,7 +615,11 @@ onUnmounted(() => {
               :max="1"
               step="0.01"
               :value="audio.volume"
-              @input="(e) => { audio.volume = parseFloat((e.target as HTMLInputElement).value) }"
+              @input="
+                (e) => {
+                  audio.volume = parseFloat((e.target as HTMLInputElement).value)
+                }
+              "
             />
 
             <!-- 新增：显示具体的音量值 -->
@@ -492,7 +631,10 @@ onUnmounted(() => {
 
         <!-- 下半部分：进度条（带时间显示），跨整个宽度 -->
         <div class="flex items-center px-4 gap-2 shrink-0" :style="'height: 30px;'">
-          <span class="text-gray-500 dark:text-gray-400 text-xs w-9 text-right shrink-0 tabular-nums">{{ formatTime(audio.currentTime) }}</span>
+          <span
+            class="text-gray-500 dark:text-gray-400 text-xs w-9 text-right shrink-0 tabular-nums"
+            >{{ formatTime(audio.currentTime) }}</span
+          >
           <input
             type="range"
             class="flex-1 min-w-0"
@@ -500,13 +642,17 @@ onUnmounted(() => {
             :max="audio.duration || 0"
             :value="audio.currentTime"
             step="0.1"
-            @input="(e) => {
-              const time = parseFloat((e.target as HTMLInputElement).value)
-              audio.seekTo(time)
-              audio.currentTime = time
-            }"
+            @input="
+              (e) => {
+                const time = parseFloat((e.target as HTMLInputElement).value)
+                audio.seekTo(time)
+                audio.currentTime = time
+              }
+            "
           />
-          <span class="text-gray-500 dark:text-gray-400 text-xs w-9 shrink-0 tabular-nums">{{ formatTime(audio.duration) }}</span>
+          <span class="text-gray-500 dark:text-gray-400 text-xs w-9 shrink-0 tabular-nums">{{
+            formatTime(audio.duration)
+          }}</span>
         </div>
       </div>
     </div>
@@ -537,26 +683,80 @@ onUnmounted(() => {
 </template>
 
 <style>
-/* 右侧滑入滑出动画（设置、统计面板） */
-.slide-fade-enter-active {
-  transition: all 0.3s ease-out;
+/*
+  拖动"模糊程度 / 缩放比例"滑杆期间，背景图层临时上合成层：
+  这是全屏尺寸 + filter: blur() 的一层，不提升时每次改参数都要在主线程
+  重新栅格化整屏；提升后变化交给合成线程处理。松手后标记清除、层被回收，
+  不会长期占着一张全屏纹理（4K 下就是几十 MB）。
+*/
+.background-layer.is-adjusting {
+  will-change: transform, filter;
 }
-.slide-fade-leave-active {
-  transition: all 0.25s ease-in;
+
+/*
+  右侧面板的常驻列。
+  宽度只在"有没有面板"这一层变化：面板之间切换时恒为 20rem，
+  也就是切换前后布局需求完全一致 —— 这是"中间内容弹一下又缩回"的根因修复。
+
+  宽度本身刻意不做过渡：
+    1. 与左侧保持一致的一次性到位手感；
+    2. 若给 width 加 CSS 过渡，它会和面板的 enter 过渡错开约 2 个 rAF
+       （Vue 要等两帧才移除 enter-from 真正开始位移），反而会在开头露出一条缝。
+  关闭时靠 rightPanelLeaving 把列宽留住到 leave 结束，因此内容是在面板滑走之后
+  才展开，面板不会和展开后的内容重叠。
+
+  两点注意：
+    1. 20rem 必须与面板自身的 w-80 一致；
+    2. 不要给这一列加 overflow-hidden —— 会把面板的 shadow-2xl 一起裁掉。
+*/
+.right-panel-column {
+  width: 0;
 }
+
+.right-panel-column.is-open {
+  width: 20rem;
+}
+
+/*
+  抽屉滑入滑出动画（设置 / 统计 / 下载 / 回忆 / 均衡器 / 侧边栏 / 历史）
+
+  改造点：
+  1. 原来的 `transition: all` 会把 transform / opacity 之外的一切可动画属性
+     都纳入过渡（含 width / height / 背景等），任何一次无关重渲染都可能被
+     莫名其妙地"补间"一帧，也阻止了浏览器按已知属性做优化。
+     现在显式声明 transform + opacity。
+  2. 抽屉面板带 backdrop-filter，位移时 backdrop 需要逐帧重算 —— 这是本应用
+     最贵的一段过渡。在过渡期间加 will-change: transform 让浏览器提前把它提升为
+     合成层（只在动画期间付这份显存，结束后由浏览器回收）。
+  3. 时长/缓动改走 main.css 里的 --motion-* 令牌，左右抽屉手感一致。
+*/
+.slide-fade-enter-active,
+.slide-left-fade-enter-active {
+  transition:
+    transform var(--motion-duration-drawer) var(--motion-ease-out),
+    opacity var(--motion-duration-base) var(--motion-ease-out);
+}
+
+.slide-fade-leave-active,
+.slide-left-fade-leave-active {
+  transition:
+    transform 250ms var(--motion-ease-in),
+    opacity var(--motion-duration-fast) var(--motion-ease-in);
+}
+
+.slide-fade-enter-active,
+.slide-fade-leave-active,
+.slide-left-fade-enter-active,
+.slide-left-fade-leave-active {
+  will-change: transform, opacity;
+}
+
 .slide-fade-enter-from,
 .slide-fade-leave-to {
   transform: translateX(100%);
   opacity: 0;
 }
 
-/* 左侧滑入滑出动画（侧边栏、历史记录） */
-.slide-left-fade-enter-active {
-  transition: all 0.3s ease-out;
-}
-.slide-left-fade-leave-active {
-  transition: all 0.25s ease-in;
-}
 .slide-left-fade-enter-from,
 .slide-left-fade-leave-to {
   transform: translateX(-100%);

@@ -4,28 +4,28 @@
 mod commands;
 mod models;
 
+use commands::app_config;
+use commands::data_dir;
 use commands::db;
-use commands::scan_folder;
-use commands::toggle_mini_mode;
-use commands::global_shortcut;
-use commands::scan_images;
-use commands::tray;
 use commands::download_bilibili;
-use commands::webview_memory;
+use commands::export;
+use commands::global_shortcut;
+use commands::history;
+use commands::loudnorm;
 use commands::memories;
 use commands::migrate;
 use commands::playlist;
-use commands::export;
-use commands::history;
-use commands::app_config;
-use commands::data_dir;
+use commands::scan_folder;
+use commands::scan_images;
 use commands::song;
-use commands::loudnorm;
+use commands::toggle_mini_mode;
+use commands::tray;
+use commands::webview_memory;
 use tauri_plugin_media::MediaExt;
 
 use std::sync::Mutex;
-use tauri::Manager;
 use tauri::Emitter;
+use tauri::Manager;
 
 pub struct AppSettings {
     pub minimize_to_tray: Mutex<bool>,
@@ -62,7 +62,7 @@ fn main() {
         .manage(AppSettings::default())
         .setup(|app| {
             // 初始化系统托盘
-            if let Err(e) = tray::init_tray(&app.handle()) {
+            if let Err(e) = tray::init_tray(app.handle()) {
                 eprintln!("初始化系统托盘失败: {}", e);
             }
 
@@ -72,12 +72,12 @@ fn main() {
             }
 
             // 初始化数据目录 (必须在数据库之前，因为 db_path 依赖 data_dir)
-            if let Err(e) = data_dir::init_data_dir(&app.handle()) {
+            if let Err(e) = data_dir::init_data_dir(app.handle()) {
                 eprintln!("[data_dir] 初始化数据目录失败，使用默认目录: {}", e);
             }
 
             // 初始化数据库 (所有表统一在一个连接中创建)
-            if let Err(e) = db::init_db(&app.handle(), |conn| {
+            if let Err(e) = db::init_db(app.handle(), |conn| {
                 app_config::init_schema(conn)?;
                 memories::init_schema(conn)?;
                 migrate::init_schema(conn)?;
@@ -86,6 +86,26 @@ fn main() {
                 Ok(())
             }) {
                 eprintln!("[db] 初始化数据库失败, 相关功能将不可用: {}", e);
+            }
+
+            // 启动自愈: 修复数据目录迁移后残留的失效封面路径
+            // (迁移代码已保证新迁移不再产生失效路径, 这里负责修复存量损坏数据)
+            match db::with_conn(data_dir::repair_stale_cover_paths) {
+                Ok(count) if count > 0 => {
+                    eprintln!("[data_dir] 已修复 {} 条失效的封面路径", count);
+                }
+                Ok(_) => {}
+                Err(e) => eprintln!("[data_dir] 封面路径自愈失败: {}", e),
+            }
+
+            // 启动回填: 把历史记录里的歌曲标识从路径哈希改为内容指纹
+            // (旧写入端存的是 Song.id, 与 songs.song_hash 不是同一套标识)
+            match db::with_conn(history::backfill_song_hash_from_path) {
+                Ok(count) if count > 0 => {
+                    eprintln!("[history] 已回填 {} 条历史记录的歌曲指纹", count);
+                }
+                Ok(_) => {}
+                Err(e) => eprintln!("[history] 歌曲指纹回填失败: {}", e),
             }
 
             // 注册媒体控制事件回调 (将系统媒体按键事件转发到前端)
@@ -129,11 +149,8 @@ fn main() {
             download_bilibili::parse_bilibili_url,
             download_bilibili::download_bilibili_music,
             download_bilibili::read_batch_file,
-            // 2026-07-14: WebView2 内存优化 (强制 GC + 渲染进程挂起)
+            // 2026-07-14: WebView2 内存优化 (切歌时主动触发一次 major GC)
             webview_memory::clean_renderer_memory,
-            webview_memory::try_suspend_renderer,
-            webview_memory::try_resume_renderer,
-            webview_memory::is_renderer_suspended,
             // Memory feature - 高山流水 v1.1: 回忆 CRUD + 导出
             memories::get_memory,
             memories::save_memory,
@@ -143,6 +160,7 @@ fn main() {
             // 迁移 + 元数据修正
             migrate::reset_migration,
             migrate::update_song_metadata,
+            migrate::set_song_favorite,
             // 虚拟歌单
             playlist::get_all_playlists,
             playlist::create_playlist,

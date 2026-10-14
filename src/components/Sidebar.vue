@@ -35,11 +35,14 @@ const useVirtualList = computed(() => library.filteredActivePlaylistSongs.length
 </script>
 
 <template>
-  <aside class="w-80 backdrop-blur border-r border-gray-200/50 dark:border-gray-700/50 flex flex-col h-full will-change-auto" :class="
-    settings.currentBackgroundUrl && settings.background.mode !== 'none'
-      ? 'bg-white/30 dark:bg-gray-900/30'
-      : 'bg-white/80 dark:bg-gray-800/50'
-  ">
+  <aside
+    class="w-80 backdrop-blur border-r border-gray-200/50 dark:border-gray-700/50 flex flex-col h-full"
+    :class="
+      settings.currentBackgroundUrl && settings.background.mode !== 'none'
+        ? 'bg-white/30 dark:bg-gray-900/30'
+        : 'bg-white/80 dark:bg-gray-800/50'
+    "
+  >
     <div class="p-4 border-b border-gray-200/50 dark:border-gray-700/50">
       <div class="flex items-center justify-between">
         <h2 class="text-gray-900 dark:text-white text-lg font-semibold">歌单</h2>
@@ -59,15 +62,13 @@ const useVirtualList = computed(() => library.filteredActivePlaylistSongs.length
       </div>
 
       <div class="p-2 space-y-0.5 flex-1 min-h-0 overflow-y-auto">
-        <div class="px-3 py-1.5 text-xs text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wider">
+        <div
+          class="px-3 py-1.5 text-xs text-gray-400 dark:text-gray-500 font-medium uppercase tracking-wider"
+        >
           我的歌单
         </div>
         <template v-if="library.customPlaylists.length > 0">
-          <CustomPlaylist
-            v-for="pl in library.customPlaylists"
-            :key="pl.id"
-            :playlist="pl"
-          />
+          <CustomPlaylist v-for="pl in library.customPlaylists" :key="pl.id" :playlist="pl" />
         </template>
         <div v-else class="px-3 py-2 text-xs text-gray-400 dark:text-gray-500">
           点击右上角 + 创建歌单
@@ -75,11 +76,15 @@ const useVirtualList = computed(() => library.filteredActivePlaylistSongs.length
       </div>
     </div>
 
-    <div class="border-t border-gray-200/50 dark:border-gray-700/50 flex-1 min-h-0 overflow-hidden flex flex-col">
+    <div
+      class="border-t border-gray-200/50 dark:border-gray-700/50 flex-1 min-h-0 overflow-hidden flex flex-col"
+    >
       <div class="px-3 py-2 border-b border-gray-200/50 dark:border-gray-700/50">
         <div class="flex items-center justify-between mb-2">
           <h3 class="text-sm font-medium text-gray-700 dark:text-gray-300 truncate">
-            {{ library.playlists.find(p => p.id === library.activePlaylistId)?.name || '歌曲列表' }}
+            {{
+              library.playlists.find((p) => p.id === library.activePlaylistId)?.name || '歌曲列表'
+            }}
           </h3>
           <span class="text-xs text-gray-400 dark:text-gray-500">
             {{ library.activePlaylistSongs.length }} 首
@@ -111,7 +116,15 @@ const useVirtualList = computed(() => library.filteredActivePlaylistSongs.length
             title="清除搜索"
             @click="library.searchQuery = ''"
           >
-            <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <svg
+              class="w-3.5 h-3.5"
+              viewBox="0 0 24 24"
+              fill="none"
+              stroke="currentColor"
+              stroke-width="2.5"
+              stroke-linecap="round"
+              stroke-linejoin="round"
+            >
               <line x1="18" y1="6" x2="6" y2="18"></line>
               <line x1="6" y1="6" x2="18" y2="18"></line>
             </svg>
@@ -148,7 +161,10 @@ const useVirtualList = computed(() => library.filteredActivePlaylistSongs.length
             />
           </template>
         </template>
-        <div v-else class="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-400 text-sm">
+        <div
+          v-else
+          class="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-400 text-sm"
+        >
           <template v-if="library.searchQuery.trim()">
             <p>没有找到匹配的歌曲</p>
           </template>

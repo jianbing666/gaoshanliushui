@@ -28,9 +28,8 @@ pnpm-debug.log*
 # Rust build output
 src-tauri/target/
 
-# Cargo lock file (for applications, usually safe to ignore)
-# For libraries, you should commit Cargo.lock
-src-tauri/Cargo.lock
+# 注意: src-tauri/Cargo.lock 应当纳入版本控制
+# 这是应用 (非库), 提交 lock 文件才能保证任何人克隆后构建出完全一致的依赖树
 
 # Tauri build artifacts
 src-tauri/WixTools/
@@ -92,4 +91,11 @@ mp4-test/
 *.sln
 *.sw?
 
+# ==================== Documentation ====================
+# 只忽略临时笔记, 正式项目文档必须纳入版本控制
+# 说明: 这里保留 *.md 的通配忽略, 再用取反规则放行根目录下的项目文档,
+#       这样新增的临时 md 默认不入库, 而正式文档需要显式登记 (见下方)
 *.md
+!/项目介绍.md
+!/综合性能评估报告.md
+!/优化方案.md

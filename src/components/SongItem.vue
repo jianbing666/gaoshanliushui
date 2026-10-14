@@ -5,6 +5,7 @@ import { useAudioStore } from '@/stores/audioStore'
 import { formatTime } from '@/utils/formatTime'
 import type { Song } from '@/types/song'
 import { computed } from 'vue'
+import HeartIcon from '@/components/icons/HeartIcon.vue'
 
 const library = useLibraryStore()
 const ui = useUIStore()
@@ -52,9 +53,7 @@ function onCoverError(e: Event) {
   <div
     class="flex items-center gap-3 px-3 rounded-lg cursor-pointer transition-colors hover:bg-gray-100/50 dark:hover:bg-white/10 group w-full max-w-full"
     :class="[
-      fillHeight
-        ? 'h-full'
-        : (compact ? 'h-9' : 'h-14'),
+      fillHeight ? 'h-full' : compact ? 'h-9' : 'h-14',
       isCurrentSong ? 'bg-gray-100/50 dark:bg-white/10' : '',
     ]"
     @click="emit('play', index)"
@@ -95,16 +94,13 @@ function onCoverError(e: Event) {
       <p
         :class="[
           compact ? 'text-xs' : 'text-sm',
-          isCurrentSong ? 'text-blue-500 dark:text-blue-400' : 'text-gray-900 dark:text-white'
+          isCurrentSong ? 'text-blue-500 dark:text-blue-400' : 'text-gray-900 dark:text-white',
         ]"
         class="truncate font-medium"
       >
         {{ song.title }}
       </p>
-      <p
-        v-if="!compact"
-        class="text-xs text-gray-600 dark:text-gray-400 truncate"
-      >
+      <p v-if="!compact" class="text-xs text-gray-600 dark:text-gray-400 truncate">
         {{ song.artist || '未知艺术家' }}
       </p>
     </div>
@@ -112,5 +108,20 @@ function onCoverError(e: Event) {
     <span v-if="!compact" class="text-xs text-gray-500 dark:text-gray-500 shrink-0">
       {{ formatTime(song.duration) }}
     </span>
+
+    <!-- 喜爱: 默认隐藏, 悬停或已喜爱时显示 -->
+    <button
+      v-if="!compact"
+      class="p-1.5 rounded-md shrink-0 transition-all"
+      :class="
+        song.favorite
+          ? 'text-rose-500 dark:text-rose-400'
+          : 'text-gray-400 dark:text-gray-500 opacity-0 group-hover:opacity-100 hover:text-rose-500 dark:hover:text-rose-400'
+      "
+      :title="song.favorite ? '取消喜爱' : '喜爱'"
+      @click.stop="library.toggleSongFavorite(song)"
+    >
+      <HeartIcon :size="15" :filled="!!song.favorite" />
+    </button>
   </div>
 </template>

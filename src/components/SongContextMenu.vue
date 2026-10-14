@@ -7,6 +7,7 @@ import ChevronLeftIcon from '@/components/icons/ChevronLeftIcon.vue'
 import PlusIcon from '@/components/icons/PlusIcon.vue'
 import TrashIcon from '@/components/icons/TrashIcon.vue'
 import FolderIcon from '@/components/icons/FolderIcon.vue'
+import HeartIcon from '@/components/icons/HeartIcon.vue'
 import { invoke } from '@tauri-apps/api/core'
 
 const ui = useUIStore()
@@ -91,6 +92,15 @@ function createAndAddToPlaylist() {
     nextTick(() => {
       ui.openCreatePlaylistModal(songId)
     })
+  }
+}
+
+/** 切换喜爱标记 (智能随机的权重信号) */
+function toggleFavorite() {
+  const song = ui.contextMenu.song
+  closeMenu()
+  if (song) {
+    void library.toggleSongFavorite(song)
   }
 }
 
@@ -188,7 +198,7 @@ onUnmounted(() => {
       class="p-1.5"
       :class="{
         'animate-menu-slide-right': menuMode === 'main',
-        'hidden': menuMode !== 'main',
+        hidden: menuMode !== 'main',
       }"
     >
       <button
@@ -200,6 +210,18 @@ onUnmounted(() => {
           <span>添加到歌单</span>
         </div>
         <ChevronRightIcon :size="14" class="text-gray-400" />
+      </button>
+
+      <button
+        class="w-full px-3 py-2 rounded-lg text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 flex items-center gap-2 transition-colors"
+        @click="toggleFavorite"
+      >
+        <HeartIcon
+          :size="14"
+          :filled="!!ui.contextMenu.song.favorite"
+          :class="ui.contextMenu.song.favorite ? 'text-rose-500' : 'text-gray-400'"
+        />
+        <span>{{ ui.contextMenu.song.favorite ? '取消喜爱' : '喜爱' }}</span>
       </button>
 
       <template v-if="!isDefaultPlaylist && ui.contextMenu.playlistId">
@@ -241,7 +263,7 @@ onUnmounted(() => {
       class="p-1.5"
       :class="{
         'animate-menu-slide-left': menuMode === 'add',
-        'hidden': menuMode !== 'add',
+        hidden: menuMode !== 'add',
       }"
     >
       <button
@@ -260,18 +282,23 @@ onUnmounted(() => {
             v-for="pl in library.customPlaylists"
             :key="pl.id"
             class="w-full px-3 py-2 rounded-lg text-left text-sm hover:bg-gray-100 dark:hover:bg-gray-700/60 flex items-center justify-between gap-2 transition-colors"
-            :class="playlistMembership[pl.id]
-              ? 'text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-900/10'
-              : 'text-gray-700 dark:text-gray-300'"
+            :class="
+              playlistMembership[pl.id]
+                ? 'text-blue-600 dark:text-blue-400 bg-blue-50/50 dark:bg-blue-900/10'
+                : 'text-gray-700 dark:text-gray-300'
+            "
             @click="addToPlaylist(pl.id)"
           >
             <div class="flex items-center gap-2 min-w-0">
-              <FolderIcon :size="14" :class="playlistMembership[pl.id] ? 'text-blue-500 shrink-0' : 'text-amber-500 shrink-0'" />
+              <FolderIcon
+                :size="14"
+                :class="
+                  playlistMembership[pl.id] ? 'text-blue-500 shrink-0' : 'text-amber-500 shrink-0'
+                "
+              />
               <span class="truncate">{{ pl.name }}</span>
             </div>
-            <span v-if="playlistMembership[pl.id]" class="shrink-0 text-xs">
-              已添加
-            </span>
+            <span v-if="playlistMembership[pl.id]" class="shrink-0 text-xs"> 已添加 </span>
           </button>
         </template>
 
@@ -296,7 +323,7 @@ onUnmounted(() => {
       class="p-1.5"
       :class="{
         'animate-menu-slide-left': menuMode === 'move',
-        'hidden': menuMode !== 'move',
+        hidden: menuMode !== 'move',
       }"
     >
       <button
@@ -310,9 +337,15 @@ onUnmounted(() => {
       <div class="h-px bg-gray-200/60 dark:bg-gray-700/60 my-1"></div>
 
       <div class="max-h-56 overflow-y-auto">
-        <template v-if="library.customPlaylists.filter(pl => pl.id !== ui.contextMenu.playlistId).length > 0">
+        <template
+          v-if="
+            library.customPlaylists.filter((pl) => pl.id !== ui.contextMenu.playlistId).length > 0
+          "
+        >
           <button
-            v-for="pl in library.customPlaylists.filter(pl => pl.id !== ui.contextMenu.playlistId)"
+            v-for="pl in library.customPlaylists.filter(
+              (pl) => pl.id !== ui.contextMenu.playlistId
+            )"
             :key="pl.id"
             class="w-full px-3 py-2 rounded-lg text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 flex items-center gap-2 transition-colors"
             @click="moveToPlaylist(pl.id)"

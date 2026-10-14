@@ -33,7 +33,7 @@ export async function saveMemory(
   songHash: string,
   songPath: string,
   shortTags: string[],
-  longText: string,
+  longText: string
 ): Promise<MemoryRecord | null> {
   if (!songHash) return null
   try {
@@ -73,7 +73,7 @@ export async function exportMemory(
   songHash: string,
   songTitle: string,
   songArtist: string,
-  outputDir?: string,
+  outputDir?: string
 ): Promise<string | null> {
   if (!songHash) return null
   try {

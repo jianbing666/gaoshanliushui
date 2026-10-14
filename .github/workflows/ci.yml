@@ -1,0 +1,62 @@
+name: CI
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  # 前端: 类型 / 风格 / 单测 / 构建
+  frontend:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装依赖
+        run: npm ci
+
+      - name: 类型检查
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: 格式检查
+        run: npm run format:check
+
+      - name: 单元测试
+        run: npm test
+
+      - name: 构建前端产物
+        run: npx vite build
+
+  # Rust 侧: 格式 / Clippy / 单测
+  #
+  # 跑在 Windows 上: 项目依赖 src-tauri/binaries 下的 ffmpeg sidecar,
+  # 且 Tauri 在 Linux 上还需要额外安装 webkit2gtk 等系统库。
+  rust:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          components: rustfmt, clippy
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri
+
+      - name: 格式检查
+        run: cargo fmt --manifest-path src-tauri/Cargo.toml --check
+
+      - name: Clippy
+        run: cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets -- -D warnings
+
+      - name: 单元测试
+        run: cargo test --manifest-path src-tauri/Cargo.toml

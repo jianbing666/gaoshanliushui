@@ -71,9 +71,11 @@ export function useShortcutConfig() {
       if (saved) {
         const savedConfigs = JSON.parse(saved) as ShortcutConfig[]
         // 合并默认配置和保存的配置
-        shortcuts.value = defaultShortcuts.map(defaultItem => {
-          const savedItem = savedConfigs.find(s => s.id === defaultItem.id)
-          return savedItem ? { ...defaultItem, currentShortcut: savedItem.currentShortcut } : defaultItem
+        shortcuts.value = defaultShortcuts.map((defaultItem) => {
+          const savedItem = savedConfigs.find((s) => s.id === defaultItem.id)
+          return savedItem
+            ? { ...defaultItem, currentShortcut: savedItem.currentShortcut }
+            : defaultItem
         })
       } else {
         shortcuts.value = [...defaultShortcuts]
@@ -117,7 +119,7 @@ export function useShortcutConfig() {
     try {
       // 检查快捷键冲突
       const conflict = shortcuts.value.find(
-        s => s.id !== shortcutId && s.currentShortcut === newShortcut
+        (s) => s.id !== shortcutId && s.currentShortcut === newShortcut
       )
       if (conflict) {
         alert(`快捷键冲突：已用于"${conflict.action}"`)
@@ -137,7 +139,7 @@ export function useShortcutConfig() {
       }
 
       // 更新本地状态
-      const index = shortcuts.value.findIndex(s => s.id === shortcutId)
+      const index = shortcuts.value.findIndex((s) => s.id === shortcutId)
       if (index !== -1) {
         shortcuts.value[index].currentShortcut = newShortcut
         saveShortcuts()
@@ -157,7 +159,7 @@ export function useShortcutConfig() {
    * 恢复默认快捷键
    */
   function resetToDefault(shortcutId: string) {
-    const index = shortcuts.value.findIndex(s => s.id === shortcutId)
+    const index = shortcuts.value.findIndex((s) => s.id === shortcutId)
     if (index !== -1) {
       shortcuts.value[index].currentShortcut = shortcuts.value[index].defaultShortcut
       saveShortcuts()
@@ -169,7 +171,7 @@ export function useShortcutConfig() {
    * 把 currentShortcut 设为空字符串, 后端会取消该快捷键的注册
    */
   async function clearShortcut(shortcutId: string) {
-    const index = shortcuts.value.findIndex(s => s.id === shortcutId)
+    const index = shortcuts.value.findIndex((s) => s.id === shortcutId)
     if (index === -1) return
     const empty = ''
     // 通知后端注销快捷键 (newShortcut = '' 表示禁用)
@@ -187,7 +189,7 @@ export function useShortcutConfig() {
    * 恢复所有默认快捷键
    */
   function resetAllToDefault() {
-    shortcuts.value = shortcuts.value.map(s => ({
+    shortcuts.value = shortcuts.value.map((s) => ({
       ...s,
       currentShortcut: s.defaultShortcut,
     }))

@@ -7,16 +7,16 @@ export default defineConfig({
   plugins: [vue()],
   resolve: {
     alias: {
-      '@': resolve(__dirname, 'src')
-    }
+      '@': resolve(__dirname, 'src'),
+    },
   },
   clearScreen: false,
   server: {
     port: 1420,
     strictPort: true,
     watch: {
-      ignored: ['**/src-tauri/**']
-    }
+      ignored: ['**/src-tauri/**'],
+    },
   },
   envPrefix: ['VITE_', 'TAURI_'],
   build: {
@@ -30,6 +30,9 @@ export default defineConfig({
         manualChunks(id) {
           if (id.includes('node_modules')) {
             if (id.includes('@tauri-apps')) return 'tauri-api'
+            // marked 只被异步的 MemoryDrawer 使用: 不进 vendor, 让它随该 chunk 按需加载,
+            // 否则整个 38KB 会被静态引入的 vendor 拖进启动关键路径.
+            if (id.includes('/node_modules/marked/')) return
             if (id.includes('pinia')) return 'pinia'
             if (id.includes('@vue') || id.includes('/vue/')) return 'vue'
             return 'vendor'
@@ -37,5 +40,5 @@ export default defineConfig({
         },
       },
     },
-  }
+  },
 })

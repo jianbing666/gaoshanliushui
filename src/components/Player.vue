@@ -27,7 +27,7 @@ const settings = useSettingsStore()
         <div
           v-if="library.currentSong"
           class="absolute left-1/2 -translate-x-1/2 z-10 w-96"
-          style="top: -120px;"
+          style="top: -120px"
         >
           <MemoryMarquee />
         </div>
@@ -37,7 +37,7 @@ const settings = useSettingsStore()
              极致性能: 后 3 种场景下让 CPU/GPU 进入空闲, 避免空转 -->
         <div
           class="relative mx-auto w-64 h-64 rounded-full shadow-2xl overflow-hidden cover-rotating"
-          :class="{ 'paused': !audio.isPlaying || settings.spectrumPaused }"
+          :class="{ paused: !audio.isPlaying || settings.spectrumPaused }"
         >
           <img
             v-if="library.currentSong.cover_path"
@@ -52,9 +52,7 @@ const settings = useSettingsStore()
             <span class="text-6xl text-white/50">♪</span>
           </div>
           <!-- 黑胶唱片中心 -->
-          <div
-            class="absolute inset-0 flex items-center justify-center pointer-events-none"
-          >
+          <div class="absolute inset-0 flex items-center justify-center pointer-events-none">
             <div class="w-12 h-12 bg-gray-900/80 rounded-full border-2 border-gray-700"></div>
           </div>
         </div>
@@ -77,7 +75,10 @@ const settings = useSettingsStore()
             :speed="30"
           />
         </div>
-        <p v-if="library.currentSong.album" class="text-gray-500 dark:text-gray-500 text-sm mt-1 max-w-xs mx-auto truncate">
+        <p
+          v-if="library.currentSong.album"
+          class="text-gray-500 dark:text-gray-500 text-sm mt-1 max-w-xs mx-auto truncate"
+        >
           {{ library.currentSong.album }}
         </p>
       </div>
@@ -90,7 +91,9 @@ const settings = useSettingsStore()
           <div class="w-12 h-12 bg-gray-900/50 rounded-full border-2 border-gray-700/50"></div>
         </div>
         <p class="text-gray-900 dark:text-white text-xl mt-6">等待播放...</p>
-        <p class="text-gray-600 dark:text-gray-400 text-sm mt-2">在右侧设置面板选择音乐文件夹开始播放</p>
+        <p class="text-gray-600 dark:text-gray-400 text-sm mt-2">
+          在右侧设置面板选择音乐文件夹开始播放
+        </p>
       </div>
     </template>
   </div>

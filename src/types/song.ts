@@ -22,6 +22,12 @@ export interface Song {
    * 旧数据可能为 undefined, 前端需做容错
    */
   content_hash?: string | null
+  /** 是否已标记为「喜爱」(智能随机的权重信号之一, 旧数据为 undefined) */
+  favorite?: boolean
+  /** 最近一次标记喜爱的 Unix 毫秒时间戳 (未喜爱为 0) */
+  favorited_at?: number
+  /** 首次入库时间 (Unix 毫秒, 智能随机的「今日新增」加成依据) */
+  created_at?: number
 }
 
 /**
@@ -153,6 +159,12 @@ export interface PlayHistoryItem {
   duration: number
   /** 封面路径（冗余存储） */
   cover_path: string | null
+  /**
+   * 封面缩略图路径（冗余存储, 128px）
+   *
+   * 可选: 存量历史记录没有该字段, 前端需回退到 cover_path
+   */
+  cover_thumb_path?: string | null
   /** 文件路径（冗余存储） */
   file_path: string
   /** 开始播放时间（时间戳） */

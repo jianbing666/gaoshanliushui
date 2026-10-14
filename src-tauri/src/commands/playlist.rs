@@ -187,11 +187,7 @@ pub async fn delete_playlist(app: AppHandle, id: i64) -> Result<(), String> {
 
 /// 重命名歌单
 #[tauri::command]
-pub async fn rename_playlist(
-    app: AppHandle,
-    id: i64,
-    new_name: String,
-) -> Result<(), String> {
+pub async fn rename_playlist(app: AppHandle, id: i64, new_name: String) -> Result<(), String> {
     let name_trim = new_name.trim().to_string();
     if name_trim.is_empty() {
         return Err("歌单名称不能为空".to_string());
@@ -286,9 +282,7 @@ fn path_to_id(path: &str) -> String {
 /// 从数据库加载默认歌单的全部歌曲 (返回 Song 数组)
 /// 用于启动时快速加载，不扫描物理文件夹
 #[tauri::command]
-pub async fn load_default_playlist_songs(
-    app: AppHandle,
-) -> Result<Vec<Song>, String> {
+pub async fn load_default_playlist_songs(app: AppHandle) -> Result<Vec<Song>, String> {
     db::run_db(&app, move |conn| {
         // 查找默认歌单
         let default_id: i64 = conn
@@ -301,7 +295,8 @@ pub async fn load_default_playlist_songs(
 
         let mut stmt = conn
             .prepare(
-                "SELECT s.song_hash, s.song_path, s.title, s.artist, s.album, s.duration, s.cover_path
+                "SELECT s.song_hash, s.song_path, s.title, s.artist, s.album, s.duration,
+                        s.cover_path, s.cover_thumb_path, s.favorite, s.favorited_at, s.created_at
                  FROM playlist_songs ps
                  JOIN songs s ON ps.song_hash = s.song_hash
                  WHERE ps.playlist_id = ?1
@@ -314,6 +309,7 @@ pub async fn load_default_playlist_songs(
                 let song_path: String = row.get(1)?;
                 let content_hash: String = row.get(0)?;
                 let cover_path: String = row.get(6)?;
+                let cover_thumb_path: String = row.get(7)?;
                 Ok(Song {
                     id: path_to_id(&song_path),
                     file_path: song_path,
@@ -321,9 +317,20 @@ pub async fn load_default_playlist_songs(
                     artist: row.get(3)?,
                     album: row.get(4)?,
                     duration: row.get::<_, i64>(5)? as u64,
-                    cover_path: if cover_path.is_empty() { None } else { Some(cover_path) },
-                    cover_thumb_path: None,
+                    cover_path: if cover_path.is_empty() {
+                        None
+                    } else {
+                        Some(cover_path)
+                    },
+                    cover_thumb_path: if cover_thumb_path.is_empty() {
+                        None
+                    } else {
+                        Some(cover_thumb_path)
+                    },
                     content_hash: Some(content_hash),
+                    favorite: row.get(8)?,
+                    favorited_at: row.get(9)?,
+                    created_at: row.get(10)?,
                 })
             })
             .map_err(|e| format!("查询歌单歌曲失败: {}", e))?;
@@ -465,8 +472,7 @@ pub async fn export_playlist(
         _ => return Err(format!("不支持的导出格式: {}", format)),
     };
 
-    std::fs::write(&output_path, content)
-        .map_err(|e| format!("写入文件失败: {}", e))?;
+    std::fs::write(&output_path, content).map_err(|e| format!("写入文件失败: {}", e))?;
 
     Ok(output_path)
 }
@@ -533,11 +539,8 @@ pub fn sync_default_playlist(conn: &mut rusqlite::Connection) -> Result<(), Stri
     let now = db::now_ms();
 
     // 清空默认歌单
-    conn.execute(
-        "DELETE FROM playlist_songs WHERE playlist_id = 1",
-        [],
-    )
-    .map_err(|e| format!("清空默认歌单失败: {}", e))?;
+    conn.execute("DELETE FROM playlist_songs WHERE playlist_id = 1", [])
+        .map_err(|e| format!("清空默认歌单失败: {}", e))?;
 
     // 重新插入所有歌曲
     conn.execute(

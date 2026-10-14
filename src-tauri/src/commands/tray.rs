@@ -14,15 +14,21 @@ pub fn init_tray(app: &AppHandle) -> Result<(), String> {
     let tray_menu = tauri::menu::Menu::with_items(
         app,
         &[
-            &tauri::menu::MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>).map_err(|e| e.to_string())?,
+            &tauri::menu::MenuItem::with_id(app, "show", "显示主窗口", true, None::<&str>)
+                .map_err(|e| e.to_string())?,
             &tauri::menu::PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?,
-            &tauri::menu::MenuItem::with_id(app, "play-pause", "播放/暂停", true, None::<&str>).map_err(|e| e.to_string())?,
-            &tauri::menu::MenuItem::with_id(app, "prev", "上一首", true, None::<&str>).map_err(|e| e.to_string())?,
-            &tauri::menu::MenuItem::with_id(app, "next", "下一首", true, None::<&str>).map_err(|e| e.to_string())?,
+            &tauri::menu::MenuItem::with_id(app, "play-pause", "播放/暂停", true, None::<&str>)
+                .map_err(|e| e.to_string())?,
+            &tauri::menu::MenuItem::with_id(app, "prev", "上一首", true, None::<&str>)
+                .map_err(|e| e.to_string())?,
+            &tauri::menu::MenuItem::with_id(app, "next", "下一首", true, None::<&str>)
+                .map_err(|e| e.to_string())?,
             &tauri::menu::PredefinedMenuItem::separator(app).map_err(|e| e.to_string())?,
-            &tauri::menu::MenuItem::with_id(app, "quit", "退出", true, None::<&str>).map_err(|e| e.to_string())?,
+            &tauri::menu::MenuItem::with_id(app, "quit", "退出", true, None::<&str>)
+                .map_err(|e| e.to_string())?,
         ],
-    ).map_err(|e| e.to_string())?;
+    )
+    .map_err(|e| e.to_string())?;
 
     // 创建托盘图标
     let mut builder = tauri::tray::TrayIconBuilder::with_id("main-tray");
@@ -39,37 +45,35 @@ pub fn init_tray(app: &AppHandle) -> Result<(), String> {
         //   右键才能打开菜单 —— 与用户预期一致.
         //   macOS 上保留 true (符合 macOS 习惯).
         .show_menu_on_left_click(cfg!(target_os = "macos"))
-        .on_menu_event(|app, event| {
-            match event.id.as_ref() {
-                "show" => {
-                    if let Some(win) = app.get_webview_window("main") {
-                        let _ = win.show();
-                        let _ = win.set_focus();
-                    }
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "show" => {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.show();
+                    let _ = win.set_focus();
                 }
-                "play-pause" => {
-                    if let Some(win) = app.get_webview_window("main") {
-                        let _ = win.set_focus();
-                    }
-                    let _ = app.emit("global-shortcut:toggle-play", ());
-                }
-                "prev" => {
-                    if let Some(win) = app.get_webview_window("main") {
-                        let _ = win.set_focus();
-                    }
-                    let _ = app.emit("global-shortcut:prev-track", ());
-                }
-                "next" => {
-                    if let Some(win) = app.get_webview_window("main") {
-                        let _ = win.set_focus();
-                    }
-                    let _ = app.emit("global-shortcut:next-track", ());
-                }
-                "quit" => {
-                    app.exit(0);
-                }
-                _ => {}
             }
+            "play-pause" => {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.set_focus();
+                }
+                let _ = app.emit("global-shortcut:toggle-play", ());
+            }
+            "prev" => {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.set_focus();
+                }
+                let _ = app.emit("global-shortcut:prev-track", ());
+            }
+            "next" => {
+                if let Some(win) = app.get_webview_window("main") {
+                    let _ = win.set_focus();
+                }
+                let _ = app.emit("global-shortcut:next-track", ());
+            }
+            "quit" => {
+                app.exit(0);
+            }
+            _ => {}
         })
         .build(app)
         .map_err(|e| e.to_string())?;

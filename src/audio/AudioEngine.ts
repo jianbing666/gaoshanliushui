@@ -268,7 +268,7 @@ export class AudioEngine {
         this.audioSourceNode.stop()
         this.audioSourceNode.disconnect()
         this.audioSourceNode = null
-      } catch (e) {
+      } catch {
         // 忽略暂停失败
       }
     }
@@ -323,7 +323,7 @@ export class AudioEngine {
         oldSource.stop()
         oldSource.disconnect()
         this.audioSourceNode = null
-      } catch (e) {
+      } catch {
         // 忽略已停止的节点错误
       }
     }
@@ -462,7 +462,7 @@ export class AudioEngine {
           loudnessNormalizer.stop(this.analyserNode, this.gainNode)
         }
         this.audioSourceNode.connect(this.gainNode)
-      } catch (e) {
+      } catch {
         // 忽略断开失败
       }
     }
@@ -480,7 +480,7 @@ export class AudioEngine {
         if (this.loudnessEnabled) {
           loudnessNormalizer.start(this.analyserNode, this.gainNode)
         }
-      } catch (e) {
+      } catch {
         // 忽略重连失败
       }
     }

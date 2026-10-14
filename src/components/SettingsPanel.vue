@@ -49,11 +49,7 @@ const {
   handleKeyDown,
 } = useShortcutConfig()
 
-const {
-  autoLaunch,
-  loading: autoLaunchLoading,
-  toggleAutoLaunch,
-} = useAutoLaunch()
+const { autoLaunch, loading: autoLaunchLoading, toggleAutoLaunch } = useAutoLaunch()
 
 const isScanningBgFolder = ref(false)
 const showRefreshConfirm = ref(false)
@@ -163,6 +159,19 @@ async function selectBackgroundFolder() {
 
 function updateBgSetting<K extends keyof BackgroundSettings>(key: K, value: BackgroundSettings[K]) {
   settings.updateBackgroundSetting(key, value)
+}
+
+/*
+  "模糊程度 / 缩放比例"是仅有的两个会改变全屏背景滤镜/变换的滑杆。
+  拖动期间打个瞬态标记，让背景图层临时上合成层（will-change），
+  松手（change）即收回；这样保留实时预览手感，同时避免整屏主线程重栅格化。
+*/
+function beginBackgroundAdjust() {
+  settings.setBackgroundAdjusting(true)
+}
+
+function endBackgroundAdjust() {
+  settings.setBackgroundAdjusting(false)
 }
 
 function handleMinimizeToTrayToggle() {
@@ -372,12 +381,17 @@ onUnmounted(() => {
 </script>
 
 <template>
-  <aside class="w-80 backdrop-blur border-l border-gray-200/60 dark:border-gray-700/60 shadow-2xl flex flex-col h-full will-change-auto" :class="
-    settings.currentBackgroundUrl && settings.background.mode !== 'none'
-      ? 'bg-white/50 dark:bg-gray-900/50'
-      : 'bg-white/90 dark:bg-gray-900/90'
-  ">
-    <div class="px-5 py-4 border-b border-gray-200/50 dark:border-gray-700/50 flex items-center justify-between">
+  <aside
+    class="w-80 backdrop-blur border-l border-gray-200/60 dark:border-gray-700/60 shadow-2xl flex flex-col h-full"
+    :class="
+      settings.currentBackgroundUrl && settings.background.mode !== 'none'
+        ? 'bg-white/50 dark:bg-gray-900/50'
+        : 'bg-white/90 dark:bg-gray-900/90'
+    "
+  >
+    <div
+      class="px-5 py-4 border-b border-gray-200/50 dark:border-gray-700/50 flex items-center justify-between"
+    >
       <div>
         <h2 class="text-gray-900 dark:text-white text-base font-semibold">设置</h2>
         <p class="text-gray-500 dark:text-gray-400 text-xs">个性化你的播放器</p>
@@ -404,11 +418,7 @@ onUnmounted(() => {
             :size="16"
             class="text-gray-400 dark:text-gray-500"
           />
-          <ChevronRightIcon
-            v-else
-            :size="16"
-            class="text-gray-400 dark:text-gray-500"
-          />
+          <ChevronRightIcon v-else :size="16" class="text-gray-400 dark:text-gray-500" />
         </button>
 
         <div v-if="settings.isSettingsSectionExpanded('appearance')" class="space-y-4">
@@ -445,11 +455,7 @@ onUnmounted(() => {
             :size="16"
             class="text-gray-400 dark:text-gray-500"
           />
-          <ChevronRightIcon
-            v-else
-            :size="16"
-            class="text-gray-400 dark:text-gray-500"
-          />
+          <ChevronRightIcon v-else :size="16" class="text-gray-400 dark:text-gray-500" />
         </button>
 
         <div v-if="settings.isSettingsSectionExpanded('library')" class="space-y-3">
@@ -472,8 +478,8 @@ onUnmounted(() => {
               v-if="library.folderPath"
               class="flex-1 px-4 py-2 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-lg text-sm text-gray-700 dark:text-gray-300 transition-all disabled:opacity-50"
               :disabled="library.isLoading"
-              @click="confirmRescan"
               :title="'重新扫描当前目录'"
+              @click="confirmRescan"
             >
               {{ library.isLoading ? '扫描中...' : '重新扫描' }}
             </button>
@@ -507,7 +513,11 @@ onUnmounted(() => {
               </button>
             </div>
             <p class="text-xs text-gray-400 dark:text-gray-500 leading-relaxed">
-              {{ library.metadataSource === 'auto' ? '优先使用 ID3 标签，缺失时从文件名解析' : '忽略 ID3 标签，完全从文件名解析（歌手 - 歌名）' }}
+              {{
+                library.metadataSource === 'auto'
+                  ? '优先使用 ID3 标签，缺失时从文件名解析'
+                  : '忽略 ID3 标签，完全从文件名解析（歌手 - 歌名）'
+              }}
             </p>
           </div>
 
@@ -523,7 +533,9 @@ onUnmounted(() => {
               </button>
             </template>
             <template v-else>
-              <div class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200/50 dark:border-yellow-800/30 rounded-lg p-3 space-y-2">
+              <div
+                class="bg-yellow-50 dark:bg-yellow-900/20 border border-yellow-200/50 dark:border-yellow-800/30 rounded-lg p-3 space-y-2"
+              >
                 <p class="text-xs text-yellow-700 dark:text-yellow-300">
                   确定要刷新所有元数据吗？将清除封面缓存并重新扫描。
                 </p>
@@ -564,11 +576,7 @@ onUnmounted(() => {
             :size="16"
             class="text-gray-400 dark:text-gray-500"
           />
-          <ChevronRightIcon
-            v-else
-            :size="16"
-            class="text-gray-400 dark:text-gray-500"
-          />
+          <ChevronRightIcon v-else :size="16" class="text-gray-400 dark:text-gray-500" />
         </button>
 
         <div v-if="settings.isSettingsSectionExpanded('system')" class="space-y-2">
@@ -580,7 +588,9 @@ onUnmounted(() => {
               </div>
               <button
                 class="relative w-10 h-5 rounded-full transition-colors shrink-0"
-                :class="autoLaunch ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
+                :class="
+                  autoLaunch ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
+                "
                 :disabled="autoLaunchLoading"
                 @click="toggleAutoLaunch"
               >
@@ -600,7 +610,11 @@ onUnmounted(() => {
               </div>
               <button
                 class="relative w-10 h-5 rounded-full transition-colors shrink-0"
-                :class="settings.minimizeToTray ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
+                :class="
+                  settings.minimizeToTray
+                    ? 'bg-blue-500 dark:bg-blue-600'
+                    : 'bg-gray-300 dark:bg-gray-600'
+                "
                 @click="handleMinimizeToTrayToggle"
               >
                 <div
@@ -619,7 +633,11 @@ onUnmounted(() => {
               </div>
               <button
                 class="relative w-10 h-5 rounded-full transition-colors shrink-0"
-                :class="settings.showSpectrum ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
+                :class="
+                  settings.showSpectrum
+                    ? 'bg-blue-500 dark:bg-blue-600'
+                    : 'bg-gray-300 dark:bg-gray-600'
+                "
                 @click="handleShowSpectrumToggle"
               >
                 <div
@@ -630,19 +648,49 @@ onUnmounted(() => {
             </div>
           </div>
 
+          <!-- 智能随机: 随机播放按权重抽样 (喜爱 / 常听 / 当日新增 加分, 常没听完 扣分) -->
+          <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-gray-900 dark:text-white text-sm font-medium">智能随机</p>
+                <p class="text-gray-500 dark:text-gray-400 text-xs">
+                  随机播放时提高喜爱 / 常听的歌的出现概率，未听完的歌降权
+                </p>
+              </div>
+              <button
+                class="relative w-10 h-5 rounded-full transition-colors shrink-0"
+                :class="
+                  settings.smartShuffle
+                    ? 'bg-blue-500 dark:bg-blue-600'
+                    : 'bg-gray-300 dark:bg-gray-600'
+                "
+                @click="settings.setSmartShuffle(!settings.smartShuffle)"
+              >
+                <div
+                  class="absolute top-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform"
+                  :class="settings.smartShuffle ? 'translate-x-[22px]' : 'translate-x-0.5'"
+                ></div>
+              </button>
+            </div>
+          </div>
 
           <!-- 频谱质量: 三档单选 (主开关开启时生效) -->
-          <div v-if="settings.showSpectrum" class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3 space-y-2">
+          <div
+            v-if="settings.showSpectrum"
+            class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3 space-y-2"
+          >
             <div>
               <p class="text-gray-900 dark:text-white text-sm font-medium">频谱质量</p>
-              <p class="text-gray-500 dark:text-gray-400 text-xs">高 = 60fps + 2048 fft, 低 = 20fps + 512 fft, 越低越省 CPU</p>
+              <p class="text-gray-500 dark:text-gray-400 text-xs">
+                高 = 60fps + 2048 fft, 低 = 20fps + 512 fft, 越低越省 CPU
+              </p>
             </div>
             <div class="bg-white/60 dark:bg-gray-900/40 rounded-lg p-1 flex gap-1">
               <button
                 v-for="opt in [
                   { value: 'high', label: '高性能' },
                   { value: 'balanced', label: '平衡' },
-                  { value: 'low', label: '低功耗' }
+                  { value: 'low', label: '低功耗' },
                 ]"
                 :key="opt.value"
                 class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
@@ -667,7 +715,11 @@ onUnmounted(() => {
               </div>
               <button
                 class="relative w-10 h-5 rounded-full transition-colors shrink-0"
-                :class="settings.loudnessNormalization ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
+                :class="
+                  settings.loudnessNormalization
+                    ? 'bg-blue-500 dark:bg-blue-600'
+                    : 'bg-gray-300 dark:bg-gray-600'
+                "
                 @click="handleLoudnessToggle"
               >
                 <div
@@ -678,12 +730,14 @@ onUnmounted(() => {
             </div>
             <!-- 测量方式: 标准 RMS / 高精度 LUFS（仅开关启用时显示） -->
             <div v-if="settings.loudnessNormalization" class="space-y-1.5">
-              <p class="text-gray-500 dark:text-gray-400 text-xs">高精度按 EBU R128 标准测量，略增 CPU</p>
+              <p class="text-gray-500 dark:text-gray-400 text-xs">
+                高精度按 EBU R128 标准测量，略增 CPU
+              </p>
               <div class="bg-white/60 dark:bg-gray-900/40 rounded-lg p-1 flex gap-1">
                 <button
                   v-for="opt in [
                     { value: 'rms', label: '标准' },
-                    { value: 'lufs', label: '高精度' }
+                    { value: 'lufs', label: '高精度' },
                   ]"
                   :key="opt.value"
                   class="flex-1 px-3 py-1.5 rounded-md text-xs font-medium transition-all"
@@ -705,7 +759,9 @@ onUnmounted(() => {
             <div class="flex items-center justify-between">
               <div>
                 <p class="text-gray-900 dark:text-white text-sm font-medium">批量响度归一化</p>
-                <p class="text-gray-500 dark:text-gray-400 text-xs">按 EBU R128（-14 LUFS）离线处理并替换原文件</p>
+                <p class="text-gray-500 dark:text-gray-400 text-xs">
+                  按 EBU R128（-14 LUFS）离线处理并替换原文件
+                </p>
               </div>
               <button
                 class="p-1 rounded transition-colors shrink-0 text-gray-500 hover:text-gray-700 dark:text-gray-400 dark:hover:text-gray-200"
@@ -736,7 +792,9 @@ onUnmounted(() => {
               <!-- 二次确认 -->
               <div v-if="batchConfirmPaths" class="space-y-2">
                 <p class="text-xs text-amber-600 dark:text-amber-400 leading-relaxed">
-                  将处理 {{ batchConfirmPaths.length }} 首歌曲并替换原文件，建议先暂停播放并自行备份；回忆关联会自动迁移。
+                  将处理
+                  {{ batchConfirmPaths.length }}
+                  首歌曲并替换原文件，建议先暂停播放并自行备份；回忆关联会自动迁移。
                 </p>
                 <div class="flex gap-2">
                   <button
@@ -759,18 +817,28 @@ onUnmounted(() => {
                 <p class="text-xs text-gray-900 dark:text-white">
                   正在处理 {{ batchCurrent.index + 1 }}/{{ batchCurrent.total }}
                 </p>
-                <div class="w-full h-1 bg-white/60 dark:bg-gray-900/40 rounded-full overflow-hidden">
+                <div
+                  class="w-full h-1 bg-white/60 dark:bg-gray-900/40 rounded-full overflow-hidden"
+                >
                   <div
-                    class="h-full bg-blue-500 dark:bg-blue-600 rounded-full transition-all duration-300"
-                    :style="{ width: ((batchCurrent.index + 1) / batchCurrent.total * 100) + '%' }"
+                    class="h-full origin-left bg-blue-500 dark:bg-blue-600 rounded-full transition-transform duration-300"
+                    :style="{
+                      transform: `scaleX(${(batchCurrent.index + 1) / batchCurrent.total})`,
+                    }"
                   ></div>
                 </div>
-                <p class="text-xs text-gray-500 dark:text-gray-400 truncate">{{ batchCurrent.file }}</p>
+                <p class="text-xs text-gray-500 dark:text-gray-400 truncate">
+                  {{ batchCurrent.file }}
+                </p>
               </div>
 
               <!-- 结果 / 错误轻提示 -->
-              <p v-if="batchSummary" class="text-xs text-green-600 dark:text-green-400">{{ batchSummary }}</p>
-              <p v-if="batchLastError" class="text-xs text-red-500 dark:text-red-400 truncate">最近失败：{{ batchLastError }}</p>
+              <p v-if="batchSummary" class="text-xs text-green-600 dark:text-green-400">
+                {{ batchSummary }}
+              </p>
+              <p v-if="batchLastError" class="text-xs text-red-500 dark:text-red-400 truncate">
+                最近失败：{{ batchLastError }}
+              </p>
             </div>
           </div>
 
@@ -779,16 +847,20 @@ onUnmounted(() => {
             <div class="flex items-center justify-between">
               <div>
                 <p class="text-gray-900 dark:text-white text-sm font-medium">清除缓存</p>
-                <p class="text-gray-500 dark:text-gray-400 text-xs">清除音频解码缓存和封面图片缓存</p>
+                <p class="text-gray-500 dark:text-gray-400 text-xs">
+                  清除音频解码缓存和封面图片缓存
+                </p>
               </div>
-                <button
-                  class="px-3 py-1.5 rounded-md text-xs font-medium transition-colors shrink-0"
-                  :class="cacheCleared
+              <button
+                class="px-3 py-1.5 rounded-md text-xs font-medium transition-colors shrink-0"
+                :class="
+                  cacheCleared
                     ? 'bg-gray-100 dark:bg-gray-600 text-gray-900 dark:text-white'
-                    : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700'"
-                  :disabled="isClearingCache"
-                  @click="handleClearCache"
-                >
+                    : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700'
+                "
+                :disabled="isClearingCache"
+                @click="handleClearCache"
+              >
                 {{ isClearingCache ? '清除中...' : cacheCleared ? '已清除' : '清除' }}
               </button>
             </div>
@@ -800,14 +872,20 @@ onUnmounted(() => {
               <div>
                 <p class="text-gray-900 dark:text-white text-sm font-medium">定时关闭</p>
                 <p class="text-gray-500 dark:text-gray-400 text-xs">
-                  {{ settings.sleepTimerEnabled
-                    ? `剩余 ${formatTime(settings.sleepTimerRemaining)}`
-                    : '设定时间后自动暂停播放' }}
+                  {{
+                    settings.sleepTimerEnabled
+                      ? `剩余 ${formatTime(settings.sleepTimerRemaining)}`
+                      : '设定时间后自动暂停播放'
+                  }}
                 </p>
               </div>
               <button
                 class="relative w-10 h-5 rounded-full transition-colors shrink-0"
-                :class="settings.sleepTimerEnabled ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
+                :class="
+                  settings.sleepTimerEnabled
+                    ? 'bg-blue-500 dark:bg-blue-600'
+                    : 'bg-gray-300 dark:bg-gray-600'
+                "
                 @click="settings.toggleSleepTimer"
               >
                 <div
@@ -822,9 +900,11 @@ onUnmounted(() => {
                   v-for="m in [15, 30, 60, 90]"
                   :key="m"
                   class="flex-1 py-1 text-xs rounded-md transition-colors"
-                  :class="settings.sleepTimerMinutes === m
-                    ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
-                    : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'"
+                  :class="
+                    settings.sleepTimerMinutes === m
+                      ? 'bg-white dark:bg-gray-700 text-gray-900 dark:text-white shadow-sm'
+                      : 'text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300'
+                  "
                   @click="settings.setSleepTimerMinutes(m)"
                 >
                   {{ m }}分
@@ -838,7 +918,10 @@ onUnmounted(() => {
                   :max="180"
                   :value="settings.sleepTimerMinutes"
                   step="5"
-                  @input="(e) => settings.setSleepTimerMinutes(parseInt((e.target as HTMLInputElement).value))"
+                  @input="
+                    (e) =>
+                      settings.setSleepTimerMinutes(parseInt((e.target as HTMLInputElement).value))
+                  "
                 />
                 <span class="text-xs text-gray-500 dark:text-gray-400 w-10 text-right">
                   {{ settings.sleepTimerMinutes }}分
@@ -861,11 +944,7 @@ onUnmounted(() => {
             :size="16"
             class="text-gray-400 dark:text-gray-500"
           />
-          <ChevronRightIcon
-            v-else
-            :size="16"
-            class="text-gray-400 dark:text-gray-500"
-          />
+          <ChevronRightIcon v-else :size="16" class="text-gray-400 dark:text-gray-500" />
         </button>
 
         <div v-if="settings.isSettingsSectionExpanded('data')" class="space-y-2">
@@ -873,9 +952,16 @@ onUnmounted(() => {
           <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
             <p class="text-xs text-gray-500 dark:text-gray-400 mb-1">
               当前目录
-              <span v-if="settings.dataDirInfo?.is_custom" class="text-blue-500 dark:text-blue-400 ml-1">（自定义）</span>
+              <span
+                v-if="settings.dataDirInfo?.is_custom"
+                class="text-blue-500 dark:text-blue-400 ml-1"
+                >（自定义）</span
+              >
             </p>
-            <p class="text-sm text-gray-900 dark:text-white truncate" :title="settings.dataDirInfo?.current_path">
+            <p
+              class="text-sm text-gray-900 dark:text-white truncate"
+              :title="settings.dataDirInfo?.current_path"
+            >
               {{ settings.dataDirInfo?.current_path || '加载中...' }}
             </p>
           </div>
@@ -884,18 +970,28 @@ onUnmounted(() => {
           <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3 space-y-2">
             <div class="flex items-center justify-between">
               <p class="text-xs text-gray-500 dark:text-gray-400">存储使用</p>
-              <p class="text-xs text-gray-700 dark:text-gray-300 font-medium">{{ formatBytes(totalDataUsage()) }}</p>
+              <p class="text-xs text-gray-700 dark:text-gray-300 font-medium">
+                {{ formatBytes(totalDataUsage()) }}
+              </p>
             </div>
             <div v-if="settings.dataUsageList.length > 0" class="space-y-1.5">
               <div v-for="item in settings.dataUsageList" :key="item.name" class="space-y-1">
                 <div class="flex items-center justify-between">
                   <span class="text-xs text-gray-600 dark:text-gray-400">{{ item.name }}</span>
-                  <span class="text-xs text-gray-500 dark:text-gray-500">{{ formatBytes(item.size_bytes) }}</span>
+                  <span class="text-xs text-gray-500 dark:text-gray-500">{{
+                    formatBytes(item.size_bytes)
+                  }}</span>
                 </div>
-                <div class="w-full h-1.5 bg-gray-200/60 dark:bg-gray-700/60 rounded-full overflow-hidden">
+                <div
+                  class="w-full h-1.5 bg-gray-200/60 dark:bg-gray-700/60 rounded-full overflow-hidden"
+                >
                   <div
-                    class="h-full bg-blue-500/70 dark:bg-blue-400/70 rounded-full transition-all"
-                    :style="{ width: totalDataUsage() > 0 ? (item.size_bytes / totalDataUsage() * 100) + '%' : '0%' }"
+                    class="h-full origin-left bg-blue-500/70 dark:bg-blue-400/70 rounded-full transition-transform"
+                    :style="{
+                      transform: `scaleX(${
+                        totalDataUsage() > 0 ? item.size_bytes / totalDataUsage() : 0
+                      })`,
+                    }"
                   ></div>
                 </div>
               </div>
@@ -928,9 +1024,11 @@ onUnmounted(() => {
             </button>
             <button
               class="flex-1 px-3 py-2 transition-all rounded-lg text-xs font-medium shrink-0"
-              :class="dataCacheCleared
-                ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
-                : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700'"
+              :class="
+                dataCacheCleared
+                  ? 'bg-green-100 dark:bg-green-900/30 text-green-700 dark:text-green-400'
+                  : 'bg-white dark:bg-gray-800 text-gray-900 dark:text-white hover:bg-gray-50 dark:hover:bg-gray-700'
+              "
               :disabled="isClearingDataCache"
               @click="handleClearDataCache"
             >
@@ -965,11 +1063,7 @@ onUnmounted(() => {
             :size="16"
             class="text-gray-400 dark:text-gray-500 ml-2"
           />
-          <ChevronRightIcon
-            v-else
-            :size="16"
-            class="text-gray-400 dark:text-gray-500 ml-2"
-          />
+          <ChevronRightIcon v-else :size="16" class="text-gray-400 dark:text-gray-500 ml-2" />
         </button>
 
         <div v-if="settings.isSettingsSectionExpanded('shortcuts')" class="space-y-2">
@@ -984,11 +1078,7 @@ onUnmounted(() => {
             </div>
 
             <div class="flex items-center gap-2">
-              <div
-                v-if="editingShortcut === shortcut.id"
-                class="flex-1 relative"
-                @click.stop
-              >
+              <div v-if="editingShortcut === shortcut.id" class="flex-1 relative" @click.stop>
                 <input
                   type="text"
                   readonly
@@ -1013,16 +1103,27 @@ onUnmounted(() => {
                   :title="'清除当前快捷键'"
                   @click="clearShortcut(shortcut.id)"
                 >
-                  <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+                  <svg
+                    class="w-3.5 h-3.5"
+                    viewBox="0 0 24 24"
+                    fill="none"
+                    stroke="currentColor"
+                    stroke-width="2.5"
+                    stroke-linecap="round"
+                    stroke-linejoin="round"
+                  >
                     <line x1="18" y1="6" x2="6" y2="18"></line>
                     <line x1="6" y1="6" x2="18" y2="18"></line>
                   </svg>
                 </button>
                 <button
-                  v-if="shortcut.currentShortcut && shortcut.currentShortcut !== shortcut.defaultShortcut"
+                  v-if="
+                    shortcut.currentShortcut &&
+                    shortcut.currentShortcut !== shortcut.defaultShortcut
+                  "
                   class="px-2 py-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 transition-colors shadow-sm border rounded-md"
-                  @click="resetToDefault(shortcut.id)"
                   title="恢复默认"
+                  @click="resetToDefault(shortcut.id)"
                 >
                   重置
                 </button>
@@ -1044,11 +1145,7 @@ onUnmounted(() => {
             :size="16"
             class="text-gray-400 dark:text-gray-500"
           />
-          <ChevronRightIcon
-            v-else
-            :size="16"
-            class="text-gray-400 dark:text-gray-500"
-          />
+          <ChevronRightIcon v-else :size="16" class="text-gray-400 dark:text-gray-500" />
         </button>
 
         <div v-if="settings.isSettingsSectionExpanded('background')" class="space-y-4">
@@ -1075,7 +1172,10 @@ onUnmounted(() => {
             >
               {{ settings.background.imagePath ? '更换图片' : '选择图片' }}
             </button>
-            <p v-if="settings.background.imagePath" class="text-xs text-gray-500 dark:text-gray-400 truncate px-1">
+            <p
+              v-if="settings.background.imagePath"
+              class="text-xs text-gray-500 dark:text-gray-400 truncate px-1"
+            >
               {{ settings.background.imagePath }}
             </p>
           </div>
@@ -1086,19 +1186,33 @@ onUnmounted(() => {
               :disabled="isScanningBgFolder"
               @click="selectBackgroundFolder"
             >
-              {{ isScanningBgFolder ? '扫描中...' : settings.background.folderPath ? '更换文件夹' : '选择文件夹' }}
+              {{
+                isScanningBgFolder
+                  ? '扫描中...'
+                  : settings.background.folderPath
+                    ? '更换文件夹'
+                    : '选择文件夹'
+              }}
             </button>
-            <p v-if="settings.background.folderPath" class="text-xs text-gray-500 dark:text-gray-400 truncate px-1">
+            <p
+              v-if="settings.background.folderPath"
+              class="text-xs text-gray-500 dark:text-gray-400 truncate px-1"
+            >
               {{ settings.background.folderPath }}
             </p>
-            <p v-if="settings.background.imageList?.length" class="text-xs text-gray-500 dark:text-gray-400 px-1">
+            <p
+              v-if="settings.background.imageList?.length"
+              class="text-xs text-gray-500 dark:text-gray-400 px-1"
+            >
               共 {{ settings.background.imageList.length }} 张图片
             </p>
 
             <div>
               <div class="flex items-center justify-between mb-2">
                 <p class="text-xs text-gray-500 dark:text-gray-400">轮播间隔</p>
-                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ settings.background.interval }} 秒</span>
+                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium"
+                  >{{ settings.background.interval }} 秒</span
+                >
               </div>
               <input
                 type="range"
@@ -1107,29 +1221,34 @@ onUnmounted(() => {
                 :max="300"
                 :value="settings.background.interval"
                 step="5"
-                @input="(e) => updateBgSetting('interval', parseInt((e.target as HTMLInputElement).value))"
+                @input="
+                  (e) => updateBgSetting('interval', parseInt((e.target as HTMLInputElement).value))
+                "
               />
             </div>
 
             <div class="flex items-center gap-2">
               <button
                 class="flex-1 px-3 py-2 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-md text-xs text-gray-600 dark:text-gray-300 transition-colors"
-                @click="settings.prevBackgroundImage()"
                 :disabled="!settings.background.imageList?.length"
+                @click="settings.prevBackgroundImage()"
               >
                 上一张
               </button>
               <button
                 class="flex-1 px-3 py-2 bg-gray-100/60 dark:bg-gray-800/60 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 rounded-md text-xs text-gray-600 dark:text-gray-300 transition-colors"
-                @click="settings.nextBackgroundImage()"
                 :disabled="!settings.background.imageList?.length"
+                @click="settings.nextBackgroundImage()"
               >
                 下一张
               </button>
             </div>
           </div>
 
-          <div v-if="settings.background.mode !== 'none'" class="space-y-4 pt-2 border-t border-gray-200/50 dark:border-gray-700/50">
+          <div
+            v-if="settings.background.mode !== 'none'"
+            class="space-y-4 pt-2 border-t border-gray-200/50 dark:border-gray-700/50"
+          >
             <div>
               <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">填充方式</p>
               <div class="flex gap-1">
@@ -1152,7 +1271,9 @@ onUnmounted(() => {
             <div>
               <div class="flex items-center justify-between mb-2">
                 <p class="text-xs text-gray-500 dark:text-gray-400">遮罩透明度</p>
-                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ Math.round(settings.background.overlay * 100) }}%</span>
+                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium"
+                  >{{ Math.round(settings.background.overlay * 100) }}%</span
+                >
               </div>
               <input
                 type="range"
@@ -1160,14 +1281,19 @@ onUnmounted(() => {
                 :min="0"
                 :max="100"
                 :value="settings.background.overlay * 100"
-                @input="(e) => updateBgSetting('overlay', parseInt((e.target as HTMLInputElement).value) / 100)"
+                @input="
+                  (e) =>
+                    updateBgSetting('overlay', parseInt((e.target as HTMLInputElement).value) / 100)
+                "
               />
             </div>
 
             <div>
               <div class="flex items-center justify-between mb-2">
                 <p class="text-xs text-gray-500 dark:text-gray-400">模糊程度</p>
-                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ settings.background.blur }}px</span>
+                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium"
+                  >{{ settings.background.blur }}px</span
+                >
               </div>
               <input
                 type="range"
@@ -1175,14 +1301,22 @@ onUnmounted(() => {
                 :min="0"
                 :max="30"
                 :value="settings.background.blur"
-                @input="(e) => updateBgSetting('blur', parseInt((e.target as HTMLInputElement).value))"
+                @input="
+                  (e) => {
+                    beginBackgroundAdjust()
+                    updateBgSetting('blur', parseInt((e.target as HTMLInputElement).value))
+                  }
+                "
+                @change="endBackgroundAdjust"
               />
             </div>
 
             <div>
               <div class="flex items-center justify-between mb-2">
                 <p class="text-xs text-gray-500 dark:text-gray-400">缩放比例</p>
-                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">{{ settings.background.scale }}%</span>
+                <span class="text-xs text-gray-600 dark:text-gray-300 font-medium"
+                  >{{ settings.background.scale }}%</span
+                >
               </div>
               <input
                 type="range"
@@ -1190,7 +1324,13 @@ onUnmounted(() => {
                 :min="50"
                 :max="200"
                 :value="settings.background.scale"
-                @input="(e) => updateBgSetting('scale', parseInt((e.target as HTMLInputElement).value))"
+                @input="
+                  (e) => {
+                    beginBackgroundAdjust()
+                    updateBgSetting('scale', parseInt((e.target as HTMLInputElement).value))
+                  }
+                "
+                @change="endBackgroundAdjust"
               />
             </div>
           </div>
@@ -1216,8 +1356,20 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+/*
+  以前这里是 `transition: all 0.15s ease`：作用域是本面板内所有 button（约 40 个），
+  意味着任何一个类名变化都会把所有可动画属性纳入补间 —— 包括 width / padding /
+  border-width 这类会引发布局的属性，它们本来只是想瞬时切换。
+  现在只声明交互真正会变的属性，布局属性不再被"补间"。
+*/
 button {
-  transition: all 0.15s ease;
+  transition:
+    color 0.15s ease,
+    background-color 0.15s ease,
+    border-color 0.15s ease,
+    box-shadow 0.15s ease,
+    opacity 0.15s ease,
+    transform 0.15s ease;
 }
 
 input:focus {
@@ -1233,5 +1385,4 @@ input:focus {
 :deep(.scrollbar-hide::-webkit-scrollbar) {
   display: none;
 }
-
 </style>

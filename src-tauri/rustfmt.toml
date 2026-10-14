@@ -1,0 +1,6 @@
+# rustfmt 配置
+#
+# 显式固定 edition 与行宽, 保证不同 rustfmt 版本下 `cargo fmt` 结果一致,
+# 避免 CI 上出现"本地没改代码却格式化失败"的情况。
+edition = "2021"
+max_width = 100

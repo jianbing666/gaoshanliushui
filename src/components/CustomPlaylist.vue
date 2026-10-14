@@ -38,11 +38,7 @@ function handleContextMenu(e: MouseEvent) {
   >
     <FolderIcon
       :size="16"
-      :class="
-        isActive
-          ? 'text-gray-600 dark:text-gray-400'
-          : 'text-gray-400 dark:text-gray-500'
-      "
+      :class="isActive ? 'text-gray-600 dark:text-gray-400' : 'text-gray-400 dark:text-gray-500'"
     />
 
     <span class="flex-1 text-sm truncate">{{ playlist.name }}</span>

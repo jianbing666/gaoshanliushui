@@ -32,7 +32,12 @@ function formatDate(timestamp: number): string {
   } else if (itemDate.getTime() === yesterday.getTime()) {
     return '昨天 ' + date.toLocaleTimeString('zh-CN', { hour: '2-digit', minute: '2-digit' })
   } else {
-    return date.toLocaleDateString('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' })
+    return date.toLocaleDateString('zh-CN', {
+      month: '2-digit',
+      day: '2-digit',
+      hour: '2-digit',
+      minute: '2-digit',
+    })
   }
 }
 
@@ -58,13 +63,17 @@ function onCoverError(e: Event) {
 
 <template>
   <div
-    class="w-80 h-full flex flex-col bg-white/50 dark:bg-gray-900/60 backdrop-blur border-r border-gray-200/60 dark:border-gray-700/60 will-change-auto"
+    class="w-80 h-full flex flex-col bg-white/50 dark:bg-gray-900/60 backdrop-blur border-r border-gray-200/60 dark:border-gray-700/60"
   >
     <!-- 头部 -->
-    <div class="flex items-center justify-between px-4 py-3 border-b border-gray-200/50 dark:border-gray-700/50">
+    <div
+      class="flex items-center justify-between px-4 py-3 border-b border-gray-200/50 dark:border-gray-700/50"
+    >
       <div class="flex items-center gap-2">
         <h2 class="text-gray-900 dark:text-white text-base font-semibold">播放历史</h2>
-        <span class="text-xs text-gray-500 dark:text-gray-400">{{ history.playHistory.length }} 首</span>
+        <span class="text-xs text-gray-500 dark:text-gray-400"
+          >{{ history.playHistory.length }} 首</span
+        >
       </div>
       <div class="flex items-center gap-1">
         <button
@@ -89,27 +98,33 @@ function onCoverError(e: Event) {
     <div class="flex-1 overflow-y-auto min-h-0">
       <template v-if="history.playHistory.length > 0">
         <!-- 阶段 2.1: 大列表走虚拟滚动, 小列表保留 v-for -->
-        <VirtualSongList
-          v-if="useVirtualList"
-          :songs="history.playHistory"
-          :item-size="64"
-        >
+        <VirtualSongList v-if="useVirtualList" :songs="history.playHistory" :item-size="64">
           <template #default="{ song, index }">
             <div
               class="flex items-center gap-3 px-3 py-2 hover:bg-gray-100/60 dark:hover:bg-white/10 cursor-pointer transition-colors group"
               @click="playHistoryItem(index)"
             >
               <!-- 封面 -->
-              <div class="w-10 h-10 rounded bg-gray-200/70 dark:bg-gray-700/70 shrink-0 overflow-hidden">
+              <div
+                class="w-10 h-10 rounded bg-gray-200/70 dark:bg-gray-700/70 shrink-0 overflow-hidden"
+              >
                 <img
                   v-if="(song as PlayHistoryItem).cover_path"
-                  :src="library.getCoverThumbUrl((song as PlayHistoryItem).cover_path as string, (song as any).cover_thumb_path)"
+                  :src="
+                    library.getCoverThumbUrl(
+                      (song as PlayHistoryItem).cover_path,
+                      (song as PlayHistoryItem).cover_thumb_path
+                    )
+                  "
                   :alt="(song as PlayHistoryItem).title"
                   class="w-full h-full object-cover"
                   loading="lazy"
                   decoding="async"
                 />
-                <div v-else class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500">
+                <div
+                  v-else
+                  class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500"
+                >
                   <MusicIcon :size="16" />
                 </div>
               </div>
@@ -123,9 +138,22 @@ function onCoverError(e: Event) {
                   {{ (song as PlayHistoryItem).artist }}
                 </p>
                 <div class="flex items-center gap-2 mt-0.5">
-                  <span class="text-xs text-gray-500 dark:text-gray-400">{{ formatDate((song as PlayHistoryItem).playedAt) }}</span>
-                  <span class="text-xs" :class="(song as PlayHistoryItem).completed ? 'text-green-500 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'">
-                    {{ (song as PlayHistoryItem).completed ? '完整播放' : formatTime((song as PlayHistoryItem).playedDuration) }}
+                  <span class="text-xs text-gray-500 dark:text-gray-400">{{
+                    formatDate((song as PlayHistoryItem).playedAt)
+                  }}</span>
+                  <span
+                    class="text-xs"
+                    :class="
+                      (song as PlayHistoryItem).completed
+                        ? 'text-green-500 dark:text-green-400'
+                        : 'text-gray-500 dark:text-gray-400'
+                    "
+                  >
+                    {{
+                      (song as PlayHistoryItem).completed
+                        ? '完整播放'
+                        : formatTime((song as PlayHistoryItem).playedDuration)
+                    }}
                   </span>
                 </div>
               </div>
@@ -149,17 +177,22 @@ function onCoverError(e: Event) {
             @click="playHistoryItem(index)"
           >
             <!-- 封面 -->
-            <div class="w-10 h-10 rounded bg-gray-200/70 dark:bg-gray-700/70 shrink-0 overflow-hidden">
+            <div
+              class="w-10 h-10 rounded bg-gray-200/70 dark:bg-gray-700/70 shrink-0 overflow-hidden"
+            >
               <img
                 v-if="item.cover_path"
-                :src="library.getCoverThumbUrl(item.cover_path, (item as any).cover_thumb_path)"
+                :src="library.getCoverThumbUrl(item.cover_path, item.cover_thumb_path)"
                 :alt="item.title"
                 class="w-full h-full object-cover"
                 loading="lazy"
                 decoding="async"
                 @error="onCoverError"
               />
-              <div v-else class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500">
+              <div
+                v-else
+                class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500"
+              >
                 <MusicIcon :size="16" />
               </div>
             </div>
@@ -173,8 +206,17 @@ function onCoverError(e: Event) {
                 {{ item.artist }}
               </p>
               <div class="flex items-center gap-2 mt-0.5">
-                <span class="text-xs text-gray-500 dark:text-gray-400">{{ formatDate(item.playedAt) }}</span>
-                <span class="text-xs" :class="item.completed ? 'text-green-500 dark:text-green-400' : 'text-gray-500 dark:text-gray-400'">
+                <span class="text-xs text-gray-500 dark:text-gray-400">{{
+                  formatDate(item.playedAt)
+                }}</span>
+                <span
+                  class="text-xs"
+                  :class="
+                    item.completed
+                      ? 'text-green-500 dark:text-green-400'
+                      : 'text-gray-500 dark:text-gray-400'
+                  "
+                >
                   {{ item.completed ? '完整播放' : formatTime(item.playedDuration) }}
                 </span>
               </div>
@@ -192,7 +234,9 @@ function onCoverError(e: Event) {
         </template>
       </template>
       <template v-else>
-        <div class="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-400">
+        <div
+          class="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-400"
+        >
           <MusicIcon :size="48" class="mb-3 opacity-30" />
           <p class="text-sm">暂无播放记录</p>
           <p class="text-xs mt-1">播放的歌曲会在这里显示</p>

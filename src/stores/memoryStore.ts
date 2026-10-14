@@ -55,7 +55,7 @@ export const useMemoryStore = defineStore('memory', () => {
       }
       await loadMemoryForCurrentSong(hash)
     },
-    { immediate: true },
+    { immediate: true }
   )
 
   /** 显式加载指定 hash 的回忆 */
@@ -88,7 +88,7 @@ export const useMemoryStore = defineStore('memory', () => {
         currentHash.value!,
         library.currentSong!.file_path,
         tags,
-        currentLongText.value,
+        currentLongText.value
       )
       if (result) currentMemory.value = result
     }, 300)
@@ -105,7 +105,7 @@ export const useMemoryStore = defineStore('memory', () => {
         currentHash.value!,
         library.currentSong!.file_path,
         currentShortTags.value,
-        text,
+        text
       )
       if (result) currentMemory.value = result
     }, 1000)
@@ -122,7 +122,7 @@ export const useMemoryStore = defineStore('memory', () => {
       currentHash.value,
       library.currentSong.file_path,
       currentShortTags.value,
-      currentLongText.value,
+      currentLongText.value
     )
     if (result) currentMemory.value = result
   }
@@ -142,7 +142,7 @@ export const useMemoryStore = defineStore('memory', () => {
       currentHash.value,
       library.currentSong.title,
       library.currentSong.artist,
-      outputDir,
+      outputDir
     )
   }
 

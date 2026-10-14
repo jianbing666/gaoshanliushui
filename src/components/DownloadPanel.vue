@@ -20,7 +20,7 @@ const library = useLibraryStore()
 const url = ref('')
 const singer = ref('')
 const song = ref('')
-const outputDir = ref(settings.downloadOutputDir)  // 从持久化中恢复
+const outputDir = ref(settings.downloadOutputDir) // 从持久化中恢复
 
 // ============== 单条状态 ==============
 const isDownloading = ref(false)
@@ -57,7 +57,7 @@ const showBatchPanel = ref(false)
 const batchItems = ref<BatchItem[]>([])
 const batchRunning = ref(false)
 const batchCurrentIndex = ref(-1) // -1 表示未开始
-const batchFinished = ref(false)  // 全部完成标记
+const batchFinished = ref(false) // 全部完成标记
 const batchLog = ref<string[]>([]) // 全局日志, 用于汇总
 
 let unlistenProgress: UnlistenFn | null = null
@@ -65,13 +65,20 @@ let unlistenProgress: UnlistenFn | null = null
 // ============== 辅助 ==============
 const stageLabel = computed(() => {
   switch (progressStage.value) {
-    case 'parsing': return '解析链接'
-    case 'downloading_audio': return '下载音频'
-    case 'converting': return '转换 MP3'
-    case 'downloading_cover': return '下载封面'
-    case 'done': return '完成'
-    case 'error': return '失败'
-    default: return '等待'
+    case 'parsing':
+      return '解析链接'
+    case 'downloading_audio':
+      return '下载音频'
+    case 'converting':
+      return '转换 MP3'
+    case 'downloading_cover':
+      return '下载封面'
+    case 'done':
+      return '完成'
+    case 'error':
+      return '失败'
+    default:
+      return '等待'
   }
 })
 
@@ -81,12 +88,10 @@ const canSubmit = computed(() => {
 
 // 批量相关计算属性
 const batchTotal = computed(() => batchItems.value.length)
-const batchCompleted = computed(() =>
-  batchItems.value.filter(i => i.status === 'success' || i.status === 'skipped').length
+const batchCompleted = computed(
+  () => batchItems.value.filter((i) => i.status === 'success' || i.status === 'skipped').length
 )
-const batchFailed = computed(() =>
-  batchItems.value.filter(i => i.status === 'error').length
-)
+const batchFailed = computed(() => batchItems.value.filter((i) => i.status === 'error').length)
 const batchProgress = computed(() => {
   if (batchTotal.value === 0) return 0
   return Math.round((batchCompleted.value / batchTotal.value) * 100)
@@ -218,7 +223,10 @@ function parseBatchContent(content: string): BatchItem[] {
     }
 
     // 用 "-" 分隔 (第一次: singer, 第二次: song, 其余: 并入 song)
-    const parts = line.split('-').map(s => s.trim()).filter(Boolean)
+    const parts = line
+      .split('-')
+      .map((s) => s.trim())
+      .filter(Boolean)
     if (parts.length === 0) continue
 
     // 找到包含 B 站链接的部分
@@ -249,7 +257,7 @@ function parseBatchContent(content: string): BatchItem[] {
       progress: 0,
       stage: '',
       message: '',
-      savedPath: ''
+      savedPath: '',
     })
   }
   return items
@@ -264,9 +272,7 @@ async function selectBatchFile() {
     const selected = await open({
       multiple: false,
       title: '选择批量下载文档',
-      filters: [
-        { name: '文档', extensions: ['md', 'txt', 'markdown'] }
-      ]
+      filters: [{ name: '文档', extensions: ['md', 'txt', 'markdown'] }],
     })
     if (!selected) return
 
@@ -275,20 +281,26 @@ async function selectBatchFile() {
     try {
       content = await invoke<string>('read_batch_file', { path })
     } catch (e) {
-      batchLog.value.unshift(`[${new Date().toLocaleTimeString()}] 读取失败: ${typeof e === 'string' ? e : String(e)}`)
+      batchLog.value.unshift(
+        `[${new Date().toLocaleTimeString()}] 读取失败: ${typeof e === 'string' ? e : String(e)}`
+      )
       return
     }
 
     const items = parseBatchContent(content)
     if (items.length === 0) {
-      batchLog.value.unshift(`[${new Date().toLocaleTimeString()}] 文档中没有解析出有效的下载条目 (格式: 歌手-歌名-链接)`)
+      batchLog.value.unshift(
+        `[${new Date().toLocaleTimeString()}] 文档中没有解析出有效的下载条目 (格式: 歌手-歌名-链接)`
+      )
       return
     }
 
     batchItems.value = items
     batchFinished.value = false
     batchCurrentIndex.value = -1
-    batchLog.value.unshift(`[${new Date().toLocaleTimeString()}] 已加载 ${items.length} 个待下载条目`)
+    batchLog.value.unshift(
+      `[${new Date().toLocaleTimeString()}] 已加载 ${items.length} 个待下载条目`
+    )
     showBatchPanel.value = true
   } catch (e) {
     console.error('[Download] 批量导入失败:', e)
@@ -307,7 +319,9 @@ async function startBatchDownload() {
 
   batchRunning.value = true
   batchFinished.value = false
-  batchLog.value.unshift(`[${new Date().toLocaleTimeString()}] 开始批量下载, 共 ${batchItems.value.length} 项`)
+  batchLog.value.unshift(
+    `[${new Date().toLocaleTimeString()}] 开始批量下载, 共 ${batchItems.value.length} 项`
+  )
 
   for (let i = 0; i < batchItems.value.length; i++) {
     const item = batchItems.value[i]
@@ -329,20 +343,26 @@ async function startBatchDownload() {
       item.stage = '完成'
       item.savedPath = savedPath
       item.message = savedPath
-      batchLog.value.unshift(`[${new Date().toLocaleTimeString()}] ✓ ${i + 1}/${batchItems.value.length} ${item.singer ? item.singer + '-' : ''}${item.song || '未命名'}`)
+      batchLog.value.unshift(
+        `[${new Date().toLocaleTimeString()}] ✓ ${i + 1}/${batchItems.value.length} ${item.singer ? item.singer + '-' : ''}${item.song || '未命名'}`
+      )
     } catch (e) {
       const errMsg = typeof e === 'string' ? e : String(e)
       item.status = 'error'
       item.stage = '失败'
       item.message = errMsg
-      batchLog.value.unshift(`[${new Date().toLocaleTimeString()}] ✗ ${i + 1}/${batchItems.value.length} ${item.singer ? item.singer + '-' : ''}${item.song || '未命名'} - ${errMsg}`)
+      batchLog.value.unshift(
+        `[${new Date().toLocaleTimeString()}] ✗ ${i + 1}/${batchItems.value.length} ${item.singer ? item.singer + '-' : ''}${item.song || '未命名'} - ${errMsg}`
+      )
     }
   }
 
   batchCurrentIndex.value = -1
   batchRunning.value = false
   batchFinished.value = true
-  batchLog.value.unshift(`[${new Date().toLocaleTimeString()}] 批量下载结束, 成功 ${batchCompleted.value}, 失败 ${batchFailed.value}`)
+  batchLog.value.unshift(
+    `[${new Date().toLocaleTimeString()}] 批量下载结束, 成功 ${batchCompleted.value}, 失败 ${batchFailed.value}`
+  )
 
   if (batchCompleted.value > 0) {
     await library.autoLoadMusicLibrary()
@@ -396,10 +416,12 @@ onUnmounted(() => {
 
 <template>
   <div
-    class="w-80 h-full flex flex-col bg-white/50 dark:bg-gray-900/60 backdrop-blur-2xl border-l border-gray-200/60 dark:border-gray-700/60 shadow-2xl"
+    class="w-80 h-full flex flex-col bg-white/50 dark:bg-gray-900/60 backdrop-blur border-l border-gray-200/60 dark:border-gray-700/60 shadow-2xl"
   >
     <!-- 头部 -->
-    <div class="flex items-center justify-between px-5 py-4 border-b border-gray-200/50 dark:border-gray-700/50">
+    <div
+      class="flex items-center justify-between px-5 py-4 border-b border-gray-200/50 dark:border-gray-700/50"
+    >
       <div>
         <h2 class="text-gray-900 dark:text-white text-base font-semibold">下载音乐</h2>
         <p class="text-gray-500 dark:text-gray-400 text-xs">从 B 站视频提取 MP3 与封面</p>
@@ -411,7 +433,15 @@ onUnmounted(() => {
           :disabled="batchRunning || isDownloading"
           @click="selectBatchFile"
         >
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            class="w-4 h-4"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z" />
             <polyline points="14 2 14 8 20 8" />
             <line x1="12" y1="18" x2="12" y2="12" />
@@ -508,9 +538,16 @@ onUnmounted(() => {
       </div>
 
       <!-- 封面预览 -->
-      <div v-if="coverPreview" class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3 flex items-center gap-3">
+      <div
+        v-if="coverPreview"
+        class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3 flex items-center gap-3"
+      >
         <div class="w-12 h-12 rounded bg-gray-200/70 dark:bg-gray-700/70 overflow-hidden shrink-0">
-          <img :src="coverPreview" class="w-full h-full object-cover" referrerpolicy="no-referrer" />
+          <img
+            :src="coverPreview"
+            class="w-full h-full object-cover"
+            referrerpolicy="no-referrer"
+          />
         </div>
         <div class="min-w-0 flex-1">
           <p class="text-xs text-gray-500 dark:text-gray-400">封面预览</p>
@@ -528,19 +565,27 @@ onUnmounted(() => {
               'text-red-600 dark:text-red-400': status === 'error',
             }"
           >
-            {{ isDownloading ? stageLabel : status === 'success' ? '成功' : status === 'error' ? '失败' : '' }}
+            {{
+              isDownloading
+                ? stageLabel
+                : status === 'success'
+                  ? '成功'
+                  : status === 'error'
+                    ? '失败'
+                    : ''
+            }}
           </span>
           <span class="text-gray-500 dark:text-gray-400">{{ progressPercent }}%</span>
         </div>
         <div class="h-1.5 bg-gray-200/60 dark:bg-gray-700/60 rounded-full overflow-hidden">
           <div
-            class="h-full transition-all duration-300"
+            class="h-full origin-left transition-transform duration-300"
             :class="{
               'bg-blue-500': status === 'idle' || isDownloading,
               'bg-green-500': status === 'success',
               'bg-red-500': status === 'error',
             }"
-            :style="{ width: progressPercent + '%' }"
+            :style="{ transform: `scaleX(${progressPercent / 100})` }"
           ></div>
         </div>
         <p
@@ -564,7 +609,10 @@ onUnmounted(() => {
       </div>
 
       <!-- ==================== 批量下载区域 ==================== -->
-      <div v-if="showBatchPanel" class="border-t border-gray-200/50 dark:border-gray-700/50 pt-4 -mx-5 px-5">
+      <div
+        v-if="showBatchPanel"
+        class="border-t border-gray-200/50 dark:border-gray-700/50 pt-4 -mx-5 px-5"
+      >
         <div class="flex items-center justify-between mb-3">
           <div>
             <h3 class="text-sm font-semibold text-gray-900 dark:text-white">批量下载</h3>
@@ -602,14 +650,22 @@ onUnmounted(() => {
                 'text-yellow-600 dark:text-yellow-400': batchFinished && batchFailed > 0,
               }"
             >
-              {{ batchRunning ? `下载中 (${batchCompleted + 1}/${batchTotal})` : batchFinished ? (batchFailed > 0 ? '完成 (部分失败)' : '全部完成') : '' }}
+              {{
+                batchRunning
+                  ? `下载中 (${batchCompleted + 1}/${batchTotal})`
+                  : batchFinished
+                    ? batchFailed > 0
+                      ? '完成 (部分失败)'
+                      : '全部完成'
+                    : ''
+              }}
             </span>
             <span class="text-gray-500 dark:text-gray-400">{{ batchProgress }}%</span>
           </div>
           <div class="h-1.5 bg-gray-200/60 dark:bg-gray-700/60 rounded-full overflow-hidden">
             <div
-              class="h-full transition-all duration-300 bg-blue-500"
-              :style="{ width: batchProgress + '%' }"
+              class="h-full origin-left transition-transform duration-300 bg-blue-500"
+              :style="{ transform: `scaleX(${batchProgress / 100})` }"
             ></div>
           </div>
         </div>
@@ -657,8 +713,13 @@ onUnmounted(() => {
               }"
               :title="item.message"
             >
-              {{ item.stage || (item.status === 'success' ? '✓ 已保存' : item.status === 'error' ? '✗ 失败' : '') }}
-              <span v-if="item.message && item.status === 'error'" class="opacity-75"> · {{ item.message }}</span>
+              {{
+                item.stage ||
+                (item.status === 'success' ? '✓ 已保存' : item.status === 'error' ? '✗ 失败' : '')
+              }}
+              <span v-if="item.message && item.status === 'error'" class="opacity-75">
+                · {{ item.message }}</span
+              >
             </div>
           </div>
         </div>
@@ -676,10 +737,17 @@ onUnmounted(() => {
       </div>
 
       <!-- 批量日志 (最近 8 条) -->
-      <div v-if="batchLog.length > 0" class="border-t border-gray-200/50 dark:border-gray-700/50 pt-3 -mx-5 px-5">
+      <div
+        v-if="batchLog.length > 0"
+        class="border-t border-gray-200/50 dark:border-gray-700/50 pt-3 -mx-5 px-5"
+      >
         <p class="text-xs text-gray-400 dark:text-gray-500 mb-1">最近日志</p>
-        <div class="space-y-0.5 max-h-32 overflow-y-auto text-xs font-mono text-gray-500 dark:text-gray-400">
-          <p v-for="(line, i) in batchLog.slice(0, 8)" :key="i" class="leading-relaxed">{{ line }}</p>
+        <div
+          class="space-y-0.5 max-h-32 overflow-y-auto text-xs font-mono text-gray-500 dark:text-gray-400"
+        >
+          <p v-for="(line, i) in batchLog.slice(0, 8)" :key="i" class="leading-relaxed">
+            {{ line }}
+          </p>
         </div>
       </div>
     </div>

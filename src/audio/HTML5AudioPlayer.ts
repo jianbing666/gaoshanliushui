@@ -78,9 +78,7 @@ export class HTML5AudioPlayer {
   /**
    * 绑定 store 状态的访问器
    */
-  bindStoreAccessors(accessors: {
-    setIsSwitchingSong: (v: boolean) => void
-  }) {
+  bindStoreAccessors(accessors: { setIsSwitchingSong: (v: boolean) => void }) {
     this._setIsSwitchingSong = accessors.setIsSwitchingSong
   }
 

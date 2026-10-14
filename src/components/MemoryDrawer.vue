@@ -69,7 +69,7 @@ watch(
   (tags) => {
     localTags.value = [...tags]
   },
-  { immediate: true },
+  { immediate: true }
 )
 
 /** 保存短标签 */
@@ -112,7 +112,7 @@ watch(
       longText.value = text
     }
   },
-  { immediate: true },
+  { immediate: true }
 )
 
 function onLongTextInput(e: Event) {
@@ -192,20 +192,18 @@ function handleEditMetadata() {
 
 <template>
   <aside
-    class="w-80 h-full flex flex-col backdrop-blur border-l border-gray-200/60 dark:border-gray-700/60 shadow-2xl will-change-auto"
-    :class="
-      hasBackground
-        ? 'bg-white/50 dark:bg-gray-900/50'
-        : 'bg-white/90 dark:bg-gray-900/90'
-    "
+    class="w-80 h-full flex flex-col backdrop-blur border-l border-gray-200/60 dark:border-gray-700/60 shadow-2xl"
+    :class="hasBackground ? 'bg-white/50 dark:bg-gray-900/50' : 'bg-white/90 dark:bg-gray-900/90'"
   >
     <!-- 头部: 歌曲名 + 关闭按钮 -->
-    <div class="px-5 py-4 border-b border-gray-200/50 dark:border-gray-700/50 flex items-center justify-between gap-2 min-w-0">
+    <div
+      class="px-5 py-4 border-b border-gray-200/50 dark:border-gray-700/50 flex items-center justify-between gap-2 min-w-0"
+    >
       <div class="min-w-0 flex-1 flex items-center gap-2">
         <div class="min-w-0 flex-1">
-          <h2 
+          <h2
             ref="songTitleRef"
-            class="text-gray-900 dark:text-white text-base font-semibold truncate" 
+            class="text-gray-900 dark:text-white text-base font-semibold truncate"
             :title="library.currentSong?.title || ''"
           >
             {{ library.currentSong?.title || '请先选择歌曲' }}
@@ -233,14 +231,20 @@ function handleEditMetadata() {
     </div>
 
     <!-- BUG 5 修复: 在抽屉内提供「显示弹幕」开关, 用户可独立控制当前会话的弹幕 -->
-    <div class="px-5 py-2.5 border-b border-gray-200/50 dark:border-gray-700/50 flex items-center justify-between">
+    <div
+      class="px-5 py-2.5 border-b border-gray-200/50 dark:border-gray-700/50 flex items-center justify-between"
+    >
       <div class="flex items-center gap-2 min-w-0">
         <span class="text-xs text-gray-600 dark:text-gray-300 font-medium">显示弹幕</span>
-        <span class="text-[10px] text-gray-400 dark:text-gray-500 truncate">播放时在唱片上方滚动</span>
+        <span class="text-[10px] text-gray-400 dark:text-gray-500 truncate"
+          >播放时在唱片上方滚动</span
+        >
       </div>
       <button
         class="relative w-9 h-5 rounded-full transition-colors shrink-0"
-        :class="settings.showMemoryTags ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'"
+        :class="
+          settings.showMemoryTags ? 'bg-blue-500 dark:bg-blue-600' : 'bg-gray-300 dark:bg-gray-600'
+        "
         :title="settings.showMemoryTags ? '关闭弹幕' : '开启弹幕'"
         @click="settings.setShowMemoryTags(!settings.showMemoryTags)"
       >
@@ -337,6 +341,7 @@ function handleEditMetadata() {
           @blur="onTextareaBlur"
         />
         <!-- 预览模式 -->
+        <!-- eslint-disable-next-line vue/no-v-html -- 渲染的是用户自己写的回忆 Markdown, 非外部输入; 渲染前经 marked 处理 -->
         <div
           v-else
           class="memory-markdown min-h-[120px] max-h-[40vh] overflow-y-auto bg-gray-100/60 dark:bg-gray-800/60 rounded-md px-3 py-2 text-sm text-gray-900 dark:text-white prose prose-sm dark:prose-invert max-w-none"
@@ -354,9 +359,14 @@ function handleEditMetadata() {
           <span class="text-xs font-medium text-gray-600 dark:text-gray-300">导出目录</span>
         </div>
         <div class="flex items-center gap-2">
-          <div class="flex-1 min-w-0 flex items-center gap-1.5 px-2.5 py-2 bg-gray-100/60 dark:bg-gray-800/60 rounded-md">
+          <div
+            class="flex-1 min-w-0 flex items-center gap-1.5 px-2.5 py-2 bg-gray-100/60 dark:bg-gray-800/60 rounded-md"
+          >
             <FolderIcon :size="14" class="shrink-0 text-gray-400 dark:text-gray-500" />
-            <span class="text-xs text-gray-600 dark:text-gray-400 truncate" :title="exportDirDisplay">
+            <span
+              class="text-xs text-gray-600 dark:text-gray-400 truncate"
+              :title="exportDirDisplay"
+            >
               {{ exportDirDisplay }}
             </span>
           </div>
@@ -368,9 +378,7 @@ function handleEditMetadata() {
             <FolderIcon :size="14" />
           </button>
         </div>
-        <p class="text-[10px] text-gray-400 dark:text-gray-500">
-          默认导出到音乐库目录，可自定义
-        </p>
+        <p class="text-[10px] text-gray-400 dark:text-gray-500">默认导出到音乐库目录，可自定义</p>
       </div>
 
       <!-- 操作按钮 -->
@@ -399,7 +407,10 @@ function handleEditMetadata() {
 
       <!-- 导出提示 -->
       <transition name="fade">
-        <p v-if="exportToast" class="text-xs text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 rounded-md px-3 py-2">
+        <p
+          v-if="exportToast"
+          class="text-xs text-green-600 dark:text-green-400 bg-green-50 dark:bg-green-900/20 rounded-md px-3 py-2"
+        >
           {{ exportToast }}
         </p>
       </transition>

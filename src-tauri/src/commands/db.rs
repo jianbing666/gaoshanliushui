@@ -23,15 +23,13 @@ static DB_CONN: Mutex<Option<Connection>> = Mutex::new(None);
 
 /// 获取数据库文件绝对路径
 pub fn db_path(app: &AppHandle) -> Result<PathBuf, String> {
-    let dir = data_dir::get_data_dir_path()
-        .or_else(|_| {
-            app.path()
-                .app_data_dir()
-                .map_err(|e| format!("获取 app_data_dir 失败: {}", e))
-        })?;
+    let dir = data_dir::get_data_dir_path().or_else(|_| {
+        app.path()
+            .app_data_dir()
+            .map_err(|e| format!("获取 app_data_dir 失败: {}", e))
+    })?;
     if !dir.exists() {
-        std::fs::create_dir_all(&dir)
-            .map_err(|e| format!("创建数据目录失败: {}", e))?;
+        std::fs::create_dir_all(&dir).map_err(|e| format!("创建数据目录失败: {}", e))?;
     }
     Ok(dir.join(DB_FILE))
 }

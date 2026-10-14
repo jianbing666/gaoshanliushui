@@ -24,9 +24,9 @@ let unlistenResized: (() => void) | null = null
 onMounted(async () => {
   try {
     isMaximized.value = await appWindow.isMaximized()
-    unlistenResized = await appWindow.onResized(async () => {
+    unlistenResized = (await appWindow.onResized(async () => {
       isMaximized.value = await appWindow.isMaximized()
-    }) as unknown as (() => void)
+    })) as unknown as () => void
   } catch (e) {
     console.warn('[TitleBar] 获取窗口状态失败:', e)
   }
@@ -79,11 +79,29 @@ const emit = defineEmits<{
         data-tauri-no-drag
         @click="ui.toggleSidebar()"
       >
-        <svg v-if="ui.showSidebar" class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg
+          v-if="ui.showSidebar"
+          class="w-4 h-4"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
           <rect x="3" y="4" width="18" height="16" rx="2" ry="2"></rect>
           <line x1="9" y1="4" x2="9" y2="20"></line>
         </svg>
-        <svg v-else class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg
+          v-else
+          class="w-4 h-4"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
           <rect x="3" y="4" width="18" height="16" rx="2" ry="2"></rect>
           <line x1="15" y1="4" x2="15" y2="20"></line>
         </svg>
@@ -91,14 +109,24 @@ const emit = defineEmits<{
       <!-- 历史记录按钮 -->
       <button
         class="w-7 h-7 flex items-center justify-center rounded-md transition-colors"
-        :class="ui.showHistoryDrawer
-          ? 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400'
-          : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-200'"
+        :class="
+          ui.showHistoryDrawer
+            ? 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400'
+            : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-200'
+        "
         title="历史记录"
         data-tauri-no-drag
         @click="ui.toggleHistoryDrawer()"
       >
-        <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <svg
+          class="w-4 h-4"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          stroke-width="2"
+          stroke-linecap="round"
+          stroke-linejoin="round"
+        >
           <path d="M3 12a9 9 0 1 0 3-6.7L3 8"></path>
           <path d="M3 3v5h5"></path>
           <path d="M12 7v5l4 2"></path>
@@ -119,7 +147,15 @@ const emit = defineEmits<{
           title="迷你模式"
           @click="emit('toggleMiniMode')"
         >
-          <svg class="w-4 h-4" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            class="w-4 h-4"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <path d="M8 3v3a2 2 0 0 1-2 2H3"></path>
             <path d="M21 8h-3a2 2 0 0 1-2-2V3"></path>
             <path d="M3 16h3a2 2 0 0 1 2 2v3"></path>
@@ -130,9 +166,11 @@ const emit = defineEmits<{
         <!-- 下载按钮 -->
         <button
           class="w-8 h-8 flex items-center justify-center rounded-md transition-colors"
-          :class="ui.showDownloadPanel
-            ? 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400'
-            : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-200'"
+          :class="
+            ui.showDownloadPanel
+              ? 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400'
+              : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-200'
+          "
           title="下载"
           @click="ui.toggleDownloadPanel()"
         >
@@ -142,9 +180,11 @@ const emit = defineEmits<{
         <!-- 统计按钮 -->
         <button
           class="w-8 h-8 flex items-center justify-center rounded-md transition-colors"
-          :class="ui.showStatsPanel
-            ? 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400'
-            : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-200'"
+          :class="
+            ui.showStatsPanel
+              ? 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400'
+              : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-200'
+          "
           title="统计"
           @click="ui.toggleStatsPanel()"
         >
@@ -154,9 +194,11 @@ const emit = defineEmits<{
         <!-- 均衡器按钮 -->
         <button
           class="w-8 h-8 flex items-center justify-center rounded-md transition-colors"
-          :class="ui.showEqualizerPanel
-            ? 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400'
-            : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-200'"
+          :class="
+            ui.showEqualizerPanel
+              ? 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400'
+              : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-200'
+          "
           title="均衡器"
           @click="ui.toggleRightPanel('equalizer')"
         >
@@ -166,9 +208,11 @@ const emit = defineEmits<{
         <!-- Memory feature - 高山流水 v1.1: 记忆按钮 (统计左、设置右) -->
         <button
           class="w-8 h-8 flex items-center justify-center rounded-md transition-colors"
-          :class="ui.showMemoryDrawer
-            ? 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400'
-            : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-200'"
+          :class="
+            ui.showMemoryDrawer
+              ? 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400'
+              : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-200'
+          "
           title="回忆"
           @click="ui.toggleMemoryDrawer()"
         >
@@ -178,9 +222,11 @@ const emit = defineEmits<{
         <!-- 设置按钮 -->
         <button
           class="w-8 h-8 flex items-center justify-center rounded-md transition-colors"
-          :class="ui.showSettings
-            ? 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400'
-            : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-200'"
+          :class="
+            ui.showSettings
+              ? 'bg-blue-500/10 dark:bg-blue-500/20 text-blue-600 dark:text-blue-400'
+              : 'text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 hover:text-gray-700 dark:hover:text-gray-200'
+          "
           title="设置"
           @click="ui.toggleSettingsPanel()"
         >
@@ -199,7 +245,14 @@ const emit = defineEmits<{
           title="最小化"
           @click="minimize"
         >
-          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <svg
+            class="w-3.5 h-3.5"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+          >
             <path d="M5 12h14"></path>
           </svg>
         </button>
@@ -210,10 +263,28 @@ const emit = defineEmits<{
           :title="isMaximized ? '还原' : '最大化'"
           @click="toggleMaximize"
         >
-          <svg v-if="!isMaximized" class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            v-if="!isMaximized"
+            class="w-3.5 h-3.5"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <rect x="4" y="4" width="16" height="16" rx="1"></rect>
           </svg>
-          <svg v-else class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <svg
+            v-else
+            class="w-3.5 h-3.5"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+            stroke-linejoin="round"
+          >
             <path d="M8 3v3a2 2 0 0 1-2 2H3"></path>
             <path d="M21 8h-3a2 2 0 0 1-2-2V3"></path>
             <path d="M3 16h3a2 2 0 0 1 2 2v3"></path>
@@ -227,7 +298,14 @@ const emit = defineEmits<{
           title="关闭"
           @click="closeWindow"
         >
-          <svg class="w-3.5 h-3.5" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+          <svg
+            class="w-3.5 h-3.5"
+            viewBox="0 0 24 24"
+            fill="none"
+            stroke="currentColor"
+            stroke-width="2"
+            stroke-linecap="round"
+          >
             <path d="M18 6 6 18"></path>
             <path d="m6 6 12 12"></path>
           </svg>

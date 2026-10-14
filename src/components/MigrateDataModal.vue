@@ -160,7 +160,9 @@ onUnmounted(() => {
           <div class="space-y-2">
             <label class="text-xs text-gray-500 dark:text-gray-400">目标目录</label>
             <div class="flex gap-2">
-              <div class="flex-1 px-3 py-2 bg-gray-100/60 dark:bg-gray-700/60 rounded-lg text-sm text-gray-900 dark:text-white truncate">
+              <div
+                class="flex-1 px-3 py-2 bg-gray-100/60 dark:bg-gray-700/60 rounded-lg text-sm text-gray-900 dark:text-white truncate"
+              >
                 {{ targetPath || '请选择目标目录' }}
               </div>
               <button
@@ -175,18 +177,31 @@ onUnmounted(() => {
 
           <div v-if="currentStage !== 'idle'" class="space-y-3">
             <div class="flex items-center justify-between">
-              <span class="text-xs text-gray-500 dark:text-gray-400">{{ stageLabel(currentStage) }}</span>
-              <span class="text-xs text-gray-600 dark:text-gray-400 font-medium">{{ percent.toFixed(1) }}%</span>
+              <span class="text-xs text-gray-500 dark:text-gray-400">{{
+                stageLabel(currentStage)
+              }}</span>
+              <span class="text-xs text-gray-600 dark:text-gray-400 font-medium"
+                >{{ percent.toFixed(1) }}%</span
+              >
             </div>
 
             <div class="w-full h-2 bg-gray-100/60 dark:bg-gray-700/60 rounded-full overflow-hidden">
+              <!--
+                进度条用 scaleX 而不是 width：
+                迁移/下载时进度按事件频率更新，改 width 每次都要重新布局，
+                改 transform 只走合成，且圆角由父级 overflow-hidden 保证不被压扁。
+              -->
               <div
-                class="h-full bg-blue-500 dark:bg-blue-400 rounded-full transition-all duration-100 ease-linear"
-                :style="{ width: percent + '%' }"
+                class="h-full origin-left bg-blue-500 dark:bg-blue-400 rounded-full transition-transform duration-100 ease-linear"
+                :style="{ transform: `scaleX(${percent / 100})` }"
               ></div>
             </div>
 
-            <p v-if="currentFile" class="text-xs text-gray-500 dark:text-gray-400 truncate" :title="currentFile">
+            <p
+              v-if="currentFile"
+              class="text-xs text-gray-500 dark:text-gray-400 truncate"
+              :title="currentFile"
+            >
               {{ currentFile }}
             </p>
 
@@ -197,19 +212,30 @@ onUnmounted(() => {
             </div>
           </div>
 
-          <div v-if="currentStage === 'completed'" class="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+          <div
+            v-if="currentStage === 'completed'"
+            class="p-3 bg-green-50 dark:bg-green-900/20 rounded-lg"
+          >
             <p class="text-sm text-green-700 dark:text-green-400 font-medium">迁移成功</p>
             <p class="text-xs text-green-600/80 dark:text-green-400/70 mt-1">
               数据已迁移到新目录，建议重启应用确保所有模块正常工作。
             </p>
           </div>
 
-          <div v-if="currentStage === 'failed' && errorMsg" class="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg">
+          <div
+            v-if="currentStage === 'failed' && errorMsg"
+            class="p-3 bg-red-50 dark:bg-red-900/20 rounded-lg"
+          >
             <p class="text-sm text-red-700 dark:text-red-400 font-medium">迁移失败</p>
-            <p class="text-xs text-red-600/80 dark:text-red-400/70 mt-1 break-all">{{ errorMsg }}</p>
+            <p class="text-xs text-red-600/80 dark:text-red-400/70 mt-1 break-all">
+              {{ errorMsg }}
+            </p>
           </div>
 
-          <p v-if="currentStage === 'idle'" class="text-xs text-gray-400 dark:text-gray-500 leading-relaxed">
+          <p
+            v-if="currentStage === 'idle'"
+            class="text-xs text-gray-400 dark:text-gray-500 leading-relaxed"
+          >
             迁移过程中请勿关闭应用。迁移完成后将自动切换到新目录。
           </p>
         </div>
@@ -217,9 +243,11 @@ onUnmounted(() => {
         <div class="px-5 py-3 border-t border-gray-100 dark:border-gray-700 flex justify-end gap-2">
           <button
             class="px-4 py-2 rounded-lg text-sm transition-all"
-            :class="currentStage === 'completed'
-              ? 'bg-blue-500 hover:bg-blue-600 text-white'
-              : 'bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300'"
+            :class="
+              currentStage === 'completed'
+                ? 'bg-blue-500 hover:bg-blue-600 text-white'
+                : 'bg-gray-100 dark:bg-gray-700 hover:bg-gray-200 dark:hover:bg-gray-600 text-gray-700 dark:text-gray-300'
+            "
             :disabled="isMigrating"
             @click="closeModal"
           >

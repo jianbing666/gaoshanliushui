@@ -51,12 +51,16 @@ export class Equalizer {
 
     try {
       this.inputNode.disconnect()
-    } catch {}
+    } catch {
+      // 未接入链路时 disconnect 会抛错, 属正常情况
+    }
 
     for (const filter of this.filters) {
       try {
         filter.disconnect()
-      } catch {}
+      } catch {
+        // 同上: 该滤波器尚未接入时 disconnect 会抛错
+      }
     }
 
     if (this._enabled && this.filters.length > 0) {
@@ -135,7 +139,9 @@ export class Equalizer {
     if (this.inputNode) {
       try {
         this.inputNode.disconnect()
-      } catch {}
+      } catch {
+        // 未接入链路时 disconnect 会抛错, 属正常情况
+      }
     }
     this.inputNode = null
   }

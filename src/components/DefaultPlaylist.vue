@@ -26,11 +26,7 @@ function getSongCount(): number {
     <!-- 音乐图标 -->
     <MusicIcon
       :size="16"
-      :class="
-        isActive
-          ? 'text-blue-500 dark:text-blue-400'
-          : 'text-gray-400 dark:text-gray-500'
-      "
+      :class="isActive ? 'text-blue-500 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'"
     />
 
     <!-- 歌单名称 -->
@@ -39,11 +35,7 @@ function getSongCount(): number {
     <!-- 歌曲数量 -->
     <span
       class="text-xs shrink-0"
-      :class="
-        isActive
-          ? 'text-blue-500 dark:text-blue-400'
-          : 'text-gray-400 dark:text-gray-500'
-      "
+      :class="isActive ? 'text-blue-500 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'"
     >
       {{ getSongCount() }}
     </span>

@@ -2,7 +2,14 @@ import { defineStore } from 'pinia'
 import { ref, computed, watch, markRaw } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { convertFileSrc } from '@tauri-apps/api/core'
-import type { ThemeMode, BackgroundSettings, FontSettings, FontFamily, DataDirInfo, FileUsage } from '@/types/song'
+import type {
+  ThemeMode,
+  BackgroundSettings,
+  FontSettings,
+  FontFamily,
+  DataDirInfo,
+  FileUsage,
+} from '@/types/song'
 import type { LoudnessMode } from '@/audio/LoudnessNormalizer'
 import { loadSettings, saveSettings, getSystemTheme } from '@/utils/storage'
 
@@ -67,7 +74,7 @@ export const useSettingsStore = defineStore('settings', () => {
   // ========== 背景图片 ==========
   const background = ref<BackgroundSettings>({
     ...defaultBackground,
-    ...(saved.background as Partial<BackgroundSettings> || {}),
+    ...((saved.background as Partial<BackgroundSettings>) || {}),
   })
 
   /** 背景轮播定时器 */
@@ -120,23 +127,18 @@ export const useSettingsStore = defineStore('settings', () => {
   function nextBackgroundImage() {
     if (!background.value.imageList?.length) return
     const len = background.value.imageList.length
-    background.value.currentImageIndex =
-      ((background.value.currentImageIndex ?? 0) + 1) % len
+    background.value.currentImageIndex = ((background.value.currentImageIndex ?? 0) + 1) % len
   }
 
   function prevBackgroundImage() {
     if (!background.value.imageList?.length) return
     const len = background.value.imageList.length
-    background.value.currentImageIndex =
-      ((background.value.currentImageIndex ?? 0) - 1 + len) % len
+    background.value.currentImageIndex = ((background.value.currentImageIndex ?? 0) - 1 + len) % len
   }
 
   function startBackgroundSlideshow() {
     stopBackgroundSlideshow()
-    if (
-      background.value.mode !== 'folder' ||
-      !background.value.imageList?.length
-    ) return
+    if (background.value.mode !== 'folder' || !background.value.imageList?.length) return
     const interval = (background.value.interval ?? 30) * 1000
     backgroundTimer = window.setInterval(() => {
       nextBackgroundImage()
@@ -160,6 +162,33 @@ export const useSettingsStore = defineStore('settings', () => {
     }
   }
 
+  // ========== 背景参数调整中 (瞬态, 不持久化) ==========
+  /*
+    背景图层是这个应用里最大的一张"滤镜表面"：全屏尺寸 + filter: blur(0~30px)，
+    拖动"模糊程度 / 缩放比例"滑杆时，每个 input 事件都会改变它，触发整屏重新
+    栅格化（主线程）+ 重新套滤镜。这里提供一个瞬态标记，让背景图层在调整期间
+    临时拿到 will-change: transform, filter，把这份重算挪到合成线程；
+    松手（change）后立刻收回，避免长期占着一张全屏纹理。
+  */
+  const backgroundAdjusting = ref(false)
+  let backgroundAdjustingTimer: ReturnType<typeof setTimeout> | null = null
+  /** 兜底时长：change 万一没来（拖拽被系统中断等），也必须收回 */
+  const BACKGROUND_ADJUST_HOLD_MS = 1500
+
+  function setBackgroundAdjusting(active: boolean) {
+    if (backgroundAdjustingTimer !== null) {
+      clearTimeout(backgroundAdjustingTimer)
+      backgroundAdjustingTimer = null
+    }
+    backgroundAdjusting.value = active
+    if (active) {
+      backgroundAdjustingTimer = setTimeout(() => {
+        backgroundAdjusting.value = false
+        backgroundAdjustingTimer = null
+      }, BACKGROUND_ADJUST_HOLD_MS)
+    }
+  }
+
   // ========== 频谱设置 ==========
   const showSpectrum = ref<boolean>(Boolean(saved.showSpectrum ?? true))
   // Memory feature - 高山流水 v1.1: 是否在唱片上方显示 tag 弹幕 (默认开启)
@@ -169,11 +198,23 @@ export const useSettingsStore = defineStore('settings', () => {
   const migratedQuality: SpectrumQuality =
     typeof saved.spectrumQuality === 'string'
       ? (saved.spectrumQuality as SpectrumQuality)
-      : (saved.spectrumLowPower ? 'low' : 'balanced')
+      : saved.spectrumLowPower
+        ? 'low'
+        : 'balanced'
   const spectrumQuality = ref<SpectrumQuality>(migratedQuality)
 
   function setShowSpectrum(value: boolean) {
     showSpectrum.value = value
+  }
+
+  // ========== 智能随机 ==========
+  //
+  // 开启后, 随机播放按权重抽样 (喜爱 / 频繁播放 / 当天新增加分, 常没听完扣分),
+  // 关闭则与历史版本完全一致的等概率随机。
+  const smartShuffle = ref<boolean>(Boolean(saved.smartShuffle ?? true))
+
+  function setSmartShuffle(value: boolean) {
+    smartShuffle.value = value
   }
 
   // Memory feature - 高山流水 v1.1: 切换弹幕显示
@@ -184,7 +225,9 @@ export const useSettingsStore = defineStore('settings', () => {
   function setSpectrumQuality(value: SpectrumQuality) {
     spectrumQuality.value = value
     // 切换频谱质量档位时触发 GC, 释放旧的频谱缓冲区等临时对象
-    void invoke('clean_renderer_memory').catch(() => { /* 静默失败 */ })
+    void invoke('clean_renderer_memory').catch(() => {
+      /* 静默失败 */
+    })
   }
 
   const spectrumSampleInterval = computed(() => {
@@ -391,7 +434,7 @@ export const useSettingsStore = defineStore('settings', () => {
   // ========== 设置面板展开状态 ==========
   type SettingsSection = 'appearance' | 'library' | 'system' | 'data' | 'shortcuts' | 'background'
   const expandedSettingsSections = ref<Set<SettingsSection>>(
-    new Set(saved.expandedSettingsSections as SettingsSection[] ?? [])
+    new Set((saved.expandedSettingsSections as SettingsSection[]) ?? [])
   )
 
   function toggleSettingsSection(section: SettingsSection) {
@@ -411,7 +454,7 @@ export const useSettingsStore = defineStore('settings', () => {
   // ========== 字体设置 ==========
   const fontSettings = ref<FontSettings>({
     ...defaultFontSettings,
-    ...(saved.fontSettings as Partial<FontSettings> || {}),
+    ...((saved.fontSettings as Partial<FontSettings>) || {}),
   })
 
   // 字体映射 (markRaw 避免深 Proxy 包装)
@@ -426,9 +469,7 @@ export const useSettingsStore = defineStore('settings', () => {
   const currentFontFamily = computed(() => fontFamilyMap[fontSettings.value.family])
   const currentFontSize = computed(() => `${fontSettings.value.size}px`)
   const currentFontColor = computed(() =>
-    fontSettings.value.useThemeColor
-      ? ''
-      : fontSettings.value.customColor || ''
+    fontSettings.value.useThemeColor ? '' : fontSettings.value.customColor || ''
   )
 
   function applyFontSettings() {
@@ -469,8 +510,36 @@ export const useSettingsStore = defineStore('settings', () => {
   // ========== 持久化(防抖) ==========
   let settingsSaveTimer: ReturnType<typeof setTimeout> | null = null
   watch(
-    [theme, background, minimizeToTray, fontSettings, showSpectrum, spectrumQuality, downloadOutputDir, showMemoryTags, memoryExportDir, expandedSettingsSections, loudnessNormalization, loudnessMode],
-    ([th, bg, mt, fs, spectrum, spectrumQualityVal, dlDir, showMemTags, memDir, expandedSections, loudnessNorm, loudMode]) => {
+    [
+      theme,
+      background,
+      minimizeToTray,
+      fontSettings,
+      showSpectrum,
+      spectrumQuality,
+      downloadOutputDir,
+      showMemoryTags,
+      memoryExportDir,
+      expandedSettingsSections,
+      loudnessNormalization,
+      loudnessMode,
+      smartShuffle,
+    ],
+    ([
+      th,
+      bg,
+      mt,
+      fs,
+      spectrum,
+      spectrumQualityVal,
+      dlDir,
+      showMemTags,
+      memDir,
+      expandedSections,
+      loudnessNorm,
+      loudMode,
+      smartShuffleVal,
+    ]) => {
       if (settingsSaveTimer) {
         clearTimeout(settingsSaveTimer)
       }
@@ -488,6 +557,7 @@ export const useSettingsStore = defineStore('settings', () => {
           expandedSettingsSections: Array.from(expandedSections as Set<string>),
           loudnessNormalization: loudnessNorm,
           loudnessMode: loudMode,
+          smartShuffle: smartShuffleVal,
         })
       }, 300)
     },
@@ -529,6 +599,8 @@ export const useSettingsStore = defineStore('settings', () => {
     nextBackgroundImage,
     prevBackgroundImage,
     updateBackgroundSetting,
+    backgroundAdjusting,
+    setBackgroundAdjusting,
     // 频谱
     showSpectrum,
     spectrumQuality,
@@ -542,6 +614,9 @@ export const useSettingsStore = defineStore('settings', () => {
     resumeSpectrum,
     pauseAllBackgroundAnimations,
     resumeAllBackgroundAnimations,
+    // 智能随机
+    smartShuffle,
+    setSmartShuffle,
     // Memory feature - 高山流水 v1.1: 弹幕显示开关
     showMemoryTags,
     setShowMemoryTags,

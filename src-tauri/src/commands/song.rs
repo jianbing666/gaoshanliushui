@@ -1,7 +1,7 @@
-use std::path::Path;
-use rusqlite::params;
-use tauri::AppHandle;
 use crate::commands::db;
+use rusqlite::params;
+use std::path::Path;
+use tauri::AppHandle;
 
 #[tauri::command]
 pub async fn delete_song(
@@ -14,7 +14,13 @@ pub async fn delete_song(
         conn.query_row::<(String, String, String), _, _>(
             "SELECT song_path, cover_path, title FROM songs WHERE song_hash = ?1",
             params![song_hash_for_db],
-            |row| Ok((row.get::<_, String>(0)?, row.get::<_, String>(1)?, row.get::<_, String>(2)?)),
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
         )
         .map_err(|e| format!("查询歌曲信息失败: {}", e))
     })
@@ -46,10 +52,11 @@ pub async fn delete_song(
                 for entry in entries.flatten() {
                     let path = entry.path();
                     if let Some(stem) = path.file_stem().and_then(|s| s.to_str()) {
-                        if stem == song_stem && path.extension().and_then(|e| e.to_str()) != Some("mp3") {
-                            if path.is_file() {
-                                let _ = std::fs::remove_file(&path);
-                            }
+                        if stem == song_stem
+                            && path.extension().and_then(|e| e.to_str()) != Some("mp3")
+                            && path.is_file()
+                        {
+                            let _ = std::fs::remove_file(&path);
                         }
                     }
                 }
@@ -58,11 +65,8 @@ pub async fn delete_song(
     }
 
     db::run_db(&app, move |conn| {
-        conn.execute(
-            "DELETE FROM songs WHERE song_hash = ?1",
-            params![song_hash],
-        )
-        .map_err(|e| format!("删除歌曲数据库记录失败: {}", e))?;
+        conn.execute("DELETE FROM songs WHERE song_hash = ?1", params![song_hash])
+            .map_err(|e| format!("删除歌曲数据库记录失败: {}", e))?;
         Ok(())
     })
     .await?;

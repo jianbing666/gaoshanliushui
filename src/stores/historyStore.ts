@@ -54,6 +54,7 @@ interface SongBasicInfo {
   artist: string
   album: string
   cover_path: string | null
+  cover_thumb_path: string | null
   duration: number
 }
 
@@ -77,6 +78,10 @@ export const useHistoryStore = defineStore('history', () => {
   const songPlayCount = shallowRef<Record<string, number>>({})
   // 按歌曲累计时长: { songId: totalPlayedSeconds }
   const songPlayDuration = shallowRef<Record<string, number>>({})
+  // 按歌曲完整播放次数 (智能随机计算完成率用): { songId: completedCount }
+  const songCompletedCount = shallowRef<Record<string, number>>({})
+  // 按歌曲最近一次有效播放时间 / Unix 毫秒 (智能随机做时间衰减用): { songId: lastPlayedAt }
+  const songLastPlayedAt = shallowRef<Record<string, number>>({})
   // 歌曲基本信息 (每首歌只存一份, 用于统计展示): { songId: SongBasicInfo }
   const songInfoMap = shallowRef<Record<string, SongBasicInfo>>({})
   // 完整历史记录是否已加载到内存 (懒加载标记)
@@ -103,6 +108,7 @@ export const useHistoryStore = defineStore('history', () => {
       album: r.album,
       duration: r.duration,
       cover_path: r.cover_path ? r.cover_path : null,
+      cover_thumb_path: r.cover_thumb_path ? r.cover_thumb_path : null,
       file_path: r.song_path,
       playedAt: r.played_at,
       playedDuration: r.played_duration,
@@ -133,20 +139,27 @@ export const useHistoryStore = defineStore('history', () => {
     // 全量按歌曲分组 (后端不做 top N 截断, 最多 10000 条记录, 分组数有限)
     const countMap: Record<string, number> = {}
     const durMap: Record<string, number> = {}
+    const completedMap: Record<string, number> = {}
+    const lastPlayedMap: Record<string, number> = {}
     const infoMap: Record<string, SongBasicInfo> = {}
     for (const s of stats.by_song ?? []) {
       countMap[s.song_hash] = s.count
       durMap[s.song_hash] = s.total_duration
+      completedMap[s.song_hash] = s.completed_count || 0
+      lastPlayedMap[s.song_hash] = s.last_played_at || 0
       infoMap[s.song_hash] = {
         title: s.title,
         artist: s.artist,
         album: s.album,
         cover_path: s.cover_path || null,
+        cover_thumb_path: s.cover_thumb_path || null,
         duration: s.duration,
       }
     }
     songPlayCount.value = countMap
     songPlayDuration.value = durMap
+    songCompletedCount.value = completedMap
+    songLastPlayedAt.value = lastPlayedMap
     songInfoMap.value = infoMap
   }
 
@@ -191,13 +204,14 @@ export const useHistoryStore = defineStore('history', () => {
       dbLoaded = true
     } catch (e) {
       console.warn('[History] 从 SQLite 加载失败, 回退到 localStorage:', e)
-      // 回退到 localStorage
+      // 回退到 localStorage。注意: dbLoaded 保持 false —— 后端命令不可用时,
+      // 后续 upsert/delete/clear 等写入路径会因 if (!dbLoaded) return 正确跳过 SQLite,
+      // 避免假装成功实际静默丢失数据; loadFromDb 的互斥锁也保持打开, 将来可重试
       playHistory.value = loadPlayHistory()
       const localFull = loadFullPlayHistory()
       buildStatsIndexFromItems(localFull)
       fullPlayHistory.value = localFull
       fullHistoryLoaded.value = true
-      dbLoaded = true
     }
   }
 
@@ -217,19 +231,8 @@ export const useHistoryStore = defineStore('history', () => {
     try {
       const records = await invoke<any[]>('get_play_history', { limit: MAX_FULL_HISTORY_ITEMS })
       if (records && records.length > 0) {
-        fullPlayHistory.value = records.map((r) => ({
-          id: r.id,
-          songId: r.song_hash,
-          title: r.title,
-          artist: r.artist,
-          album: r.album,
-          duration: r.duration,
-          cover_path: r.cover_path ? r.cover_path : null,
-          file_path: r.song_path,
-          playedAt: r.played_at,
-          playedDuration: r.played_duration,
-          completed: r.completed,
-        }))
+        // 复用 mapRecord, 避免与 loadFromDb 的内联映射产生字段漂移
+        fullPlayHistory.value = records.map(mapRecord)
       } else {
         fullPlayHistory.value = []
       }
@@ -253,6 +256,7 @@ export const useHistoryStore = defineStore('history', () => {
         album: item.album,
         duration: Math.round(item.duration) || 0,
         cover_path: item.cover_path || '',
+        cover_thumb_path: item.cover_thumb_path || '',
         played_at: item.playedAt,
         // Rust 侧字段为 i64, 浮点秒会导致整批反序列化失败, 必须取整
         played_duration: Math.max(0, Math.round(item.playedDuration)),
@@ -292,6 +296,8 @@ export const useHistoryStore = defineStore('history', () => {
     const byDay: Record<string, DailyStat> = {}
     const count: Record<string, number> = {}
     const duration: Record<string, number> = {}
+    const completed: Record<string, number> = {}
+    const lastPlayed: Record<string, number> = {}
     const infoMap: Record<string, SongBasicInfo> = {}
     const uniqueIds = new Set<string>()
     let localTotalDuration = 0
@@ -317,6 +323,13 @@ export const useHistoryStore = defineStore('history', () => {
       count[item.songId] = (count[item.songId] || 0) + 1
       // 按歌曲累计时长
       duration[item.songId] = (duration[item.songId] || 0) + item.playedDuration
+      // 按歌曲完整播放次数 + 最近播放时间
+      if (item.completed) {
+        completed[item.songId] = (completed[item.songId] || 0) + 1
+      }
+      if (item.playedAt > (lastPlayed[item.songId] || 0)) {
+        lastPlayed[item.songId] = item.playedAt
+      }
       // 歌曲基本信息 (只存一份)
       if (!infoMap[item.songId]) {
         infoMap[item.songId] = {
@@ -324,6 +337,7 @@ export const useHistoryStore = defineStore('history', () => {
           artist: item.artist,
           album: item.album,
           cover_path: item.cover_path,
+          cover_thumb_path: item.cover_thumb_path ?? null,
           duration: item.duration,
         }
       }
@@ -337,6 +351,8 @@ export const useHistoryStore = defineStore('history', () => {
     dailyStats.value = byDay
     songPlayCount.value = count
     songPlayDuration.value = duration
+    songCompletedCount.value = completed
+    songLastPlayedAt.value = lastPlayed
     songInfoMap.value = infoMap
     totalPlayedDuration = localTotalDuration
     totalCompletedCount = localTotalCompleted
@@ -352,6 +368,8 @@ export const useHistoryStore = defineStore('history', () => {
     dailyStats.value = {}
     songPlayCount.value = {}
     songPlayDuration.value = {}
+    songCompletedCount.value = {}
+    songLastPlayedAt.value = {}
     songInfoMap.value = {}
   }
 
@@ -372,6 +390,7 @@ export const useHistoryStore = defineStore('history', () => {
         album: item.album,
         duration: item.duration,
         cover_path: item.cover_path || '',
+        cover_thumb_path: item.cover_thumb_path || '',
         played_at: item.playedAt,
         played_duration: Math.round(item.playedDuration),
         completed: item.completed,
@@ -404,12 +423,16 @@ export const useHistoryStore = defineStore('history', () => {
 
     currentHistoryItem = {
       id: generateId('history'),
-      songId: song.id,
+      // 存内容指纹而非路径哈希: play_history.song_hash 在语义上是与 songs 表
+      // 相同的内容指纹, 这样移动/改名文件后仍能关联到同一首歌。
+      // 旧数据存的是 song.id, 反查侧已做兼容(见 utils/songIdentity.ts)。
+      songId: song.content_hash || song.id,
       title: song.title,
       artist: song.artist,
       album: song.album,
       duration: song.duration,
       cover_path: song.cover_path,
+      cover_thumb_path: song.cover_thumb_path ?? null,
       file_path: song.file_path,
       playedAt: Date.now(),
       playedDuration: 0,
@@ -549,6 +572,18 @@ export const useHistoryStore = defineStore('history', () => {
       ...songPlayDuration.value,
       [item.songId]: (songPlayDuration.value[item.songId] || 0) + item.playedDuration,
     }
+    if (item.completed) {
+      songCompletedCount.value = {
+        ...songCompletedCount.value,
+        [item.songId]: (songCompletedCount.value[item.songId] || 0) + 1,
+      }
+    }
+    if (item.playedAt > (songLastPlayedAt.value[item.songId] || 0)) {
+      songLastPlayedAt.value = {
+        ...songLastPlayedAt.value,
+        [item.songId]: item.playedAt,
+      }
+    }
 
     // 更新歌曲基本信息 (首次出现时添加)
     if (oldCount === 0) {
@@ -559,6 +594,7 @@ export const useHistoryStore = defineStore('history', () => {
           artist: item.artist,
           album: item.album,
           cover_path: item.cover_path,
+          cover_thumb_path: item.cover_thumb_path ?? null,
           duration: item.duration,
         },
       }
@@ -633,6 +669,12 @@ export const useHistoryStore = defineStore('history', () => {
       }
       const oldCount = songPlayCount.value[removed.songId] || 0
       const newCount = Math.max(0, oldCount - 1)
+      const oldCompleted = songCompletedCount.value[removed.songId] || 0
+      const newCompleted = Math.max(0, oldCompleted - (removed.completed ? 1 : 0))
+      // 最近播放时间重新取自展示历史 (每首歌只保留最新一条), 无剩余记录则清空该项
+      const remainingLatest = playHistory.value
+        .filter((h) => h.songId === removed!.songId)
+        .reduce((max, h) => Math.max(max, h.playedAt), 0)
       if (newCount === 0) {
         const newCountMap = { ...songPlayCount.value }
         delete newCountMap[removed.songId]
@@ -640,6 +682,12 @@ export const useHistoryStore = defineStore('history', () => {
         const newDurMap = { ...songPlayDuration.value }
         delete newDurMap[removed.songId]
         songPlayDuration.value = newDurMap
+        const newCompletedMap = { ...songCompletedCount.value }
+        delete newCompletedMap[removed.songId]
+        songCompletedCount.value = newCompletedMap
+        const newLastPlayedMap = { ...songLastPlayedAt.value }
+        delete newLastPlayedMap[removed.songId]
+        songLastPlayedAt.value = newLastPlayedMap
         const newInfoMap = { ...songInfoMap.value }
         delete newInfoMap[removed.songId]
         songInfoMap.value = newInfoMap
@@ -647,7 +695,18 @@ export const useHistoryStore = defineStore('history', () => {
         songPlayCount.value = { ...songPlayCount.value, [removed.songId]: newCount }
         songPlayDuration.value = {
           ...songPlayDuration.value,
-          [removed.songId]: Math.max(0, (songPlayDuration.value[removed.songId] || 0) - removed.playedDuration),
+          [removed.songId]: Math.max(
+            0,
+            (songPlayDuration.value[removed.songId] || 0) - removed.playedDuration
+          ),
+        }
+        songCompletedCount.value = {
+          ...songCompletedCount.value,
+          [removed.songId]: newCompleted,
+        }
+        songLastPlayedAt.value = {
+          ...songLastPlayedAt.value,
+          [removed.songId]: remainingLatest,
         }
       }
       totalPlayCount = Math.max(0, totalPlayCount - 1)
@@ -658,7 +717,9 @@ export const useHistoryStore = defineStore('history', () => {
 
     // 同步删除 SQLite
     if (dbLoaded) {
-      invoke('delete_play_history', { id }).catch((e) => console.warn('[History] 从 SQLite 删除失败:', e))
+      invoke('delete_play_history', { id }).catch((e) =>
+        console.warn('[History] 从 SQLite 删除失败:', e)
+      )
     }
   }
 
@@ -667,13 +728,20 @@ export const useHistoryStore = defineStore('history', () => {
   /**
    * 获取某一时间段内的统计汇总 (基于 dailyStats, O(天数) 而非 O(全量))
    */
-  function getStatsInRange(startTime: number, endTime: number): { count: number; totalDuration: number; completedCount: number } {
+  function getStatsInRange(
+    startTime: number,
+    endTime: number
+  ): { count: number; totalDuration: number; completedCount: number } {
     let count = 0
     let totalDuration = 0
     let completedCount = 0
     const start = new Date(startTime)
     const end = new Date(endTime)
-    for (let d = new Date(start.getFullYear(), start.getMonth(), start.getDate()); d.getTime() < end.getTime(); d.setDate(d.getDate() + 1)) {
+    for (
+      let d = new Date(start.getFullYear(), start.getMonth(), start.getDate());
+      d.getTime() < end.getTime();
+      d.setDate(d.getDate() + 1)
+    ) {
       const dayKey = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
       const stat = dailyStats.value[dayKey]
       if (stat) {
@@ -873,6 +941,10 @@ export const useHistoryStore = defineStore('history', () => {
     allTimeStats,
     mostLoopedSong,
     longestPlayedSong,
+    // 按歌曲聚合索引 (智能随机消费: 播放频率 / 完成率 / 最近播放时间)
+    songPlayCount,
+    songCompletedCount,
+    songLastPlayedAt,
     // 操作
     startHistoryRecord,
     startHistoryRecordIfAbsent,

@@ -21,7 +21,6 @@ let startVolume = 0
 let startY = 0
 
 const volumePercent = computed(() => Math.round(player.volume * 100))
-const sliderHeight = computed(() => `${player.volume * 100}%`)
 
 function handleMouseDown(e: MouseEvent) {
   e.preventDefault()
@@ -38,7 +37,7 @@ function handleMouseMove(e: MouseEvent) {
   const rect = sliderRef.value.getBoundingClientRect()
   const trackHeight = rect.height
   const deltaY = startY - e.clientY
-  let newVolume = startVolume + (deltaY / trackHeight)
+  let newVolume = startVolume + deltaY / trackHeight
   newVolume = Math.max(0, Math.min(1, newVolume))
   player.volume = newVolume
 }
@@ -100,20 +99,57 @@ onUnmounted(() => {
         @click="handleTrackClick"
         @mousedown="handleMouseDown"
       >
-        <div class="w-2 h-full bg-gray-300/30 dark:bg-gray-600/30 rounded-full relative overflow-hidden">
+        <div
+          class="w-2 h-full bg-gray-300/30 dark:bg-gray-600/30 rounded-full relative overflow-hidden"
+        >
+          <!--
+            填充条改用 scaleY（transform-origin 在底部）而不再是 height：
+            拖动时每一帧都改 height 会持续触发布局，scaleY 只走合成。
+            圆角交给父级 overflow-hidden 负责，避免缩放把圆头压扁。
+          -->
           <div
-            class="absolute bottom-0 left-0 right-0 bg-gradient-to-t from-pink-400 to-pink-300 rounded-full transition-all duration-100"
-            :class="{ 'transition-none': isDragging }"
-            :style="{ height: sliderHeight }"
+            class="volume-fill absolute inset-0 bg-gradient-to-t from-pink-400 to-pink-300"
+            :class="{ 'is-dragging': isDragging }"
+            :style="{ transform: `scaleY(${player.volume})` }"
           ></div>
         </div>
 
+        <!--
+          滑块仍以 bottom 定位（绝对定位，代价很低），但把 translateY(50%) 从内联
+          样式挪进 CSS —— 原来的内联 transform 直接覆盖掉了 Tailwind 的
+          hover:scale-110 / scale-110，导致悬停与拖动放大实际上都没生效。
+        -->
         <div
-          class="absolute w-4 h-4 bg-pink-400 rounded-full shadow-lg border-2 border-white transition-all duration-100 hover:scale-110"
-          :class="{ 'transition-none scale-110': isDragging }"
-          :style="{ bottom: `${volumePercent}%`, transform: 'translateY(50%)' }"
+          class="volume-thumb absolute w-4 h-4 bg-pink-400 rounded-full shadow-lg border-2 border-white"
+          :class="{ 'is-dragging': isDragging }"
+          :style="{ bottom: `${volumePercent}%` }"
         ></div>
       </div>
     </div>
   </teleport>
 </template>
+
+<style scoped>
+.volume-fill {
+  transition: transform 100ms linear;
+  transform-origin: bottom;
+}
+
+.volume-thumb {
+  transform: translateY(50%);
+  transition:
+    bottom 100ms linear,
+    transform 120ms ease-out;
+}
+
+.volume-thumb:hover,
+.volume-thumb.is-dragging {
+  transform: translateY(50%) scale(1.15);
+}
+
+/* 拖动中不做补间，指针位置即音量，避免 100ms 的跟手延迟 */
+.volume-fill.is-dragging,
+.volume-thumb.is-dragging {
+  transition: none;
+}
+</style>

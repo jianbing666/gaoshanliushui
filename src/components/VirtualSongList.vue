@@ -24,7 +24,7 @@ const props = withDefaults(
     compactSize: 36,
     compact: false,
     playlistId: null,
-  },
+  }
 )
 
 const emit = defineEmits<{
@@ -49,10 +49,7 @@ function handlePlay(index: number) {
     :buffer="200"
   >
     <template #default="{ item, index }">
-      <div
-        class="virtual-song-list__row"
-        :style="{ height: `${rowSize}px` }"
-      >
+      <div class="virtual-song-list__row" :style="{ height: `${rowSize}px` }">
         <slot
           :song="item as Song"
           :index="index"

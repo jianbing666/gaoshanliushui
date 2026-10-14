@@ -35,6 +35,7 @@ pub fn init_schema(conn: &rusqlite::Connection) -> Result<(), String> {
             album        TEXT    NOT NULL DEFAULT '',
             duration     INTEGER NOT NULL DEFAULT 0,
             cover_path   TEXT    NOT NULL DEFAULT '',
+            cover_thumb_path TEXT NOT NULL DEFAULT '',
             source       TEXT    NOT NULL DEFAULT 'folder_migration',
             created_at   INTEGER NOT NULL,
             updated_at   INTEGER NOT NULL
@@ -48,6 +49,31 @@ pub fn init_schema(conn: &rusqlite::Connection) -> Result<(), String> {
     // v2 迁移: 添加 album 字段 (幂等)
     let _ = conn.execute(
         "ALTER TABLE songs ADD COLUMN album TEXT NOT NULL DEFAULT ''",
+        [],
+    );
+
+    // v3 迁移: 添加 cover_thumb_path 字段 (幂等)
+    //
+    // 背景: 缩略图路径此前只通过 scan:enrich-progress 事件推给前端, 从未落库,
+    //   导致重启后前端拿不到缩略图、退化为全尺寸封面 (性能优化实际失效)。
+    //   存量行为空字符串, 前端按"无缩略图"回退, 下次扫描时补齐。
+    let _ = conn.execute(
+        "ALTER TABLE songs ADD COLUMN cover_thumb_path TEXT NOT NULL DEFAULT ''",
+        [],
+    );
+
+    // v4 迁移: 添加 favorite / favorited_at 字段 (幂等)
+    //
+    // 背景: 「喜爱」是智能随机权重的核心信号之一, 必须与歌曲库一起持久化。
+    //   favorite 为 0/1 整数, favorited_at 记录最近一次标记喜爱的毫秒时间戳
+    //   (用于智能随机的时间衰减)。两者的不变式: favorited_at != 0 等价于 favorite = 1。
+    //   存量数据默认 0 / 0, 即"未喜爱", 不影响任何既有行为。
+    let _ = conn.execute(
+        "ALTER TABLE songs ADD COLUMN favorite INTEGER NOT NULL DEFAULT 0",
+        [],
+    );
+    let _ = conn.execute(
+        "ALTER TABLE songs ADD COLUMN favorited_at INTEGER NOT NULL DEFAULT 0",
         [],
     );
 
@@ -84,7 +110,7 @@ pub fn parse_folder_name(name: &str) -> (String, String) {
         if let Some(end) = s.find('】') {
             let inside = &s[3..end];
             let rest = &s[end + 3..];
-            let title = rest.trim_start_matches(|c: char| c == ' ' || c == '-');
+            let title = rest.trim_start_matches([' ', '-']);
             let title = title.split("（cover").next().unwrap_or(title).trim();
             if !title.is_empty() {
                 return (inside.to_string(), title.to_string());
@@ -109,7 +135,7 @@ fn find_first_mp3(folder: &Path) -> Option<std::path::PathBuf> {
         let path = entry.path();
         if path.is_file() {
             if let Some(ext) = path.extension() {
-                if ext.to_ascii_lowercase() == "mp3" {
+                if ext.eq_ignore_ascii_case("mp3") {
                     return Some(path);
                 }
             }
@@ -143,8 +169,7 @@ pub fn run_migration(music_folder: &str, app: &AppHandle) -> Result<usize, Strin
     let mut songs_to_insert: Vec<(String, String, String, String)> = Vec::new();
 
     // 遍历所有子文件夹，收集数据
-    let read_dir = std::fs::read_dir(music_path)
-        .map_err(|e| format!("读取音乐目录失败: {}", e))?;
+    let read_dir = std::fs::read_dir(music_path).map_err(|e| format!("读取音乐目录失败: {}", e))?;
 
     for entry in read_dir.filter_map(|e| e.ok()) {
         let folder_path = entry.path();
@@ -185,7 +210,9 @@ pub fn run_migration(music_folder: &str, app: &AppHandle) -> Result<usize, Strin
         let mut inserted = 0usize;
         for (content_hash, mp3_path_str, title, artist) in &songs_to_insert {
             conn.execute(
-                "INSERT OR REPLACE INTO songs 
+                // INSERT OR IGNORE: 已存在的歌曲保持原样 —— 既不能覆盖用户手动修正的
+                // title/artist, 也不能清掉 favorite / favorited_at (RESET 迁移重跑时曾会)
+                "INSERT OR IGNORE INTO songs 
                     (song_hash, song_path, title, artist, duration, cover_path, source, created_at, updated_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)",
                 params![
@@ -223,8 +250,7 @@ pub async fn reset_migration(app: AppHandle) -> Result<(), String> {
         .join(MIGRATE_FLAG);
 
     if flag_path.exists() {
-        std::fs::remove_file(&flag_path)
-            .map_err(|e| format!("删除 flag 文件失败: {}", e))?;
+        std::fs::remove_file(&flag_path).map_err(|e| format!("删除 flag 文件失败: {}", e))?;
     }
 
     // 同时清空 songs 表
@@ -272,6 +298,43 @@ pub async fn update_song_metadata(
     Ok(())
 }
 
+/// 写入喜爱状态 (抽成独立函数便于单测)
+///
+/// 不变式: favorite = 1 时 favorited_at 为本次操作时间戳; favorite = 0 时清零,
+/// 避免非喜爱歌曲残留"最近喜爱时间"影响智能随机的时间衰减。
+fn apply_favorite(
+    conn: &rusqlite::Connection,
+    song_hash: &str,
+    favorite: bool,
+    now: i64,
+) -> Result<usize, String> {
+    let favorited_at = if favorite { now } else { 0 };
+    conn.execute(
+        "UPDATE songs SET favorite = ?1, favorited_at = ?2, updated_at = ?3
+         WHERE song_hash = ?4",
+        params![favorite as i64, favorited_at, now, song_hash],
+    )
+    .map_err(|e| format!("更新喜爱状态失败: {}", e))
+}
+
+/// 标记/取消标记「喜爱」(智能随机的权重信号之一)
+#[tauri::command]
+pub async fn set_song_favorite(
+    app: AppHandle,
+    song_hash: String,
+    favorite: bool,
+) -> Result<(), String> {
+    let now = db::now_ms();
+
+    db::run_db(&app, move |conn| {
+        apply_favorite(conn, &song_hash, favorite, now)?;
+        Ok(())
+    })
+    .await?;
+
+    Ok(())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -309,5 +372,71 @@ mod tests {
         let (a, t) = parse_folder_name("随便一首歌");
         assert_eq!(a, "未知歌手");
         assert_eq!(t, "随便一首歌");
+    }
+
+    /// 读取某首歌的喜爱状态 (favorite, favorited_at)
+    fn read_favorite(conn: &rusqlite::Connection, hash: &str) -> (i64, i64) {
+        conn.query_row(
+            "SELECT favorite, favorited_at FROM songs WHERE song_hash = ?1",
+            params![hash],
+            |row| Ok((row.get(0)?, row.get(1)?)),
+        )
+        .expect("查询喜爱状态失败")
+    }
+
+    /// 存量库 (无 favorite / favorited_at 列) 应能通过 init_schema 补齐, 且可重复执行
+    #[test]
+    fn test_init_schema_adds_favorite_columns_to_legacy_db() {
+        let conn = rusqlite::Connection::open_in_memory().expect("打开内存库失败");
+        conn.execute_batch(
+            "CREATE TABLE songs (
+                song_hash  TEXT PRIMARY KEY,
+                song_path  TEXT NOT NULL UNIQUE,
+                title      TEXT NOT NULL,
+                artist     TEXT NOT NULL,
+                duration   INTEGER NOT NULL DEFAULT 0,
+                cover_path TEXT NOT NULL DEFAULT '',
+                source     TEXT NOT NULL DEFAULT 'legacy',
+                created_at INTEGER NOT NULL,
+                updated_at INTEGER NOT NULL
+            );",
+        )
+        .expect("建旧表失败");
+        conn.execute(
+            "INSERT INTO songs (song_hash, song_path, title, artist, created_at, updated_at)
+             VALUES ('h1', 'x.mp3', 't', 'a', 0, 0)",
+            [],
+        )
+        .expect("插入存量数据失败");
+
+        init_schema(&conn).expect("旧库应能补齐新列");
+        init_schema(&conn).expect("重复执行应保持幂等");
+
+        assert_eq!(read_favorite(&conn, "h1"), (0, 0), "存量数据默认为未喜爱");
+    }
+
+    /// 喜爱 / 取消喜爱应写入 favorite 与 favorited_at, 并维持两者不变式
+    #[test]
+    fn test_apply_favorite_toggles_state() {
+        let conn = rusqlite::Connection::open_in_memory().expect("打开内存库失败");
+        init_schema(&conn).expect("初始化 schema 失败");
+        conn.execute(
+            "INSERT INTO songs (song_hash, song_path, title, artist, created_at, updated_at)
+             VALUES ('h1', 'x.mp3', 't', 'a', 0, 0)",
+            [],
+        )
+        .expect("插入歌曲失败");
+
+        assert_eq!(apply_favorite(&conn, "h1", true, 1000).unwrap(), 1);
+        assert_eq!(read_favorite(&conn, "h1"), (1, 1000), "喜爱应记录时间戳");
+
+        assert_eq!(apply_favorite(&conn, "h1", false, 2000).unwrap(), 1);
+        assert_eq!(read_favorite(&conn, "h1"), (0, 0), "取消喜爱应清零时间戳");
+
+        assert_eq!(
+            apply_favorite(&conn, "missing", true, 3000).unwrap(),
+            0,
+            "不存在的歌曲不应报错, 影响行数为 0"
+        );
     }
 }

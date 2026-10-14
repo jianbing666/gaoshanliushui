@@ -265,8 +265,9 @@ export const useUIStore = defineStore('ui', () => {
     isMiniMode.value = value
 
     // 2. 立即调用后端处理"看不见的属性"
-    invoke('toggle_mini_mode', { isMini: value })
-      .catch((e) => console.warn('[miniMode] toggle_mini_mode 失败:', e))
+    invoke('toggle_mini_mode', { isMini: value }).catch((e) =>
+      console.warn('[miniMode] toggle_mini_mode 失败:', e)
+    )
 
     // 3. 阶段 5: 进入迷你模式时自动暂停所有非必要后台任务
     const settings = useSettingsStore()
@@ -287,10 +288,9 @@ export const useUIStore = defineStore('ui', () => {
       if (cur && cur.length === 2 && cur[0] > 0 && cur[1] > 0) {
         startSize = [cur[0], cur[1]]
       }
-    } catch (e) {
-      startSize = value
-        ? [NORMAL_TARGET_W, NORMAL_TARGET_H]
-        : [MINI_TARGET_W, MINI_TARGET_H]
+    } catch {
+      // 取窗口尺寸失败时退回按目标尺寸推断, 不阻断迷你模式切换
+      startSize = value ? [NORMAL_TARGET_W, NORMAL_TARGET_H] : [MINI_TARGET_W, MINI_TARGET_H]
     }
 
     const targetSize: [number, number] = value
@@ -321,7 +321,7 @@ export const useUIStore = defineStore('ui', () => {
         miniModeAnimId = null
         invoke('set_window_size', {
           width: miniModeTargetSize[0],
-          height: miniModeTargetSize[1]
+          height: miniModeTargetSize[1],
         }).catch(() => {})
       }
     }

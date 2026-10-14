@@ -59,10 +59,12 @@ async function exportPlaylist() {
     const defaultName = `${playlist.name}.md`
     const filePath = await save({
       defaultPath: defaultName,
-      filters: [{
-        name: 'Markdown',
-        extensions: ['md']
-      }]
+      filters: [
+        {
+          name: 'Markdown',
+          extensions: ['md'],
+        },
+      ],
     })
 
     if (!filePath) return

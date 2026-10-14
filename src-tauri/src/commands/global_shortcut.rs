@@ -107,13 +107,33 @@ fn parse_shortcut_id(id: &str) -> &'static str {
 
 pub fn register_global_shortcuts(app: &AppHandle) -> Result<(), String> {
     let store = app.state::<ShortcutStore>();
-    
+
     let shortcuts = vec![
-        ("toggle_play", store.toggle_play.lock().unwrap().clone(), "global-shortcut:toggle-play"),
-        ("prev_track", store.prev_track.lock().unwrap().clone(), "global-shortcut:prev-track"),
-        ("next_track", store.next_track.lock().unwrap().clone(), "global-shortcut:next-track"),
-        ("volume_up", store.volume_up.lock().unwrap().clone(), "global-shortcut:volume-up"),
-        ("volume_down", store.volume_down.lock().unwrap().clone(), "global-shortcut:volume-down"),
+        (
+            "toggle_play",
+            store.toggle_play.lock().unwrap().clone(),
+            "global-shortcut:toggle-play",
+        ),
+        (
+            "prev_track",
+            store.prev_track.lock().unwrap().clone(),
+            "global-shortcut:prev-track",
+        ),
+        (
+            "next_track",
+            store.next_track.lock().unwrap().clone(),
+            "global-shortcut:next-track",
+        ),
+        (
+            "volume_up",
+            store.volume_up.lock().unwrap().clone(),
+            "global-shortcut:volume-up",
+        ),
+        (
+            "volume_down",
+            store.volume_down.lock().unwrap().clone(),
+            "global-shortcut:volume-down",
+        ),
     ];
 
     for (_name, shortcut_str, event_name) in &shortcuts {

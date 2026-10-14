@@ -159,8 +159,8 @@ async fn normalize_one(app: &AppHandle, path: &Path, target: f64) -> Result<f64,
         "-".into(),
     ];
     let (_, stderr) = run_ffmpeg(app, analysis_args).await?;
-    let measurement = parse_loudnorm_json(&stderr)
-        .ok_or_else(|| "无法解析 ffmpeg 响度测量结果".to_string())?;
+    let measurement =
+        parse_loudnorm_json(&stderr).ok_or_else(|| "无法解析 ffmpeg 响度测量结果".to_string())?;
 
     // ---------- Pass2: 线性归一化到临时文件 ----------
     let parent = path

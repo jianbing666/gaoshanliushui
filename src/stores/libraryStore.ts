@@ -4,6 +4,7 @@ import { invoke } from '@tauri-apps/api/core'
 import { convertFileSrc } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { Song, Playlist, PlaylistRecord, PlaylistSong } from '@/types/song'
+import { matchesSongKey } from '@/utils/songIdentity'
 import {
   loadSettings,
   saveSettings,
@@ -50,7 +51,9 @@ export const useLibraryStore = defineStore('library', () => {
   // ========== 元数据源 + 加载状态 ==========
   const isLoading = ref(false)
   const folderPath = ref((saved.folderPath as string) ?? '')
-  const metadataSource = ref<'auto' | 'filename'>((saved.metadataSource as 'auto' | 'filename') ?? 'auto')
+  const metadataSource = ref<'auto' | 'filename'>(
+    (saved.metadataSource as 'auto' | 'filename') ?? 'auto'
+  )
 
   // ========== 歌单分组管理 ==========
   const playlists = ref<Playlist[]>([])
@@ -79,20 +82,14 @@ export const useLibraryStore = defineStore('library', () => {
     currentIndex.value >= 0 ? playlist.value[currentIndex.value] : null
   )
 
-  const defaultPlaylist = computed(() =>
-    playlists.value.find((p) => p.type === 'default')
-  )
+  const defaultPlaylist = computed(() => playlists.value.find((p) => p.type === 'default'))
 
-  const customPlaylists = computed(() =>
-    playlists.value.filter((p) => p.type === 'custom')
-  )
+  const customPlaylists = computed(() => playlists.value.filter((p) => p.type === 'custom'))
 
   const filteredCustomPlaylists = computed(() => {
     const query = searchQuery.value.trim().toLowerCase()
     if (!query) return customPlaylists.value
-    return customPlaylists.value.filter((pl) =>
-      pl.name.toLowerCase().includes(query)
-    )
+    return customPlaylists.value.filter((pl) => pl.name.toLowerCase().includes(query))
   })
 
   const activePlaylistSongs = computed(() => {
@@ -136,16 +133,22 @@ export const useLibraryStore = defineStore('library', () => {
     const query = searchQuery.value.trim().toLowerCase()
     const songs = activePlaylistSongs.value
     if (!query) return songs
-    return songs.filter((song) =>
-      song.title.toLowerCase().includes(query) ||
-      song.artist.toLowerCase().includes(query) ||
-      song.album.toLowerCase().includes(query)
+    return songs.filter(
+      (song) =>
+        song.title.toLowerCase().includes(query) ||
+        song.artist.toLowerCase().includes(query) ||
+        song.album.toLowerCase().includes(query)
     )
   })
 
   // ========== 工具方法 ==========
+  // 按标识查找歌曲
+  //
+  // 标识可能来自播放历史: 既可能是 Song.id (路径哈希), 也可能是
+  // content_hash (内容指纹) —— 历史写入方式变更过, 存量记录是新旧混杂的。
+  // 详见 utils/songIdentity.ts。
   function findSongById(songId: string): Song | undefined {
-    return playlist.value.find((s) => s.id === songId)
+    return playlist.value.find((s) => matchesSongKey(s, songId))
   }
 
   // ========== URL 缓存(阶段 1.3 优化) ==========
@@ -172,7 +175,10 @@ export const useLibraryStore = defineStore('library', () => {
     return url
   }
 
-  function getCoverThumbUrl(coverPath: string | null, thumbPath: string | null | undefined): string {
+  function getCoverThumbUrl(
+    coverPath: string | null,
+    thumbPath: string | null | undefined
+  ): string {
     if (thumbPath) {
       let url = coverUrlCache.get(thumbPath)
       if (url === undefined) {
@@ -515,94 +521,94 @@ export const useLibraryStore = defineStore('library', () => {
   }
 
   // ========== 文件夹扫描 ==========
-// v1.1 性能优化 (2026-07-15): 两阶段扫描
-//   - 阶段 1 (快速返回): 文件名/ID3基础信息 + duration + content_hash
-//     → 前端立即拿到歌曲列表，记忆功能可用
-//   - 阶段 2 (后台异步): 封面提取 + 缩略图生成
-//     → 通过 scan:enrich-progress 事件增量更新
-//     → 封面提取是最耗时的操作，移到后台不阻塞首屏
-async function scanMusicFolder(path: string, forceRefresh = false) {
-  isLoading.value = true
+  // v1.1 性能优化 (2026-07-15): 两阶段扫描
+  //   - 阶段 1 (快速返回): 文件名/ID3基础信息 + duration + content_hash
+  //     → 前端立即拿到歌曲列表，记忆功能可用
+  //   - 阶段 2 (后台异步): 封面提取 + 缩略图生成
+  //     → 通过 scan:enrich-progress 事件增量更新
+  //     → 封面提取是最耗时的操作，移到后台不阻塞首屏
+  async function scanMusicFolder(path: string, forceRefresh = false) {
+    isLoading.value = true
 
-  try {
-    const metaSrc = metadataSource.value === 'filename' ? 'filename' : 'auto'
-    const songs = await invoke<Song[]>('scan_music_folder', {
-      folderPath: path,
-      metadataSource: metaSrc,
-      forceRefresh,
-    })
+    try {
+      const metaSrc = metadataSource.value === 'filename' ? 'filename' : 'auto'
+      const songs = await invoke<Song[]>('scan_music_folder', {
+        folderPath: path,
+        metadataSource: metaSrc,
+        forceRefresh,
+      })
 
-    // 记录当前播放的歌曲 ID,用于扫描后恢复
-    const currentSongId = currentSong.value?.id
+      // 记录当前播放的歌曲 ID,用于扫描后恢复
+      const currentSongId = currentSong.value?.id
 
-    playlist.value = songs
-    folderPath.value = path
-    setMusicLibraryPath(path)
-    syncDefaultPlaylist(songs)
+      playlist.value = songs
+      folderPath.value = path
+      setMusicLibraryPath(path)
+      syncDefaultPlaylist(songs)
 
-    // 加载当前歌单的歌曲
-    void loadActivePlaylistSongs()
+      // 加载当前歌单的歌曲
+      void loadActivePlaylistSongs()
 
-    // 下载输出目录默认联动音乐库
-    // 仅当用户从未显式设置过 (downloadOutputDir 为空) 时自动同步
-    const settingsStore = useSettingsStore()
-    if (!settingsStore.downloadOutputDir) {
-      settingsStore.setDownloadOutputDir(path)
-    }
+      // 下载输出目录默认联动音乐库
+      // 仅当用户从未显式设置过 (downloadOutputDir 为空) 时自动同步
+      const settingsStore = useSettingsStore()
+      if (!settingsStore.downloadOutputDir) {
+        settingsStore.setDownloadOutputDir(path)
+      }
 
-    // 尝试恢复当前播放位置
-    if (currentSongId) {
-      const newIndex = songs.findIndex((s) => s.id === currentSongId)
-      if (newIndex !== -1) {
-        currentIndex.value = newIndex
-      } else if (songs.length > 0) {
+      // 尝试恢复当前播放位置
+      if (currentSongId) {
+        const newIndex = songs.findIndex((s) => s.id === currentSongId)
+        if (newIndex !== -1) {
+          currentIndex.value = newIndex
+        } else if (songs.length > 0) {
+          currentIndex.value = 0
+        } else {
+          currentIndex.value = -1
+        }
+      } else if (songs.length > 0 && currentIndex.value === -1) {
         currentIndex.value = 0
-      } else {
+      } else if (songs.length === 0) {
         currentIndex.value = -1
       }
-    } else if (songs.length > 0 && currentIndex.value === -1) {
-      currentIndex.value = 0
-    } else if (songs.length === 0) {
-      currentIndex.value = -1
-    }
 
-    // ========== 阶段 2: 监听后台封面补全事件 ==========
-    const unlistenProgress = await listen('scan:enrich-progress', (event) => {
-      const payload = event.payload as {
-        id: string
-        file_path: string
-        cover_path: string | null
-        cover_thumb_path: string | null
-        index: number
-        total: number
-      }
-
-      const songIndex = playlist.value.findIndex((s) => s.id === payload.id)
-      if (songIndex !== -1) {
-        const updated = [...playlist.value]
-        updated[songIndex] = {
-          ...updated[songIndex],
-          cover_path: payload.cover_path ?? updated[songIndex].cover_path,
-          cover_thumb_path: payload.cover_thumb_path ?? updated[songIndex].cover_thumb_path,
+      // ========== 阶段 2: 监听后台封面补全事件 ==========
+      const unlistenProgress = await listen('scan:enrich-progress', (event) => {
+        const payload = event.payload as {
+          id: string
+          file_path: string
+          cover_path: string | null
+          cover_thumb_path: string | null
+          index: number
+          total: number
         }
-        playlist.value = updated
-        syncDefaultPlaylist(updated)
-      }
-    })
 
-    const unlistenComplete = await listen('scan:enrich-complete', () => {
-      unlistenProgress()
-      unlistenComplete()
-    })
+        const songIndex = playlist.value.findIndex((s) => s.id === payload.id)
+        if (songIndex !== -1) {
+          const updated = [...playlist.value]
+          updated[songIndex] = {
+            ...updated[songIndex],
+            cover_path: payload.cover_path ?? updated[songIndex].cover_path,
+            cover_thumb_path: payload.cover_thumb_path ?? updated[songIndex].cover_thumb_path,
+          }
+          playlist.value = updated
+          syncDefaultPlaylist(updated)
+        }
+      })
 
-    return songs
-  } catch (error) {
-    clearMusicLibraryPath()
-    throw error
-  } finally {
-    isLoading.value = false
+      const unlistenComplete = await listen('scan:enrich-complete', () => {
+        unlistenProgress()
+        unlistenComplete()
+      })
+
+      return songs
+    } catch (error) {
+      clearMusicLibraryPath()
+      throw error
+    } finally {
+      isLoading.value = false
+    }
   }
-}
 
   function setMetadataSource(source: 'auto' | 'filename') {
     metadataSource.value = source
@@ -621,7 +627,10 @@ async function scanMusicFolder(path: string, forceRefresh = false) {
    * 更新本地缓存中某首歌的元数据 (title/artist/album)
    * 会同步更新 playlist 和 activePlaylistSongList
    */
-  function updateSongLocalMetadata(songId: string, updates: { title?: string; artist?: string; album?: string }) {
+  function updateSongLocalMetadata(
+    songId: string,
+    updates: { title?: string; artist?: string; album?: string }
+  ) {
     // 更新默认歌单播放列表
     const idx = playlist.value.findIndex((s) => s.id === songId)
     if (idx !== -1) {
@@ -642,6 +651,45 @@ async function scanMusicFolder(path: string, forceRefresh = false) {
         ...updates,
       }
       activePlaylistSongList.value = updated
+    }
+  }
+
+  /**
+   * 就地更新所有列表缓存中的喜爱状态 (playlist / 自定义歌单列表)
+   */
+  function applyFavoriteLocal(songId: string, favorite: boolean, favoritedAt: number) {
+    // 默认歌单下 activePlaylistSongList 与 playlist 指向同一个数组, 只需处理一次
+    const sharedWithDefault = activePlaylistSongList.value === playlist.value
+    const patch = (songs: Song[]) =>
+      songs.map((s) => (s.id === songId ? { ...s, favorite, favorited_at: favoritedAt } : s))
+
+    if (playlist.value.some((s) => s.id === songId)) {
+      playlist.value = patch(playlist.value)
+    }
+    if (!sharedWithDefault && activePlaylistSongList.value.some((s) => s.id === songId)) {
+      activePlaylistSongList.value = patch(activePlaylistSongList.value)
+    }
+  }
+
+  /**
+   * 切换「喜爱」标记 (乐观更新 + 后台落库)
+   *
+   * 喜爱是智能随机的高权重信号, 必须落库 —— 重启应用、重新扫描目录后都要保留。
+   * 先改本地缓存让 UI 立即响应, IPC 失败再回滚, 避免前后端状态不一致。
+   */
+  async function toggleSongFavorite(song: Song, favorite?: boolean) {
+    const next = favorite ?? !song.favorite
+    const prevFavorite = !!song.favorite
+    const prevFavoritedAt = song.favorited_at ?? 0
+    const songHash = song.content_hash || song.id
+    const favoritedAt = next ? Date.now() : 0
+
+    applyFavoriteLocal(song.id, next, favoritedAt)
+    try {
+      await invoke('set_song_favorite', { songHash, favorite: next })
+    } catch (e) {
+      console.warn('[Library] 更新喜爱状态失败, 已回滚:', e)
+      applyFavoriteLocal(song.id, prevFavorite, prevFavoritedAt)
     }
   }
 
@@ -771,6 +819,7 @@ async function scanMusicFolder(path: string, forceRefresh = false) {
     setMetadataSource,
     refreshMetadata,
     updateSongLocalMetadata,
+    toggleSongFavorite,
     removeSongFromLibrary,
     // 内存管理
     compactMemory,

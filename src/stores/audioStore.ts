@@ -3,9 +3,12 @@ import { ref, computed, nextTick, watch, onScopeDispose } from 'vue'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import type { LoopMode } from '@/types/song'
+import type { Song } from '@/types/song'
 import { audioEngine } from '@/audio/AudioEngine'
 import { html5AudioPlayer } from '@/audio/HTML5AudioPlayer'
 import { loadSettings, saveSettings } from '@/utils/storage'
+import { computeSmartWeights, pickWeightedIndex } from '@/utils/smartShuffle'
+import type { SongPlaySignals } from '@/utils/smartShuffle'
 import { useLibraryStore } from './libraryStore'
 import { useHistoryStore } from './historyStore'
 import { useSettingsStore } from './settingsStore'
@@ -37,6 +40,15 @@ import { mediaControls, PlaybackStatus } from 'tauri-plugin-media-api'
 
 const saved = loadSettings()
 
+/**
+ * 初始音量（0~1）。
+ * 只作用在"本地没有存过音量"的首次启动；用户一旦调过音量，
+ * 之后一律以 localStorage 里持久化的值为准。
+ * 三处使用点（volume 初值 / lastVolume 初值 / 取消静音的兜底值）共用此常量，
+ * 避免以后再改默认值时漏改其中一处。
+ */
+const DEFAULT_VOLUME = 0.5
+
 export const useAudioStore = defineStore('audio', () => {
   const library = useLibraryStore()
   const history = useHistoryStore()
@@ -48,8 +60,8 @@ export const useAudioStore = defineStore('audio', () => {
   const pendingPlay = ref(false)
   const currentTime = ref(0)
   const duration = ref(0)
-  const volume = ref((saved.volume as number) ?? 0.8)
-  const lastVolume = ref(0.8)
+  const volume = ref((saved.volume as number) ?? DEFAULT_VOLUME)
+  const lastVolume = ref(DEFAULT_VOLUME)
   const loopMode = ref<LoopMode>((saved.loopMode as LoopMode) ?? 'list')
 
   // ========== 随机播放历史 ==========
@@ -57,6 +69,26 @@ export const useAudioStore = defineStore('audio', () => {
 
   // ========== 计算属性 ==========
   const currentSong = computed(() => library.currentSong)
+
+  /**
+   * 当前播放曲目的"身份键"。
+   *
+   * 为什么不直接 watch(currentSong)：
+   *   currentSong 是 `playlist[currentIndex]` 的 computed，返回的是**对象引用**；
+   *   而 playlist 是 shallowRef —— 收藏(applyFavoriteLocal)、编辑元数据等操作
+   *   必须用 `{ ...song, ...patch }` 造出"同 id 的新对象 + 新数组"才能触发 UI 更新。
+   *   于是对象引用变了，但曲目根本没变。
+   *
+   *   旧实现 `watch(() => currentSong.value)` 只看引用，后果是：点一次「喜欢」就会
+   *   走进换歌加载器 → stopPlayback() → currentTime = 0 → 从头重新加载播放，
+   *   播放进度被清零，同时还会把播放历史记录切断重开。
+   *
+   *   改成只监听"身份键"：id 与 file_path 都没变就不算换歌。
+   */
+  const currentTrackKey = computed(() => {
+    const song = currentSong.value
+    return song ? `${song.id}\u0000${song.file_path}` : null
+  })
 
   // 当前歌单的歌曲列表（默认歌单 = 全部歌曲，自定义歌单 = 歌单内歌曲）
   const activeSongs = computed(() => library.activePlaylistSongs)
@@ -93,11 +125,45 @@ export const useAudioStore = defineStore('audio', () => {
     const songs = activeSongs.value
     if (songs.length <= 1) return 0
     const currentIdx = currentActiveIndex.value
+
+    // 智能随机: 按权重抽样 (喜爱 / 常听 / 当日新增加分, 常没听完扣分)
+    if (settings.smartShuffle) {
+      const weights = computeSmartWeights(songs, getPlaySignals, Date.now(), currentIdx)
+      const picked = pickWeightedIndex(weights)
+      // 权重池已排除当前歌曲, 这里的兜底只为防御异常输入
+      if (picked >= 0 && picked !== currentIdx) {
+        return activeIndexToGlobal(picked)
+      }
+    }
+
+    // 等概率随机 (开关关闭, 或智能随机兜底)
     let newActiveIndex = Math.floor(Math.random() * songs.length)
-    if (newActiveIndex === currentIdx && songs.length > 1) {
+    if (newActiveIndex === currentIdx) {
       newActiveIndex = (newActiveIndex + 1) % songs.length
     }
     return activeIndexToGlobal(newActiveIndex)
+  }
+
+  /**
+   * 读取某首歌的播放信号 (智能随机加权用)
+   *
+   * 播放历史早期把路径哈希写进 song_hash, 现在是内容指纹, 存量数据两种键都有,
+   * 因此两个键都查一遍并取较丰富的一份 (与 utils/songIdentity 的口径一致)。
+   */
+  function getPlaySignals(song: Song): SongPlaySignals {
+    const keys: string[] = []
+    if (song.content_hash) keys.push(song.content_hash)
+    if (song.id) keys.push(song.id)
+
+    let playCount = 0
+    let completedCount = 0
+    let lastPlayedAt = 0
+    for (const key of keys) {
+      playCount = Math.max(playCount, history.songPlayCount[key] || 0)
+      completedCount = Math.max(completedCount, history.songCompletedCount[key] || 0)
+      lastPlayedAt = Math.max(lastPlayedAt, history.songLastPlayedAt[key] || 0)
+    }
+    return { playCount, completedCount, lastPlayedAt }
   }
 
   // ========== 切歌/播放控制 ==========
@@ -287,7 +353,7 @@ export const useAudioStore = defineStore('audio', () => {
       lastVolume.value = volume.value
       volume.value = 0
     } else {
-      volume.value = lastVolume.value || 0.8
+      volume.value = lastVolume.value || DEFAULT_VOLUME
     }
   }
 
@@ -444,11 +510,15 @@ export const useAudioStore = defineStore('audio', () => {
   // 旧实现用 isLoadingSong 布尔锁, 加载期间的切歌请求会被直接丢弃,
   // 异步加载完成后播放的是过期目标 (一种"选 A 播 B"竞态)。
   // 现在每次变化都进入加载, await 后校验令牌, 只有最新一次生效。
+  //
+  // 注意: 这里必须监听 currentTrackKey(身份键) 而不是 currentSong(对象引用),
+  // 否则"收藏 / 编辑元数据"这类同曲目换对象的更新会被误判成换歌并把进度清零。
   let loadGeneration = 0
 
   watch(
-    () => currentSong.value,
-    async (song) => {
+    currentTrackKey,
+    async () => {
+      const song = currentSong.value
       if (!song) return
       const myGen = ++loadGeneration
 
@@ -477,18 +547,21 @@ export const useAudioStore = defineStore('audio', () => {
         // 第 3 步: 并行加载 HTML5 Audio (仅用于元数据/MediaSession, 不发声)
         //    放在 Web Audio 之后, 不阻塞主播放链路
         html5AudioPlayer.setVolume(0)
-        html5AudioPlayer.load(song.file_path).then(() => {
-          // 加载完成时可能已切到别的歌, 校验后再写 MediaSession
-          if (myGen !== loadGeneration || currentSong.value?.id !== song.id) return
-          html5AudioPlayer.setVolume(0)
-          html5AudioPlayer.setMediaSession(
-            song.title,
-            song.artist,
-            song.cover_path ? library.getCoverUrl(song.cover_path) : undefined
-          )
-        }).catch((e) => {
-          console.warn('[audioStore] HTML5 Audio 加载失败 (不影响播放):', e)
-        })
+        html5AudioPlayer
+          .load(song.file_path)
+          .then(() => {
+            // 加载完成时可能已切到别的歌, 校验后再写 MediaSession
+            if (myGen !== loadGeneration || currentSong.value?.id !== song.id) return
+            html5AudioPlayer.setVolume(0)
+            html5AudioPlayer.setMediaSession(
+              song.title,
+              song.artist,
+              song.cover_path ? library.getCoverUrl(song.cover_path) : undefined
+            )
+          })
+          .catch((e) => {
+            console.warn('[audioStore] HTML5 Audio 加载失败 (不影响播放):', e)
+          })
 
         // 第 4 步: 根据当前播放状态决定是否自动播放
         //   (加载期间用户按了播放也能被捕捉到, 不再依赖加载前快照)
@@ -710,13 +783,19 @@ export const useAudioStore = defineStore('audio', () => {
 
   void initNativeMediaControls()
 
-  watch(() => currentSong.value, () => {
-    void updateNativeMediaMetadata()
-  })
+  watch(
+    currentTrackKey,
+    () => {
+      void updateNativeMediaMetadata()
+    }
+  )
 
-  watch(() => isPlaying.value, () => {
-    void updateNativeMediaPlaybackStatus()
-  })
+  watch(
+    () => isPlaying.value,
+    () => {
+      void updateNativeMediaPlaybackStatus()
+    }
+  )
 
   // ========== 监听 settings 的睡眠定时器触发 ==========
   function handleSleepTimerFire() {
@@ -732,7 +811,9 @@ export const useAudioStore = defineStore('audio', () => {
 
   // ========== 初始化 HTML5 Audio store 访问器 ==========
   html5AudioPlayer.bindStoreAccessors({
-    setIsSwitchingSong: (v: boolean) => { isSwitchingSong.value = v },
+    setIsSwitchingSong: (v: boolean) => {
+      isSwitchingSong.value = v
+    },
   })
 
   // 接收时长变化(从 HTML5 Audio 元数据)
@@ -756,6 +837,7 @@ export const useAudioStore = defineStore('audio', () => {
     shuffleHistory,
     // 计算属性
     currentSong,
+    currentTrackKey,
     hasNext,
     hasPrev,
     // 工具

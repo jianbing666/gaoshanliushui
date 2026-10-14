@@ -25,6 +25,15 @@ pub struct Song {
     /// 旧数据为 None, 前端需做容错
     #[serde(default)]
     pub content_hash: Option<String>,
+    /// 是否已标记为「喜爱」（智能随机的高权重来源之一）
+    #[serde(default)]
+    pub favorite: bool,
+    /// 最近一次标记喜爱的 Unix 毫秒时间戳（未喜爱为 0, 用于智能随机的时间衰减）
+    #[serde(default)]
+    pub favorited_at: i64,
+    /// 首次入库时间（Unix 毫秒, 用于智能随机的「今日新增」加成）
+    #[serde(default)]
+    pub created_at: i64,
 }
 
 /// 循环模式

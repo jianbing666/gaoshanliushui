@@ -6,7 +6,7 @@
  *   - 关闭时音频链路完全恢复原状并停止测量，做到零开销
  *
  * 双测量模式:
- *   - rms（标准/低开销）：复用播放链路的 AnalyserNode，5Hz 轮询瞬时 RMS
+ *   - rms（标准/低开销）：在 K-weighting 之后的测点上 5Hz 轮询瞬时 RMS
  *   - lufs（高精度）：K-weighting 测量支路 + AudioWorklet，按 EBU R128 双门限
  *                     计算集成 LUFS（10Hz 上报），不影响主链路音质
  *
@@ -17,8 +17,9 @@
  *
  * 主链路（启用时）:
  *   AnalyserNode → loudnessGain → limiter → volumeGainNode
- * LUFS 模式额外测量支路:
- *   AnalyserNode → K-weighting(搁架+高通) → AudioWorkletNode → 静音Gain
+ * 测量支路（两种模式共用，K-weighting 之后取值）:
+ *   AnalyserNode → K-weighting(搁架+高通) → [AudioWorkletNode] → 测点 → 静音Gain
+ *   rms 模式省略 worklet，直接由测点 AnalyserNode 取 RMS
  * 关闭后恢复:
  *   AnalyserNode → volumeGainNode
  */
@@ -26,7 +27,12 @@
 /** 测量模式：标准 RMS / 高精度 LUFS */
 export type LoudnessMode = 'rms' | 'lufs'
 
-/** 目标响度（dB）。RMS 模式为 dB(RMS)，LUFS 模式为 LUFS */
+/**
+ * 目标响度（dB）
+ *
+ * 两种模式都取 K-weighting 之后的信号，因此都近似同一把尺子（EBU R128），
+ * 目标值可以直接共用。
+ */
 const TARGET_DB = -14
 /** 最大提升增益（dB），防止安静片段被过度放大 */
 const MAX_BOOST_DB = 9
@@ -38,6 +44,8 @@ const MEASURE_INTERVAL_MS = 200
 const EMA_ALPHA = 0.2
 /** setTargetAtTime 时间常数（s），增益变化的最终平滑层 */
 const GAIN_TIME_CONSTANT = 0.4
+/** 测点 AnalyserNode 的 FFT 长度（时域波形长度，约 46ms @44.1kHz） */
+const MEASURE_FFT_SIZE = 2048
 
 export class LoudnessNormalizer {
   /** 响度增益节点（补偿量施加于此） */
@@ -67,6 +75,13 @@ export class LoudnessNormalizer {
   private meterNode: AudioWorkletNode | null = null
   /** 维持 worklet 渲染的零增益出口 → destination（不发声） */
   private meterSink: GainNode | null = null
+  /**
+   * K-weighting 之后的测点。
+   *
+   * rms 模式从这里取时域波形：直接拿未加权的信号求 RMS 会把"低音多但听起来
+   * 不响"的歌低估、把"明亮且压缩重"的歌高估，正是响度参差的主因。
+   */
+  private measureAnalyser: AnalyserNode | null = null
   /** worklet 模块加载 Promise（全局只加载/编译一次） */
   private modulePromise: Promise<void> | null = null
 
@@ -95,11 +110,6 @@ export class LoudnessNormalizer {
       limiter.release.value = 0.25
       this.limiterNode = limiter
     }
-    // 复用波形缓冲，长度与 analyser.fftSize 对齐（当前为 2048）
-    if (!this.wave || this.wave.length !== analyser.fftSize) {
-      this.wave = new Float32Array(analyser.fftSize)
-    }
-
     this.analyser = analyser
     this.volumeGain = volumeGain
     this.active = true
@@ -121,9 +131,11 @@ export class LoudnessNormalizer {
     this.reset()
 
     if (this.mode === 'rms') {
+      // RMS 模式不需要 worklet，测量支路可同步搭好
+      this.attachMeasureBranch(context, false)
       this.startRms()
     } else {
-      void this.attachLufsBranch(context)
+      void this.attachMeasureBranch(context, true)
     }
   }
 
@@ -136,7 +148,7 @@ export class LoudnessNormalizer {
 
     this.active = false
     this.stopRms()
-    this.detachLufsBranch()
+    this.detachMeasureBranch()
 
     if (input && output) {
       try {
@@ -167,11 +179,12 @@ export class LoudnessNormalizer {
     // 切模式视为重新测量：复位增益与平滑状态
     this.reset()
     if (mode === 'rms') {
-      this.detachLufsBranch()
+      // attachMeasureBranch 内部会先拆旧线，无需单独 detach
+      this.attachMeasureBranch(context, false)
       this.startRms()
     } else {
       this.stopRms()
-      void this.attachLufsBranch(context)
+      void this.attachMeasureBranch(context, true)
     }
   }
 
@@ -213,12 +226,13 @@ export class LoudnessNormalizer {
    * 单次 RMS 测量与增益更新（定时器回调）
    */
   private updateRms(): void {
-    if (!this.analyser || !this.gainNode || !this.wave) return
+    const tap = this.measureAnalyser
+    if (!tap || !this.gainNode || !this.wave) return
     // 窗口隐藏时系统会节流/冻结音频图，跳过以节省 CPU
     if (document.hidden) return
 
-    const analyser = this.analyser
-    analyser.getFloatTimeDomainData(this.wave)
+    // 测点位于 K-weighting 之后, 取到的已是加权信号 (近似响度而非裸 RMS)
+    tap.getFloatTimeDomainData(this.wave)
 
     // 计算 RMS（线性，full-scale = 1）
     let sumSquares = 0
@@ -246,19 +260,32 @@ export class LoudnessNormalizer {
   // ============ LUFS 模式 ============
 
   /**
-   * 加载 worklet 模块（仅一次）并接入 K-weighting 测量支路
-   * 异步期间若已被 stop / 切模式，则放弃接线
+   * 搭建 K-weighting 测量支路（两种模式共用）
+   *
+   * 链路: analyser → 搁架 → 高通 → 测点 → [worklet] → 零增益 → destination
+   *
+   * 为什么 RMS 模式也必须走 K-weighting:
+   *   实测用户曲库（已批量归一化到 -14 LUFS）: 各曲集成响度极差仅 0.4dB,
+   *   而 dBFS RMS 极差达 1.5dB, 且整体比 LUFS 低约 2.4dB。若直接以 -14dBFS
+   *   为目标, 每首歌都会被统一抬高约 2.7dB —— 既推翻批量归一化的成果, 又会把
+   *   本就接近 -1.5dB 的峰值顶进限幅器。
+   *
+   * 末端必须接零增益节点再回 destination: Web Audio 只处理通往 destination 的
+   * 支路, 悬空分支取不到数据。
    */
-  private async attachLufsBranch(context: AudioContext): Promise<void> {
-    try {
-      await this.ensureModule(context)
-    } catch {
-      // 模块加载失败：静默回退，不反复尝试
-      return
+  private async attachMeasureBranch(context: AudioContext, useWorklet: boolean): Promise<void> {
+    if (useWorklet) {
+      try {
+        await this.ensureModule(context)
+      } catch {
+        // 模块加载失败：静默回退，不反复尝试
+        return
+      }
+      // await 期间可能已被 stop / 切回 rms
+      if (!this.active || this.mode !== 'lufs' || !this.analyser) return
     }
-    if (!this.active || this.mode !== 'lufs' || !this.analyser) return
 
-    const analyser = this.analyser
+    if (!this.analyser) return
 
     if (!this.kShelf) {
       const shelf = context.createBiquadFilter()
@@ -274,7 +301,13 @@ export class LoudnessNormalizer {
       hp.Q.value = 0.5
       this.kHighpass = hp
     }
-    if (!this.meterNode) {
+    if (!this.measureAnalyser) {
+      const tap = context.createAnalyser()
+      tap.fftSize = MEASURE_FFT_SIZE
+      tap.smoothingTimeConstant = 0
+      this.measureAnalyser = tap
+    }
+    if (useWorklet && !this.meterNode) {
       const node = new AudioWorkletNode(context, 'lufs-processor', {
         numberOfInputs: 1,
         numberOfOutputs: 1,
@@ -294,26 +327,36 @@ export class LoudnessNormalizer {
       this.meterSink = sink
     }
 
-    // 测量支路: analyser → shelf → highpass → meter → 零增益 → destination
-    try {
-      this.kShelf.disconnect()
-      this.kHighpass.disconnect()
-      this.meterNode.disconnect()
-      this.meterSink.disconnect()
-    } catch {
-      // 忽略
+    const analyser = this.analyser
+    const shelf = this.kShelf
+    const highpass = this.kHighpass
+    const tap = this.measureAnalyser
+    const sink = this.meterSink
+    const worklet = useWorklet ? this.meterNode : null
+    if (!analyser || !shelf || !highpass || !tap || !sink) return
+
+    // 波形缓冲与测点 fftSize 对齐（复用，避免每次测量分配）
+    if (!this.wave || this.wave.length !== tap.fftSize) {
+      this.wave = new Float32Array(tap.fftSize)
     }
-    analyser.connect(this.kShelf)
-    this.kShelf.connect(this.kHighpass)
-    this.kHighpass.connect(this.meterNode)
-    this.meterNode.connect(this.meterSink)
-    this.meterSink.connect(context.destination)
+
+    // 先拆旧线再重建，避免重复 connect 导致同一信号叠加
+    this.detachMeasureBranch()
+
+    analyser.connect(shelf)
+    shelf.connect(highpass)
+    highpass.connect(tap)
+    tap.connect(worklet ?? sink)
+    if (worklet) {
+      worklet.connect(sink)
+    }
+    sink.connect(context.destination)
   }
 
   /**
-   * 断开 LUFS 测量支路（节点保留复用，仅断开连线）
+   * 断开测量支路（节点保留复用，仅断开连线）
    */
-  private detachLufsBranch(): void {
+  private detachMeasureBranch(): void {
     // 仅移除 analyser → kShelf 这一条支路连接（disconnect(destinationNode) 是定向断开）
     try {
       if (this.analyser && this.kShelf) {
@@ -325,6 +368,7 @@ export class LoudnessNormalizer {
     try {
       this.kShelf?.disconnect()
       this.kHighpass?.disconnect()
+      this.measureAnalyser?.disconnect()
       this.meterNode?.disconnect()
       this.meterSink?.disconnect()
     } catch {

@@ -50,10 +50,12 @@ onMounted(() => {
 
 <template>
   <aside
-    class="w-80 h-full flex flex-col bg-white/50 dark:bg-gray-900/60 backdrop-blur border-l border-gray-200/60 dark:border-gray-700/60 shadow-2xl will-change-auto"
+    class="w-80 h-full flex flex-col bg-white/50 dark:bg-gray-900/60 backdrop-blur border-l border-gray-200/60 dark:border-gray-700/60 shadow-2xl"
   >
     <!-- 头部 -->
-    <div class="flex items-center justify-between px-5 py-4 border-b border-gray-200/50 dark:border-gray-700/50">
+    <div
+      class="flex items-center justify-between px-5 py-4 border-b border-gray-200/50 dark:border-gray-700/50"
+    >
       <div>
         <h2 class="text-gray-900 dark:text-white text-base font-semibold">均衡器</h2>
         <p class="text-gray-500 dark:text-gray-400 text-xs">调节音效风格</p>
@@ -74,7 +76,9 @@ onMounted(() => {
         <div class="flex items-center justify-between">
           <div>
             <p class="text-gray-900 dark:text-white text-sm font-medium">启用均衡器</p>
-            <p class="text-gray-500 dark:text-gray-400 text-xs">{{ eqEnabled ? '已启用' : '已禁用' }}</p>
+            <p class="text-gray-500 dark:text-gray-400 text-xs">
+              {{ eqEnabled ? '已启用' : '已禁用' }}
+            </p>
           </div>
           <button
             class="relative w-10 h-5 rounded-full transition-colors shrink-0"
@@ -91,15 +95,19 @@ onMounted(() => {
 
       <!-- 预设选择 -->
       <div>
-        <h3 class="text-gray-900 dark:text-white text-sm font-medium mb-3 font-semibold">音效预设</h3>
+        <h3 class="text-gray-900 dark:text-white text-sm font-medium mb-3 font-semibold">
+          音效预设
+        </h3>
         <div class="grid grid-cols-2 gap-2">
           <button
             v-for="preset in presets"
             :key="preset.name"
             class="rounded-lg p-3 text-left transition-all border"
-            :class="selectedPreset === preset.name && eqEnabled
-              ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400'
-              : 'bg-white dark:bg-gray-800/60 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:border-blue-200 dark:hover:border-blue-800'"
+            :class="
+              selectedPreset === preset.name && eqEnabled
+                ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-300 dark:border-blue-700 text-blue-700 dark:text-blue-400'
+                : 'bg-white dark:bg-gray-800/60 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300 hover:border-blue-200 dark:hover:border-blue-800'
+            "
             :disabled="!eqEnabled"
             @click="applyPreset(preset.name)"
           >
@@ -110,7 +118,9 @@ onMounted(() => {
       </div>
 
       <!-- 说明 -->
-      <div class="text-xs text-gray-400 dark:text-gray-500 leading-relaxed bg-gray-100/40 dark:bg-gray-800/40 rounded-md p-3">
+      <div
+        class="text-xs text-gray-400 dark:text-gray-500 leading-relaxed bg-gray-100/40 dark:bg-gray-800/40 rounded-md p-3"
+      >
         <p>选择不同预设体验不同音效风格</p>
         <p class="mt-1">基于 Web Audio API 实时处理，零延迟</p>
       </div>
