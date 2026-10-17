@@ -29,6 +29,15 @@
 import { equalizer } from './Equalizer'
 import { loudnessNormalizer } from './LoudnessNormalizer'
 import type { LoudnessMode } from './LoudnessNormalizer'
+import type { SwitchTimingsInput } from '../utils/switchSegments'
+
+/**
+ * 引擎采集的切歌分段原始计时（P0 定位用，不参与任何播放决策）
+ * 由 audioStore 在切歌完成后读取并通过 perf:switch-trace 交给记录器。
+ */
+export interface EngineSwitchTimings extends SwitchTimingsInput {
+  songId: string
+}
 
 export class AudioEngine {
   // ========== 模块级状态(Web Audio 单例) ==========
@@ -55,6 +64,13 @@ export class AudioEngine {
    * 每次发起新加载 +1, 解码完成后若序号已过期则不写入 current/prev 槽
    */
   private bufferLoadSeq = 0
+
+  /**
+   * 最近一次切歌的分段计时（P0 定位用）
+   * getAudioBuffer 记录 fetch/decode，playFromOffset 补齐 start 两段；
+   * 仅观测，不改变任何播放行为。
+   */
+  private lastTimings: EngineSwitchTimings | null = null
 
   /** 暂停时的播放位置(秒),用于恢复播放 */
   private pausedOffset = 0
@@ -124,6 +140,7 @@ export class AudioEngine {
       this.currentSongId = songId
       // 使任何在途的旧加载失效, 防止其完成后污染缓存槽
       this.bufferLoadSeq++
+      this.recordCacheHit(songId)
       return this.currentBuffer
     }
 
@@ -151,15 +168,29 @@ export class AudioEngine {
       this.currentBuffer = promotedBuffer
       this.currentBufferUrl = url
       this.currentSongId = songId
+      this.recordCacheHit(songId)
       return this.currentBuffer
     }
 
     const reqId = ++this.bufferLoadSeq
     try {
+      // 分段计时: fetch(含读取) / decode 分开记，便于定位瓶颈在哪一段
+      const fetchStartedAt = performance.now()
       const response = await fetch(url)
       if (!response.ok) return null
       const arrayBuffer = await response.arrayBuffer()
+      const fetchEndedAt = performance.now()
       const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer)
+      const decodeEndedAt = performance.now()
+      // 先落计时再判并发：过期加载同样要留下样本，否则"连切"时样本会缺失
+      this.lastTimings = {
+        songId,
+        cacheHit: false,
+        fetchMs: fetchEndedAt - fetchStartedAt,
+        decodeMs: decodeEndedAt - fetchEndedAt,
+        startPrepMs: 0,
+        startCallMs: 0,
+      }
 
       // 并发保护: 解码期间又发起了更新的加载, 本次结果已过期,
       // 不写入缓存槽 (调用方也会通过世代令牌丢弃本次播放)
@@ -185,11 +216,32 @@ export class AudioEngine {
   }
 
   /**
+   * 读取最近一次切歌的分段计时（无样本时为 null）
+   * 仅供性能定位使用，调用方负责把原始毫秒取整归档。
+   */
+  getLastTimings(): EngineSwitchTimings | null {
+    return this.lastTimings ? { ...this.lastTimings } : null
+  }
+
+  /** 记录一次 LRU 命中的切歌（无 fetch / decode 开销） */
+  private recordCacheHit(songId: string): void {
+    this.lastTimings = {
+      songId,
+      cacheHit: true,
+      fetchMs: 0,
+      decodeMs: 0,
+      startPrepMs: 0,
+      startCallMs: 0,
+    }
+  }
+
+  /**
    * 播放歌曲(从指定偏移量开始)
    * @param offset 开始播放位置(秒)
    * @param onStart 播放开始回调(由 audioStore 注入,用于触发 history 记录)
    */
   async playFromOffset(offset: number, onStart?: () => void): Promise<void> {
+    const enteredAt = performance.now()
     if (!this.audioContext || !this.currentUrl) return
 
     if (this.audioContext.state === 'suspended') {
@@ -234,6 +286,8 @@ export class AudioEngine {
       this._onStart = onStart
     }
     this._onStart?.()
+    // 分段计时: onStart 之前为 startPrep(唤醒/拆旧/建链/回调)，之后为 startCall(实际启动)
+    const startPrepEndedAt = performance.now()
 
     try {
       // 先启动 source (此时 gain 仍为 0, 不会发声)
@@ -250,6 +304,13 @@ export class AudioEngine {
     } catch (error) {
       console.error('[Audio] AudioBufferSourceNode 启动失败:', error)
       this.audioSourceNode = null
+    } finally {
+      // 仅补计时，不改变任何播放行为；恢复/seek 入口也会经过这里，
+      // 但记录器只认 audioStore 在切歌链路派发的 perf:switch-trace，不会误采。
+      if (this.lastTimings) {
+        this.lastTimings.startPrepMs = startPrepEndedAt - enteredAt
+        this.lastTimings.startCallMs = performance.now() - startPrepEndedAt
+      }
     }
   }
 

@@ -582,6 +582,13 @@ export const useAudioStore = defineStore('audio', () => {
               new CustomEvent('perf:playback-started', { detail: { songId: song.id } })
             )
           })
+          // 性能记录: 切歌分段明细(fetch/decode/start),仅定位用,不参与任何播放决策
+          const timings = audioEngine.getLastTimings()
+          if (timings) {
+            window.dispatchEvent(
+              new CustomEvent('perf:switch-trace', { detail: { songId: song.id, timings } })
+            )
+          }
           // 最后才解除切歌锁
           isSwitchingSong.value = false
           startTimeUpdate()

@@ -12,6 +12,7 @@
  *   - 长任务: PerformanceObserver('longtask') → 次数、总时长、最长
  *   - JS 堆: performance.memory 周期采样 → 起止值、峰值、增量
  *   - 切歌延迟: 监听 audioStore 派发的 perf:load-start / perf:playback-started
+ *   - 切歌分段: 监听 perf:switch-trace → fetch / decode / start 三段耗时及残余(定位用)
  *
  * 人工标记
  *   - mark(name): 记录"开始滚动""打开设置"等动作的时间点 (相对记录起点)
@@ -22,6 +23,14 @@
  *   - 控制台可用 window.__perf 直接调用 start/mark/stop/exportJson/exportMarkdown
  *   - 导出: 弹出保存对话框, 经 Rust write_text_file 落盘; 浏览器环境退化为下载
  */
+
+import { buildSwitchSegments, summarizeSwitchSegments } from './switchSegments'
+import type {
+  SegmentStats,
+  SwitchSegments,
+  SwitchSegmentSummary,
+  SwitchTimingsInput,
+} from './switchSegments'
 
 const RECORDS_KEY = 'gaoshanliushui:perf-records'
 const MAX_RECORDS = 50
@@ -53,6 +62,8 @@ export interface PerfMark {
 export interface PerfSwitch {
   songId?: string
   latencyMs: number
+  /** 三段明细(仅切歌链路有; 由 perf:switch-trace 补进已归档的这条记录) */
+  segments?: SwitchSegments
 }
 
 export interface PerfRecord {
@@ -73,6 +84,8 @@ export interface PerfRecord {
     deltaUsedHeapMb: number
   }
   switches: PerfSwitch[]
+  /** 切歌分段汇总(每段中位 / P95 / 最大); 老记录可能没有此字段 */
+  segmentSummary?: SwitchSegmentSummary
   marks: PerfMark[]
 }
 
@@ -147,6 +160,7 @@ class PerfRecorder {
     window.addEventListener('perf:app-ready', this.onAppReady)
     window.addEventListener('perf:load-start', this.onLoadStart as EventListener)
     window.addEventListener('perf:playback-started', this.onPlaybackStarted as EventListener)
+    window.addEventListener('perf:switch-trace', this.onSwitchTrace as EventListener)
   }
 
   private onAppReady = () => {
@@ -167,6 +181,26 @@ class PerfRecorder {
     if (startedAt === undefined) return
     this.switchStarts.delete(songId)
     this.switches.push({ songId, latencyMs: round(performance.now() - startedAt) })
+  }
+
+  /**
+   * 切歌分段: 由 audioStore 在切歌链路结束(playFromOffset resolve)后派发。
+   * 事件顺序是 playback-started → switch-trace, 所以这里回填最近一条同 ID 且还没有分段的记录。
+   * 极端情况(同一首歌快速连点)用"倒序 + 尚未填过"来配对, 避免把两轮的段混在一行。
+   */
+  private onSwitchTrace = (
+    event: CustomEvent<{ songId?: string; timings?: SwitchTimingsInput }>
+  ) => {
+    if (!this.recording) return
+    const songId = event.detail?.songId
+    const timings = event.detail?.timings
+    if (!songId || !timings) return
+    const target = [...this.switches]
+      .reverse()
+      .find((item) => item.songId === songId && !item.segments)
+    if (!target) return
+    target.segments = buildSwitchSegments(timings, target.latencyMs)
+    this.updatePanel()
   }
 
   private navigation: NavigationTiming = {
@@ -262,6 +296,7 @@ class PerfRecorder {
         deltaUsedHeapMb: round(endUsed - startUsed),
       },
       switches: [...this.switches],
+      segmentSummary: summarizeSwitchSegments(this.switches),
       marks: [...this.marks],
     }
 
@@ -443,6 +478,34 @@ class PerfRecorder {
       if (record.switches.length > 0) {
         lines.push(
           `- 切歌延迟(ms): ${record.switches.map((item) => `${item.songId ?? 'n/a'}=${item.latencyMs}`).join(', ')}`
+        )
+      }
+      const segments = record.segmentSummary
+      if (segments && segments.sampleCount > 0) {
+        const share = (value: number) =>
+          segments.latency.medianMs > 0
+            ? `${Math.round((value / segments.latency.medianMs) * 100)}%`
+            : '-'
+        lines.push(
+          `- 切歌分段: 样本 ${segments.sampleCount} 次(命中 LRU ${segments.cacheHitCount} 次), 总延迟中位 ${segments.latency.medianMs}ms`
+        )
+        lines.push('')
+        lines.push('| 段 | 样本 | 最小(ms) | 中位(ms) | P95(ms) | 最大(ms) | 中位占比 |')
+        lines.push('| --- | ---: | ---: | ---: | ---: | ---: | ---: |')
+        const rows: [string, SegmentStats][] = [
+          ['fetch', segments.fetch],
+          ['decode', segments.decode],
+          ['start', segments.start],
+          ['其他', segments.other],
+        ]
+        for (const [name, stats] of rows) {
+          lines.push(
+            `| ${name} | ${stats.count} | ${stats.minMs} | ${stats.medianMs} | ${stats.p95Ms} | ${stats.maxMs} | ${share(stats.medianMs)} |`
+          )
+        }
+        lines.push('')
+        lines.push(
+          '> fetch / decode 只统计未命中 LRU 的样本;start = startPrep + startCall;其他 = 总延迟 − fetch − decode − startPrep。'
         )
       }
       if (record.marks.length > 0) {
