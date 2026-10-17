@@ -13,6 +13,7 @@ function makeSegments(overrides: Partial<SwitchSegments> = {}): SwitchSegments {
     decodeMs: 200,
     startPrepMs: 50,
     startCallMs: 5,
+    resumeMs: 0,
     otherMs: 30,
     ...overrides,
   }
@@ -83,6 +84,21 @@ describe('buildSwitchSegments', () => {
     expect(segments.fetchMs).toBe(0)
     expect(segments.decodeMs).toBe(0)
     expect(segments.otherMs).toBe(4)
+  })
+
+  it('未提供 resumeMs 时按 0 归档,提供了则原样保留', () => {
+    const withoutResume = buildSwitchSegments(
+      { cacheHit: true, fetchMs: 0, decodeMs: 0, startPrepMs: 5, startCallMs: 1 },
+      10
+    )
+    expect(withoutResume.resumeMs).toBe(0)
+
+    const withResume = buildSwitchSegments(
+      { cacheHit: true, fetchMs: 0, decodeMs: 0, startPrepMs: 900, startCallMs: 1, resumeMs: 880 },
+      950
+    )
+    expect(withResume.resumeMs).toBe(880)
+    expect(withResume.otherMs).toBe(50)
   })
 
   it('计时出现负值时按 0 处理', () => {

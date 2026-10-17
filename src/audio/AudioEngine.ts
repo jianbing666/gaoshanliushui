@@ -7,8 +7,12 @@
  *   - 通过回调注入(onStart/onEnded)与 store 解耦,避免引擎层反向依赖 store
  *   - 单例模式,确保全局唯一音频链路
  *
- * 关键设计(2026-07-14 修复):
- *   - AudioBuffer LRU: current + prev(切回上一首 < 50ms)
+ * 关键设计:
+ *   - AudioBuffer LRU: 按 songId 归档的 3 首字典缓存(当前 / 上一首 / 预解码的下一首)
+ *   - 预解码: 当前曲目开始播放后把下一首解好,把 84.5% 的 decode 开销挪出切歌关键路径
+ *
+ * 历史修复(2026-07-14):
+ *   - 切歌静音三层防护(见 stopPlayback / isMutedForSwitch)
  *   - 切歌静音: stopPlayback 时立即 gain.gain = 0,新 source start 前恢复
  *   - 强制唤醒: forceWake() 显式 await audioContext.resume()
  *   - onended 清理: 手动 stop 前先 audioSourceNode.onended = null
@@ -30,6 +34,7 @@ import { equalizer } from './Equalizer'
 import { loudnessNormalizer } from './LoudnessNormalizer'
 import type { LoudnessMode } from './LoudnessNormalizer'
 import type { SwitchTimingsInput } from '../utils/switchSegments'
+import { AudioBufferCache } from './AudioBufferCache'
 
 /**
  * 引擎采集的切歌分段原始计时（P0 定位用，不参与任何播放决策）
@@ -46,24 +51,36 @@ export class AudioEngine {
   private gainNode: GainNode | null = null
   private audioSourceNode: AudioBufferSourceNode | null = null
 
-  /** 当前播放歌曲的 AudioBuffer(仅保留一首) */
+  /** 当前挂在播放链路上的 AudioBuffer(内容由 LRU 持有,这里只是引用) */
   private currentBuffer: AudioBuffer | null = null
-  private currentBufferUrl: string | null = null
-  /** 当前播放歌曲的 ID (引擎内部维护, 用于 LRU 槽位降级时正确标注) */
-  private currentSongId: string | null = null
   /** 当前播放歌曲的 URL */
   private currentUrl: string | null = null
 
-  /** LRU 前一首(切回上一首 < 50ms) */
-  private prevBuffer: AudioBuffer | null = null
-  private prevBufferUrl: string | null = null
-  private prevSongId: string | null = null
+  /**
+   * 已解码音频的 LRU 缓存(P0 优化: 当前 + 上一首 + 预解码的下一首)
+   * PCM 约 0.34MB/秒/双声道,因此默认 3 首 + 256MB 字节上限双约束
+   */
+  private cache = new AudioBufferCache<AudioBuffer>({
+    maxEntries: 3,
+    maxBytes: 256 * 1024 * 1024,
+  })
+
+  /** 在途解码任务(按 songId 去重: 预解码与前台请求撞车时共享同一份 Promise) */
+  private inflight = new Map<string, Promise<AudioBuffer | null>>()
 
   /**
-   * 异步加载序号 (防止并发 fetch/decode 乱序污染缓存槽)
-   * 每次发起新加载 +1, 解码完成后若序号已过期则不写入 current/prev 槽
+   * 每次 load 的 fetch / decode 耗时(按 songId)
+   * 由 getAudioBuffer 取用后再落到 lastTimings,这样"前台加入预解码任务"时也能拿到真实分段,
+   * 不会把上一次切歌的计时当成这一次的结果。
    */
-  private bufferLoadSeq = 0
+  private loadTimings = new Map<string, { fetchMs: number; decodeMs: number }>()
+
+  /** 预解码队列(串行执行,同一时刻只解一首) */
+  private prefetchQueue: { songId: string; url: string }[] = []
+  private prefetchRunning = false
+
+  /** 缓存代际:clearCache 后旧任务的结果不再写回 */
+  private cacheGeneration = 0
 
   /**
    * 最近一次切歌的分段计时（P0 定位用）
@@ -123,96 +140,127 @@ export class AudioEngine {
   }
 
   /**
-   * 获取 AudioBuffer(fetch + decodeAudioData,LRU 保留前一首)
-   * 阶段 3.3: 支持 LRU, 切回上一首 < 50ms
-   * @param url 音频文件 URL
-   * @param songId 歌曲 ID,用于 prev 槽匹配(防止 ID 复用错位)
+   * 获取 AudioBuffer(P0 优化: 按 songId 归档的 LRU + 预解码)
    *
-   * 2026-09 修复:
-   *   - prev 槽提升为 current 时, 先用局部变量保存 prev 引用再做降级,
-   *     修复"点击上一首却播放旧 current 音频"的引用覆盖 Bug
-   *   - currentSongId 由引擎内部维护, 降级时标注不再依赖外部传参
-   *   - bufferLoadSeq 防止并发加载乱序完成时污染缓存槽
+   * 与旧实现的差别:
+   *   - 缓存从"current + prev 两个槽位"改为 {AudioBufferCache} 的 LRU(默认 3 首),
+   *     命中即刷新 LRU 顺序,并把当前播放的一首 pin 住
+   *   - 未命中走 load(),与预解码共享同一份 in-flight 任务,不会重复解码同一首
+   *   - 淘汰统一由缓存层负责:PCM 体积大(约 0.34MB/秒/双声道),必须同时按条目数与字节数约束
+   *
+   * @param url 音频文件 URL
+   * @param songId 歌曲 ID
    */
   async getAudioBuffer(url: string, songId: string): Promise<AudioBuffer | null> {
-    // 命中 current
-    if (this.currentBuffer && this.currentBufferUrl === url) {
-      this.currentSongId = songId
-      // 使任何在途的旧加载失效, 防止其完成后污染缓存槽
-      this.bufferLoadSeq++
+    const cached = this.cache.get(songId, url)
+    if (cached) {
+      this.applyCurrent(songId, url, cached)
       this.recordCacheHit(songId)
-      return this.currentBuffer
+      return cached
     }
 
     if (!this.audioContext) return null
 
-    // 命中 prev(切回上一首)
-    if (songId && this.prevBuffer && this.prevSongId === songId && this.prevBufferUrl === url) {
-      // 槽位发生调整, 使在途加载失效
-      this.bufferLoadSeq++
-      // 先保存要提升的 prev buffer 引用 (若先覆盖 prevBuffer 会丢失它!)
-      const promotedBuffer = this.prevBuffer
-
-      // current 降级为 prev
-      if (this.currentBuffer) {
-        this.prevBuffer = this.currentBuffer
-        this.prevBufferUrl = this.currentBufferUrl
-        this.prevSongId = this.currentSongId
-      } else {
-        this.prevBuffer = null
-        this.prevBufferUrl = null
-        this.prevSongId = null
-      }
-
-      // prev 提升为 current
-      this.currentBuffer = promotedBuffer
-      this.currentBufferUrl = url
-      this.currentSongId = songId
-      this.recordCacheHit(songId)
-      return this.currentBuffer
+    // 前台要播的这一首优先:清掉排队中的预解码,避免与本次解码抢 CPU
+    this.prefetchQueue = []
+    const audioBuffer = await this.load(url, songId)
+    if (!audioBuffer) return null
+    // 解码耗时来自这次 load 本身(可能是预解码先发起的任务被前台接走)
+    const timings = this.loadTimings.get(songId)
+    this.lastTimings = {
+      songId,
+      cacheHit: false,
+      fetchMs: timings?.fetchMs ?? 0,
+      decodeMs: timings?.decodeMs ?? 0,
+      startPrepMs: 0,
+      startCallMs: 0,
     }
+    this.applyCurrent(songId, url, audioBuffer)
+    return audioBuffer
+  }
 
-    const reqId = ++this.bufferLoadSeq
+  /**
+   * 预解码指定歌曲(P0 优化: 把解码提前到用户点歌之前)
+   *
+   * 只写缓存,不触碰 currentBuffer/currentUrl,因此不会影响正在播放的内容;
+   * 已缓存或在途时直接跳过,队列串行执行且最多保留两个请求。
+   */
+  prefetch(url: string, songId: string): void {
+    if (!this.audioContext) return
+    if (this.cache.has(songId) || this.inflight.has(songId)) return
+    this.prefetchQueue = this.prefetchQueue.filter((item) => item.songId !== songId)
+    this.prefetchQueue.push({ songId, url })
+    const overflow = this.prefetchQueue.length - 2
+    if (overflow > 0) this.prefetchQueue.splice(0, overflow)
+    void this.runPrefetchQueue()
+  }
+
+  /** 串行执行预解码:同一时刻只解一首,避免与播放抢 CPU 造成卡顿 */
+  private async runPrefetchQueue(): Promise<void> {
+    if (this.prefetchRunning) return
+    this.prefetchRunning = true
     try {
-      // 分段计时: fetch(含读取) / decode 分开记，便于定位瓶颈在哪一段
-      const fetchStartedAt = performance.now()
-      const response = await fetch(url)
-      if (!response.ok) return null
-      const arrayBuffer = await response.arrayBuffer()
-      const fetchEndedAt = performance.now()
-      const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer)
-      const decodeEndedAt = performance.now()
-      // 先落计时再判并发：过期加载同样要留下样本，否则"连切"时样本会缺失
-      this.lastTimings = {
-        songId,
-        cacheHit: false,
-        fetchMs: fetchEndedAt - fetchStartedAt,
-        decodeMs: decodeEndedAt - fetchEndedAt,
-        startPrepMs: 0,
-        startCallMs: 0,
+      while (this.prefetchQueue.length > 0) {
+        const next = this.prefetchQueue.shift()
+        if (!next) break
+        if (this.cache.has(next.songId) || this.inflight.has(next.songId)) continue
+        // 预解码失败不影响任何播放行为,load 内部已记录错误
+        await this.load(next.url, next.songId)
       }
-
-      // 并发保护: 解码期间又发起了更新的加载, 本次结果已过期,
-      // 不写入缓存槽 (调用方也会通过世代令牌丢弃本次播放)
-      if (reqId !== this.bufferLoadSeq) {
-        return audioBuffer
-      }
-
-      // 旧的 current 降级为 prev (songId 用引擎内部记录, 保证标注正确)
-      if (this.currentBuffer) {
-        this.prevBuffer = this.currentBuffer
-        this.prevBufferUrl = this.currentBufferUrl
-        this.prevSongId = this.currentSongId
-      }
-      this.currentBuffer = audioBuffer
-      this.currentBufferUrl = url
-      this.currentSongId = songId
-
-      return audioBuffer
-    } catch (error) {
-      console.error('[Audio] AudioBuffer 解码失败:', error)
-      return null
+    } finally {
+      this.prefetchRunning = false
     }
+  }
+
+  /** 把已解码音频挂到播放槽位并 pin 住(缓存淘汰时不会动它) */
+  private applyCurrent(songId: string, url: string, buffer: AudioBuffer): void {
+    this.currentBuffer = buffer
+    this.currentUrl = url
+    this.cache.pin(songId)
+  }
+
+  /** 读取并解码一首歌,结果写入 LRU;同一首的并发请求共享同一个任务 */
+  private load(url: string, songId: string): Promise<AudioBuffer | null> {
+    const existing = this.inflight.get(songId)
+    if (existing) return existing
+
+    const generation = this.cacheGeneration
+    const task = (async (): Promise<AudioBuffer | null> => {
+      if (!this.audioContext) return null
+      try {
+        const fetchStartedAt = performance.now()
+        const response = await fetch(url)
+        if (!response.ok) return null
+        const arrayBuffer = await response.arrayBuffer()
+        const fetchEndedAt = performance.now()
+        const audioBuffer = await this.audioContext.decodeAudioData(arrayBuffer)
+        const decodeEndedAt = performance.now()
+
+        // 计时总是记录:前台可能是"接走"了预解码任务,同样需要真实分段
+        this.loadTimings.set(songId, {
+          fetchMs: fetchEndedAt - fetchStartedAt,
+          decodeMs: decodeEndedAt - fetchEndedAt,
+        })
+        if (this.loadTimings.size > 8) {
+          const oldest = this.loadTimings.keys().next().value
+          if (oldest !== undefined) this.loadTimings.delete(oldest)
+        }
+
+        // 清缓存后完成的旧任务不再写回,避免把已释放的内容又塞回 LRU
+        if (generation === this.cacheGeneration) {
+          const bytes = audioBuffer.length * audioBuffer.numberOfChannels * 4
+          this.cache.set(songId, url, audioBuffer, bytes)
+        }
+        return audioBuffer
+      } catch (error) {
+        console.error('[Audio] AudioBuffer 解码失败:', error)
+        return null
+      }
+    })().finally(() => {
+      this.inflight.delete(songId)
+    })
+    this.inflight.set(songId, task)
+    return task
   }
 
   /**
@@ -244,12 +292,16 @@ export class AudioEngine {
     const enteredAt = performance.now()
     if (!this.audioContext || !this.currentUrl) return
 
+    // 唤醒耗时单独记:音频设备异常时 resume() 可能占掉整个 startPrep
+    let resumeMs = 0
     if (this.audioContext.state === 'suspended') {
+      const resumeStartedAt = performance.now()
       try {
         await this.audioContext.resume()
       } catch {
         return
       }
+      resumeMs = performance.now() - resumeStartedAt
     }
 
     const audioBuffer = this.currentBuffer
@@ -310,6 +362,7 @@ export class AudioEngine {
       if (this.lastTimings) {
         this.lastTimings.startPrepMs = startPrepEndedAt - enteredAt
         this.lastTimings.startCallMs = performance.now() - startPrepEndedAt
+        this.lastTimings.resumeMs = resumeMs
       }
     }
   }
@@ -476,14 +529,12 @@ export class AudioEngine {
    * 清除音频缓存(AudioBuffer)
    */
   clearCache(): void {
-    this.bufferLoadSeq++
+    this.cacheGeneration++
+    this.cache.clear()
+    this.loadTimings.clear()
+    this.prefetchQueue = []
     this.currentBuffer = null
-    this.currentBufferUrl = null
-    this.currentSongId = null
     this.currentUrl = null
-    this.prevBuffer = null
-    this.prevBufferUrl = null
-    this.prevSongId = null
   }
 
   /**
@@ -563,6 +614,7 @@ export class AudioEngine {
       hasSource: !!this.audioSourceNode,
       hasContext: !!this.audioContext,
       contextState: this.audioContext?.state ?? 'closed',
+      cache: this.cache.stats,
     }
   }
 

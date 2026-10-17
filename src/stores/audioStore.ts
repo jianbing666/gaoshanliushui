@@ -185,6 +185,101 @@ export const useAudioStore = defineStore('audio', () => {
     history.endHistoryRecord(audioEngine)
   }
 
+  // ========== 预解码下一首(P0 优化: 把 decode 挪出切歌关键路径) ==========
+  //
+  // 实测切歌延迟 84.5% 花在 decodeAudioData(单曲 200~600ms),而命中已解码缓存的
+  // 切歌只需 1ms 量级。因此在当前曲目开始播放后,把"下一首"提前解好放进 LRU。
+  //
+  // 约束:
+  //   - 随机/单曲循环无法预测下一首(随机会白烧一次解码),不预取
+  //   - 延迟 600ms 触发,避开切歌本身的解码与首帧;期间若又换歌则重新计时
+  const PREFETCH_DELAY_MS = 600
+  let prefetchTimer: number | null = null
+  /**
+   * 随机模式下的"下一首"预选结果
+   *
+   * 随机的下一首本来到歌尾才算,这样预解码永远落空。这里在预解码时机提前抽一次,
+   * 存下结果并在真正切歌时使用——随机性不变(仍是均匀/加权抽样),但解码可以提前完成。
+   * 换歌、换歌单、切模式时都会作废重抽。
+   */
+  let prefetchedNext: { songId: string; globalIndex: number } | null = null
+
+  /** 推断"下一首"会播哪一首(顺序/列表循环可预测,其余返回 null) */
+  function upcomingSong(): Song | null {
+    const songs = activeSongs.value
+    if (songs.length < 2) return null
+    if (loopMode.value === 'shuffle' || loopMode.value === 'single') return null
+    const idx = currentActiveIndex.value
+    if (idx < 0) return null
+    if (idx + 1 < songs.length) return songs[idx + 1]
+    return loopMode.value === 'list' ? songs[0] : null
+  }
+
+  function cancelPrefetch() {
+    if (prefetchTimer !== null) {
+      clearTimeout(prefetchTimer)
+      prefetchTimer = null
+    }
+    prefetchedNext = null
+  }
+
+  /**
+   * 取出随机模式预选的下一首并作废旧结果
+   * 校验: 该曲目仍在当前歌单、且不是当前正在播的这首;否则回退到现抽
+   */
+  function takeShuffleNext(): number {
+    const pending = prefetchedNext
+    prefetchedNext = null
+    if (!pending) return getRandomIndex()
+    const songs = activeSongs.value
+    const stillExists = songs.some((song) => song.id === pending.songId)
+    if (stillExists && pending.songId !== currentSong.value?.id) return pending.globalIndex
+    return getRandomIndex()
+  }
+
+  /**
+   * 确保"下一首"已经进入预解码(幂等: 已缓存/在途时是廉价空操作)
+   *
+   * 随机模式下,若尚未预选就提前抽一次并记住;已经预选过则沿用,不会反复换目标。
+   */
+  function ensurePrefetch() {
+    if (!currentSong.value) return
+    if (loopMode.value === 'single') return
+    // 切歌过程中不解码:前台正在解码这一首,再并发一个预解码会把两者都拖慢
+    if (isSwitchingSong.value || pendingPlay.value) return
+
+    if (loopMode.value === 'shuffle') {
+      if (prefetchedNext) {
+        const picked = library.playlist.find((song) => song.id === prefetchedNext?.songId)
+        if (picked) {
+          audioEngine.prefetch(library.getAudioUrl(picked.file_path), picked.id)
+          return
+        }
+        // 预选目标已不在歌单(切换歌单等),作废重抽
+        prefetchedNext = null
+      }
+      const index = getRandomIndex()
+      const picked = library.playlist[index]
+      if (!picked) return
+      prefetchedNext = { songId: picked.id, globalIndex: index }
+      audioEngine.prefetch(library.getAudioUrl(picked.file_path), picked.id)
+      return
+    }
+
+    const song = upcomingSong()
+    if (!song) return
+    audioEngine.prefetch(library.getAudioUrl(song.file_path), song.id)
+  }
+
+  /** 安排一次预解码;重复调用只保留最后一次(切歌期间的重置靠 cancelPrefetch) */
+  function schedulePrefetch(delay = PREFETCH_DELAY_MS) {
+    cancelPrefetch()
+    prefetchTimer = window.setTimeout(() => {
+      prefetchTimer = null
+      ensurePrefetch()
+    }, delay)
+  }
+
   function next() {
     const songs = activeSongs.value
     if (songs.length === 0) return
@@ -212,7 +307,7 @@ export const useAudioStore = defineStore('audio', () => {
       if (shuffleHistory.value.length > 100) {
         shuffleHistory.value.shift()
       }
-      library.currentIndex = getRandomIndex()
+      library.currentIndex = takeShuffleNext()
       settleIfNoSongChanged(startIndex)
       return
     }
@@ -252,7 +347,7 @@ export const useAudioStore = defineStore('audio', () => {
       if (shuffleHistory.value.length > 100) {
         shuffleHistory.value.shift()
       }
-      library.currentIndex = getRandomIndex()
+      library.currentIndex = takeShuffleNext()
       return
     }
 
@@ -488,12 +583,21 @@ export const useAudioStore = defineStore('audio', () => {
   // ========== 播放时间更新定时器 ==========
   let timeUpdateInterval: number | null = null
 
+  /** 预解码看门狗的时间闸门(毫秒):频率远低于 250ms 的进度刷新,避免额外开销 */
+  const PREFETCH_WATCHDOG_MS = 2000
+  let lastPrefetchCheckAt = 0
+
   function startTimeUpdate() {
     if (timeUpdateInterval) return
     timeUpdateInterval = window.setInterval(() => {
-      if (isPlaying.value) {
-        const t = audioEngine.getCurrentTime()
-        currentTime.value = t
+      if (!isPlaying.value) return
+      const t = audioEngine.getCurrentTime()
+      currentTime.value = t
+      // 兜底:首次播放、预选失败、播放器被系统唤醒等路径都靠这里补一次预解码
+      const now = performance.now()
+      if (now - lastPrefetchCheckAt >= PREFETCH_WATCHDOG_MS) {
+        lastPrefetchCheckAt = now
+        ensurePrefetch()
       }
     }, 250)
   }
@@ -524,6 +628,8 @@ export const useAudioStore = defineStore('audio', () => {
 
       // 性能记录: 切歌加载起点 (供 perfRecorder 计算切歌延迟)
       window.dispatchEvent(new CustomEvent('perf:load-start', { detail: { songId: song.id } }))
+      // 换歌时取消排队中的预解码,避免与本次解码抢 CPU
+      cancelPrefetch()
 
       try {
         // 第 1 步: 立即停止旧播放 + 静音 (AudioEngine 三层静音防护)
@@ -589,6 +695,8 @@ export const useAudioStore = defineStore('audio', () => {
               new CustomEvent('perf:switch-trace', { detail: { songId: song.id, timings } })
             )
           }
+          // 播放已开始:把下一首预解码好,下次切歌就走 LRU 命中
+          schedulePrefetch()
           // 最后才解除切歌锁
           isSwitchingSong.value = false
           startTimeUpdate()
@@ -618,6 +726,8 @@ export const useAudioStore = defineStore('audio', () => {
         await audioEngine.resumePlayback()
         startTimeUpdate()
         void html5AudioPlayer.play()
+        // 恢复播放后同样预解码下一首(暂停期间缓存的下一首可能已被淘汰)
+        schedulePrefetch()
         // 暂停时历史记录已结束, 恢复播放需要新开一条记录
         // (切歌自动播放路径由 playFromOffset 的 onStart 回调负责, 不走这里)
         if (currentSong.value) {
@@ -896,7 +1006,10 @@ export const useAudioStore = defineStore('audio', () => {
     // 引擎生命周期
     resumeAudioContext: () => audioEngine.resumeContext(),
     reconcilePlaybackState,
-    clearAudioBufferCache: () => audioEngine.clearCache(),
+    clearAudioBufferCache: () => {
+    cancelPrefetch()
+    audioEngine.clearCache()
+  },
     disconnectAnalyser: () => audioEngine.disconnectAnalyser(),
     reconnectAnalyser: () => audioEngine.reconnectAnalyser(),
   }

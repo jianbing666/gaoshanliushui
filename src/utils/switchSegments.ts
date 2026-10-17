@@ -24,6 +24,8 @@ export interface SwitchTimingsInput {
   startPrepMs: number
   /** onStart 之后到 source.start() 与音量恢复完成(超出上例总延迟口径的部分) */
   startCallMs: number
+  /** 其中花在 audioContext.resume() 上的时间(排查音频设备异常用,已计入 startPrep) */
+  resumeMs?: number
 }
 
 /** 归档进记录的分段(已取整;otherMs 由总延迟反推) */
@@ -33,6 +35,8 @@ export interface SwitchSegments {
   decodeMs: number
   startPrepMs: number
   startCallMs: number
+  /** startPrep 中花在 audioContext.resume() 的部分 */
+  resumeMs: number
   /** 总延迟扣掉 fetch/decode/startPrep 后的残余(store 编排、await 调度、静音重入等) */
   otherMs: number
 }
@@ -107,8 +111,17 @@ export function buildSwitchSegments(
   const decodeMs = round(Math.max(0, timings.decodeMs))
   const startPrepMs = round(Math.max(0, timings.startPrepMs))
   const startCallMs = round(Math.max(0, timings.startCallMs))
+  const resumeMs = round(Math.max(0, timings.resumeMs ?? 0))
   const otherMs = round(Math.max(0, latencyMs - fetchMs - decodeMs - startPrepMs))
-  return { cacheHit: timings.cacheHit, fetchMs, decodeMs, startPrepMs, startCallMs, otherMs }
+  return {
+    cacheHit: timings.cacheHit,
+    fetchMs,
+    decodeMs,
+    startPrepMs,
+    startCallMs,
+    resumeMs,
+    otherMs,
+  }
 }
 
 /**

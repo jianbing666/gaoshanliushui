@@ -507,6 +507,17 @@ class PerfRecorder {
         lines.push(
           '> fetch / decode 只统计未命中 LRU 的样本;start = startPrep + startCall;其他 = 总延迟 − fetch − decode − startPrep。'
         )
+        const resumeTotal = round(
+          record.switches.reduce((sum, item) => sum + (item.segments?.resumeMs ?? 0), 0)
+        )
+        const resumeMax = round(
+          record.switches.reduce((max, item) => Math.max(max, item.segments?.resumeMs ?? 0), 0)
+        )
+        if (resumeTotal > 0) {
+          lines.push(
+            `- 上下文唤醒(audioContext.resume): 合计 ${resumeTotal}ms, 单次最大 ${resumeMax}ms`
+          )
+        }
       }
       if (record.marks.length > 0) {
         lines.push(
