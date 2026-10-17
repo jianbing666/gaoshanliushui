@@ -4,13 +4,11 @@ import { useLibraryStore } from '@/stores/libraryStore'
 import { useAudioStore } from '@/stores/audioStore'
 import { useUIStore } from '@/stores/uiStore'
 import { formatTime } from '@/utils/formatTime'
-import MusicIcon from '@/components/icons/MusicIcon.vue'
-import ChevronLeftIcon from '@/components/icons/ChevronLeftIcon.vue'
-import TrashIcon from '@/components/icons/TrashIcon.vue'
 // 阶段 2.1: 虚拟列表
 import VirtualSongList from '@/components/VirtualSongList.vue'
 import type { PlayHistoryItem } from '@/types/song'
 import { computed } from 'vue'
+import Icon from '@/components/icons/Icon.vue'
 
 const history = useHistoryStore()
 const library = useLibraryStore()
@@ -82,14 +80,14 @@ function onCoverError(e: Event) {
           title="清空历史"
           @click="history.clearPlayHistory()"
         >
-          <TrashIcon :size="16" />
+          <Icon name="trash" :size="16" />
         </button>
         <button
           class="p-1.5 rounded-md hover:bg-gray-200/60 dark:hover:bg-gray-700/60 text-gray-600 dark:text-gray-300 hover:text-gray-800 dark:hover:text-white transition-colors"
           title="关闭"
           @click="ui.toggleHistoryDrawer()"
         >
-          <ChevronLeftIcon :size="18" />
+          <Icon name="chevron-left" :size="18" />
         </button>
       </div>
     </div>
@@ -130,7 +128,7 @@ function onCoverError(e: Event) {
                   v-else
                   class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500"
                 >
-                  <MusicIcon :size="16" />
+                  <Icon name="music" :size="16" />
                 </div>
               </div>
 
@@ -169,7 +167,7 @@ function onCoverError(e: Event) {
                 title="删除记录"
                 @click.stop="history.removeHistoryItem((song as PlayHistoryItem).id)"
               >
-                <TrashIcon :size="14" />
+                <Icon name="trash" :size="14" />
               </button>
             </div>
           </template>
@@ -198,7 +196,7 @@ function onCoverError(e: Event) {
                 v-else
                 class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500"
               >
-                <MusicIcon :size="16" />
+                <Icon name="music" :size="16" />
               </div>
             </div>
 
@@ -233,7 +231,7 @@ function onCoverError(e: Event) {
               title="删除记录"
               @click.stop="history.removeHistoryItem(item.id)"
             >
-              <TrashIcon :size="14" />
+              <Icon name="trash" :size="14" />
             </button>
           </div>
         </template>
@@ -242,7 +240,7 @@ function onCoverError(e: Event) {
         <div
           class="flex flex-col items-center justify-center h-full text-gray-500 dark:text-gray-400"
         >
-          <MusicIcon :size="48" class="mb-3 opacity-30" />
+          <Icon name="music" :size="48" class="mb-3 opacity-30" />
           <p class="text-sm">暂无播放记录</p>
           <p class="text-xs mt-1">播放的歌曲会在这里显示</p>
         </div>

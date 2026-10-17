@@ -1,8 +1,10 @@
 <script setup lang="ts">
+import { defineAsyncComponent } from 'vue'
 import { useAudioStore } from '@/stores/audioStore'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useSettingsStore } from '@/stores/settingsStore'
-import AudioSpectrum from '@/components/AudioSpectrum.vue'
+// P2: 频谱可视化按需加载(canvas 动画只在打开频谱时才有意义)
+const AudioSpectrum = defineAsyncComponent(() => import('@/components/AudioSpectrum.vue'))
 // Memory feature - 高山流水 v1.1: 弹幕式 tag 展示
 import MemoryMarquee from '@/components/MemoryMarquee.vue'
 // v1.1 (2026-07-14): 长文本循环滚动

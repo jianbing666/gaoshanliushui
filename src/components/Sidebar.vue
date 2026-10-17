@@ -8,8 +8,8 @@ import CustomPlaylist from '@/components/CustomPlaylist.vue'
 import SongItem from '@/components/SongItem.vue'
 // 阶段 2.1: 虚拟列表
 import VirtualSongList from '@/components/VirtualSongList.vue'
-import PlusIcon from '@/components/icons/PlusIcon.vue'
 import { computed } from 'vue'
+import Icon from '@/components/icons/Icon.vue'
 
 const library = useLibraryStore()
 const audio = useAudioStore()
@@ -51,7 +51,7 @@ const useVirtualList = computed(() => library.filteredActivePlaylistSongs.length
           title="新建歌单"
           @click="handleCreatePlaylist"
         >
-          <PlusIcon :size="16" />
+          <Icon name="plus" :size="16" />
         </button>
       </div>
     </div>

@@ -3,11 +3,7 @@ import { ref, onMounted, onUnmounted } from 'vue'
 import { getCurrentWindow } from '@tauri-apps/api/window'
 import { useUIStore } from '@/stores/uiStore'
 import { useAudioStore } from '@/stores/audioStore'
-import SettingsIcon from '@/components/icons/SettingsIcon.vue'
-import BarChart3Icon from '@/components/icons/BarChart3Icon.vue'
-import DownloadIcon from '@/components/icons/DownloadIcon.vue'
-import MemoryIcon from '@/components/icons/MemoryIcon.vue'
-import EqualizerIcon from '@/components/icons/EqualizerIcon.vue'
+import Icon from '@/components/icons/Icon.vue'
 
 const props = defineProps<{
   showMiniModeButton?: boolean
@@ -174,7 +170,7 @@ const emit = defineEmits<{
           title="下载"
           @click="ui.toggleDownloadPanel()"
         >
-          <DownloadIcon :size="16" />
+          <Icon name="download" :size="16" />
         </button>
 
         <!-- 统计按钮 -->
@@ -188,7 +184,7 @@ const emit = defineEmits<{
           title="统计"
           @click="ui.toggleStatsPanel()"
         >
-          <BarChart3Icon :size="16" />
+          <Icon name="bar-chart3" :size="16" />
         </button>
 
         <!-- 均衡器按钮 -->
@@ -202,7 +198,7 @@ const emit = defineEmits<{
           title="均衡器"
           @click="ui.toggleRightPanel('equalizer')"
         >
-          <EqualizerIcon :size="16" />
+          <Icon name="equalizer" :size="16" />
         </button>
 
         <!-- Memory feature - 高山流水 v1.1: 记忆按钮 (统计左、设置右) -->
@@ -216,7 +212,7 @@ const emit = defineEmits<{
           title="回忆"
           @click="ui.toggleMemoryDrawer()"
         >
-          <MemoryIcon :size="16" />
+          <Icon name="memory" :size="16" />
         </button>
 
         <!-- 设置按钮 -->
@@ -230,7 +226,7 @@ const emit = defineEmits<{
           title="设置"
           @click="ui.toggleSettingsPanel()"
         >
-          <SettingsIcon :size="16" />
+          <Icon name="settings" :size="16" />
         </button>
       </div>
 

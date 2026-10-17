@@ -6,21 +6,11 @@ export default { inheritAttrs: false }
 import { useAudioStore } from '@/stores/audioStore'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useSettingsStore } from '@/stores/settingsStore'
-import { html5AudioPlayer } from '@/audio/HTML5AudioPlayer'
 import { formatTime } from '@/utils/formatTime'
 import { ref } from 'vue'
 import { useVolumeSlider } from '@/composables/useVolumeSlider'
 import VolumeSlider from '@/components/VolumeSlider.vue'
-import RepeatIcon from '@/components/icons/RepeatIcon.vue'
-import RepeatOneIcon from '@/components/icons/RepeatOneIcon.vue'
-import ShuffleIcon from '@/components/icons/ShuffleIcon.vue'
-import ArrowRightIcon from '@/components/icons/ArrowRightIcon.vue'
-import SkipBackIcon from '@/components/icons/SkipBackIcon.vue'
-import SkipForwardIcon from '@/components/icons/SkipForwardIcon.vue'
-import PlayIcon from '@/components/icons/PlayIcon.vue'
-import PauseIcon from '@/components/icons/PauseIcon.vue'
-import MusicIcon from '@/components/icons/MusicIcon.vue'
-import HeartIcon from '@/components/icons/HeartIcon.vue'
+import Icon from '@/components/icons/Icon.vue'
 
 const player = useAudioStore()
 const library = useLibraryStore()
@@ -66,7 +56,7 @@ function onProgressInput(event: Event) {
   // Web Audio 主链路：使用 seekTo 跳转
   player.seekTo(time)
   // 同时更新 audio 元素的进度（保持同步，仅用于元数据）
-  html5AudioPlayer.seek(time)
+  void import('@/audio/HTML5AudioPlayer').then((m) => m.html5AudioPlayer.seek(time))
   player.currentTime = time
 }
 
@@ -110,7 +100,7 @@ function toggleMute() {
             v-else
             class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500"
           >
-            <MusicIcon :size="20" />
+            <Icon name="music" :size="20" />
           </div>
         </div>
         <div v-if="library.currentSong" class="min-w-0">
@@ -151,10 +141,10 @@ function toggleMute() {
             :title="loopModeLabels[player.loopMode]"
             @click="player.toggleLoopMode"
           >
-            <ShuffleIcon v-if="player.loopMode === 'shuffle'" :size="18" />
-            <RepeatOneIcon v-else-if="player.loopMode === 'single'" :size="18" />
-            <RepeatIcon v-else-if="player.loopMode === 'list'" :size="18" />
-            <ArrowRightIcon v-else :size="18" />
+            <Icon v-if="player.loopMode === 'shuffle'" name="shuffle" :size="18" />
+            <Icon v-else-if="player.loopMode === 'single'" name="repeat-one" :size="18" />
+            <Icon v-else-if="player.loopMode === 'list'" name="repeat" :size="18" />
+            <Icon v-else name="arrow-right" :size="18" />
           </button>
 
           <!-- 上一首 -->
@@ -164,7 +154,7 @@ function toggleMute() {
             :disabled="!player.hasPrev"
             @click="player.prev"
           >
-            <SkipBackIcon :size="20" />
+            <Icon name="skip-back" :size="20" />
           </button>
 
           <!-- 播放/暂停 -->
@@ -172,8 +162,8 @@ function toggleMute() {
             class="w-12 h-12 bg-gray-900 dark:bg-white rounded-full flex items-center justify-center hover:bg-gray-700 dark:hover:bg-gray-200 transition-colors shadow-lg"
             @click="player.togglePlay"
           >
-            <PauseIcon v-if="player.isPlaying" :size="20" class="text-white dark:text-gray-900" />
-            <PlayIcon v-else :size="20" class="text-white dark:text-gray-900 ml-0.5" />
+            <Icon v-if="player.isPlaying" name="pause" :size="20" class="text-white dark:text-gray-900" />
+            <Icon v-else name="play" :size="20" class="text-white dark:text-gray-900 ml-0.5" />
           </button>
 
           <!-- 下一首 -->
@@ -183,7 +173,7 @@ function toggleMute() {
             :disabled="!player.hasNext"
             @click="player.next"
           >
-            <SkipForwardIcon :size="20" />
+            <Icon name="skip-forward" :size="20" />
           </button>
         </div>
 

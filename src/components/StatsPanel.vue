@@ -2,8 +2,7 @@
 import { useHistoryStore } from '@/stores/historyStore'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useUIStore } from '@/stores/uiStore'
-import MusicIcon from '@/components/icons/MusicIcon.vue'
-import ChevronRightIcon from '@/components/icons/ChevronRightIcon.vue'
+import Icon from '@/components/icons/Icon.vue'
 
 const history = useHistoryStore()
 const library = useLibraryStore()
@@ -60,7 +59,7 @@ function onCoverError(e: Event) {
         title="关闭"
         @click="ui.toggleStatsPanel()"
       >
-        <ChevronRightIcon :size="18" />
+        <Icon name="chevron-right" :size="18" />
       </button>
     </div>
 
@@ -169,7 +168,7 @@ function onCoverError(e: Event) {
                   v-else
                   class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500"
                 >
-                  <MusicIcon :size="20" />
+                  <Icon name="music" :size="20" />
                 </div>
               </div>
               <div class="flex-1 min-w-0">
@@ -218,7 +217,7 @@ function onCoverError(e: Event) {
                   v-else
                   class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500"
                 >
-                  <MusicIcon :size="20" />
+                  <Icon name="music" :size="20" />
                 </div>
               </div>
               <div class="flex-1 min-w-0">
@@ -240,7 +239,7 @@ function onCoverError(e: Event) {
             v-if="!history.mostLoopedSong && !history.longestPlayedSong"
             class="text-center py-8 text-gray-500 dark:text-gray-400"
           >
-            <MusicIcon :size="40" class="mx-auto mb-2 opacity-30" />
+            <Icon name="music" :size="40" class="mx-auto mb-2 opacity-30" />
             <p class="text-sm">暂无统计数据</p>
             <p class="text-xs mt-1">多听几首歌再来看看吧</p>
           </div>

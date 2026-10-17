@@ -6,11 +6,7 @@ import { listen, type UnlistenFn } from '@tauri-apps/api/event'
 import { useSettingsStore } from '@/stores/settingsStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useLibraryStore } from '@/stores/libraryStore'
-import FolderIcon from '@/components/icons/FolderIcon.vue'
-import ChevronRightIcon from '@/components/icons/ChevronRightIcon.vue'
-import DownloadIcon from '@/components/icons/DownloadIcon.vue'
-import XIcon from '@/components/icons/XIcon.vue'
-import CheckIcon from '@/components/icons/CheckIcon.vue'
+import Icon from '@/components/icons/Icon.vue'
 
 const settings = useSettingsStore()
 const ui = useUIStore()
@@ -453,7 +449,7 @@ onUnmounted(() => {
           title="关闭"
           @click="ui.toggleDownloadPanel()"
         >
-          <ChevronRightIcon :size="18" />
+          <Icon name="chevron-right" :size="18" />
         </button>
       </div>
     </div>
@@ -532,7 +528,7 @@ onUnmounted(() => {
             title="选择文件夹"
             @click="selectOutputDir"
           >
-            <FolderIcon :size="14" />
+            <Icon name="folder" :size="14" />
           </button>
         </div>
       </div>
@@ -690,10 +686,10 @@ onUnmounted(() => {
                   <span class="w-2 h-2 rounded-full bg-blue-500 animate-pulse"></span>
                 </template>
                 <template v-else-if="item.status === 'success'">
-                  <CheckIcon :size="12" class="text-green-500" />
+                  <Icon name="check" :size="12" class="text-green-500" />
                 </template>
                 <template v-else-if="item.status === 'error'">
-                  <XIcon :size="12" class="text-red-500" />
+                  <Icon name="x" :size="12" class="text-red-500" />
                 </template>
               </span>
               <span class="font-medium text-gray-900 dark:text-white truncate flex-1">
@@ -731,7 +727,7 @@ onUnmounted(() => {
           :disabled="batchItems.length === 0 || !outputDir"
           @click="startBatchDownload"
         >
-          <DownloadIcon :size="12" />
+          <Icon name="download" :size="12" />
           串行下载 {{ batchItems.length }} 项
         </button>
       </div>
@@ -766,7 +762,7 @@ onUnmounted(() => {
         :disabled="!canSubmit"
         @click="startDownload"
       >
-        <DownloadIcon :size="14" />
+        <Icon name="download" :size="14" />
         {{ isDownloading ? '下载中...' : '开始下载' }}
       </button>
     </div>

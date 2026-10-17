@@ -7,7 +7,7 @@ import './styles/virtual-scroller.css'
 // 2026-07-14: 托盘/快捷键/媒体键事件监听器必须在最早期注册
 //   原因: Vue 组件挂载前可能错过事件, 且 webview 冻结后重启时
 //   监听器是 Rust 唤醒 webview 的唯一信号源
-import { setupGlobalMediaListeners } from './composables/useMediaControls'
+
 
 // 记录 JS 启动基准时刻 (供按需加载的性能记录器计算启动耗时)
 const bootAt = performance.now()
@@ -27,7 +27,8 @@ nextTick(() => {
 
 // 必须在 app.mount 之后、且必须在 Pinia 创建之后调用
 // 内部会等待 useAudioStore() 获取 store 实例
-setupGlobalMediaListeners()
+// P2: 媒体事件监听器按需加载(约 3.2KB 移出主入口); 它只注册 Tauri 事件, 晚一个 tick 无副作用
+void import('./composables/useMediaControls').then((module) => module.setupGlobalMediaListeners())
 
 // ========== 性能记录器 (按需加载, 默认不进主包) ==========
 // 按 Ctrl+Shift+F12 首次加载并打开面板; 若上次开启过, 启动时静默加载以采集启动时序。

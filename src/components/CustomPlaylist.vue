@@ -3,7 +3,7 @@ import { computed } from 'vue'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useUIStore } from '@/stores/uiStore'
 import type { Playlist } from '@/types/song'
-import FolderIcon from '@/components/icons/FolderIcon.vue'
+import Icon from '@/components/icons/Icon.vue'
 
 const props = defineProps<{
   playlist: Playlist
@@ -36,7 +36,8 @@ function handleContextMenu(e: MouseEvent) {
     @click="handleClick"
     @contextmenu="handleContextMenu"
   >
-    <FolderIcon
+    <Icon
+name="folder"
       :size="16"
       :class="isActive ? 'text-gray-600 dark:text-gray-400' : 'text-gray-400 dark:text-gray-500'"
     />

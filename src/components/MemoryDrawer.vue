@@ -13,12 +13,7 @@ import { useMemoryStore } from '@/stores/memoryStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useSettingsStore } from '@/stores/settingsStore'
-import XIcon from '@/components/icons/XIcon.vue'
-import ChevronRightIcon from '@/components/icons/ChevronRightIcon.vue'
-import TrashIcon from '@/components/icons/TrashIcon.vue'
-import DownloadIcon from '@/components/icons/DownloadIcon.vue'
-import FolderIcon from '@/components/icons/FolderIcon.vue'
-import PencilIcon from '@/components/icons/PencilIcon.vue'
+import Icon from '@/components/icons/Icon.vue'
 
 const memory = useMemoryStore()
 const ui = useUIStore()
@@ -218,7 +213,7 @@ function handleEditMetadata() {
           title="编辑歌曲元数据"
           @click="handleEditMetadata"
         >
-          <PencilIcon :size="15" />
+          <Icon name="pencil" :size="15" />
         </button>
       </div>
       <button
@@ -226,7 +221,7 @@ function handleEditMetadata() {
         title="关闭"
         @click="handleClose"
       >
-        <ChevronRightIcon :size="18" />
+        <Icon name="chevron-right" :size="18" />
       </button>
     </div>
 
@@ -285,7 +280,7 @@ function handleEditMetadata() {
               :title="`删除标签 ${tag}`"
               @click="removeTag(tag)"
             >
-              <XIcon :size="12" />
+              <Icon name="x" :size="12" />
             </button>
           </span>
         </div>
@@ -362,7 +357,7 @@ function handleEditMetadata() {
           <div
             class="flex-1 min-w-0 flex items-center gap-1.5 px-2.5 py-2 bg-gray-100/60 dark:bg-gray-800/60 rounded-md"
           >
-            <FolderIcon :size="14" class="shrink-0 text-gray-400 dark:text-gray-500" />
+            <Icon name="folder" :size="14" class="shrink-0 text-gray-400 dark:text-gray-500" />
             <span
               class="text-xs text-gray-600 dark:text-gray-400 truncate"
               :title="exportDirDisplay"
@@ -375,7 +370,7 @@ function handleEditMetadata() {
             title="选择导出文件夹"
             @click="selectExportDir"
           >
-            <FolderIcon :size="14" />
+            <Icon name="folder" :size="14" />
           </button>
         </div>
         <p class="text-[10px] text-gray-400 dark:text-gray-500">默认导出到音乐库目录，可自定义</p>
@@ -388,7 +383,7 @@ function handleEditMetadata() {
           :disabled="exporting"
           @click="handleExport"
         >
-          <DownloadIcon :size="14" />
+          <Icon name="download" :size="14" />
           {{ exporting ? '导出中...' : '导出备注' }}
         </button>
         <button
@@ -400,7 +395,7 @@ function handleEditMetadata() {
           "
           @click="handleDelete"
         >
-          <TrashIcon :size="14" />
+          <Icon name="trash" :size="14" />
           {{ confirmingDelete ? '再次点击确认' : '删除' }}
         </button>
       </div>

@@ -1,7 +1,7 @@
 <script setup lang="ts">
 import { computed } from 'vue'
 import { useLibraryStore } from '@/stores/libraryStore'
-import MusicIcon from '@/components/icons/MusicIcon.vue'
+import Icon from '@/components/icons/Icon.vue'
 
 const player = useLibraryStore()
 
@@ -24,7 +24,8 @@ function getSongCount(): number {
     @click="player.selectPlaylist(defaultPlaylistId)"
   >
     <!-- 音乐图标 -->
-    <MusicIcon
+    <Icon
+name="music"
       :size="16"
       :class="isActive ? 'text-blue-500 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'"
     />

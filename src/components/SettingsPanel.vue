@@ -11,8 +11,7 @@ import { useShortcutConfig } from '@/composables/useShortcutConfig'
 import { useAutoLaunch } from '@/composables/useAutoLaunch'
 import { ref, onMounted, onUnmounted } from 'vue'
 import { useUIStore } from '@/stores/uiStore'
-import ChevronRightIcon from '@/components/icons/ChevronRightIcon.vue'
-import ChevronDownIcon from '@/components/icons/ChevronDownIcon.vue'
+import Icon from '@/components/icons/Icon.vue'
 
 const settings = useSettingsStore()
 const library = useLibraryStore()
@@ -401,7 +400,7 @@ onUnmounted(() => {
         title="关闭"
         @click="ui.toggleSettingsPanel()"
       >
-        <ChevronRightIcon :size="18" />
+        <Icon name="chevron-right" :size="18" />
       </button>
     </div>
 
@@ -413,12 +412,13 @@ onUnmounted(() => {
           @click="settings.toggleSettingsSection('appearance')"
         >
           <h3 class="text-gray-900 dark:text-white text-sm font-semibold">外观</h3>
-          <ChevronDownIcon
-            v-if="settings.isSettingsSectionExpanded('appearance')"
+          <Icon
+v-if="settings.isSettingsSectionExpanded('appearance')"
+            name="chevron-down"
             :size="16"
             class="text-gray-400 dark:text-gray-500"
           />
-          <ChevronRightIcon v-else :size="16" class="text-gray-400 dark:text-gray-500" />
+          <Icon v-else name="chevron-right" :size="16" class="text-gray-400 dark:text-gray-500" />
         </button>
 
         <div v-if="settings.isSettingsSectionExpanded('appearance')" class="space-y-4">
@@ -450,12 +450,13 @@ onUnmounted(() => {
           @click="settings.toggleSettingsSection('library')"
         >
           <h3 class="text-gray-900 dark:text-white text-sm font-semibold">音乐库</h3>
-          <ChevronDownIcon
-            v-if="settings.isSettingsSectionExpanded('library')"
+          <Icon
+v-if="settings.isSettingsSectionExpanded('library')"
+            name="chevron-down"
             :size="16"
             class="text-gray-400 dark:text-gray-500"
           />
-          <ChevronRightIcon v-else :size="16" class="text-gray-400 dark:text-gray-500" />
+          <Icon v-else name="chevron-right" :size="16" class="text-gray-400 dark:text-gray-500" />
         </button>
 
         <div v-if="settings.isSettingsSectionExpanded('library')" class="space-y-3">
@@ -571,12 +572,13 @@ onUnmounted(() => {
           @click="settings.toggleSettingsSection('system')"
         >
           <h3 class="text-gray-900 dark:text-white text-sm font-semibold">系统</h3>
-          <ChevronDownIcon
-            v-if="settings.isSettingsSectionExpanded('system')"
+          <Icon
+v-if="settings.isSettingsSectionExpanded('system')"
+            name="chevron-down"
             :size="16"
             class="text-gray-400 dark:text-gray-500"
           />
-          <ChevronRightIcon v-else :size="16" class="text-gray-400 dark:text-gray-500" />
+          <Icon v-else name="chevron-right" :size="16" class="text-gray-400 dark:text-gray-500" />
         </button>
 
         <div v-if="settings.isSettingsSectionExpanded('system')" class="space-y-2">
@@ -768,7 +770,7 @@ onUnmounted(() => {
                 :class="showBatchLoudnorm ? 'rotate-180' : ''"
                 @click="showBatchLoudnorm = !showBatchLoudnorm"
               >
-                <ChevronDownIcon class="w-4 h-4" />
+                <Icon name="chevron-down" class="w-4 h-4" />
               </button>
             </div>
 
@@ -939,12 +941,13 @@ onUnmounted(() => {
           @click="settings.toggleSettingsSection('data')"
         >
           <h3 class="text-gray-900 dark:text-white text-sm font-semibold">数据管理</h3>
-          <ChevronDownIcon
-            v-if="settings.isSettingsSectionExpanded('data')"
+          <Icon
+v-if="settings.isSettingsSectionExpanded('data')"
+            name="chevron-down"
             :size="16"
             class="text-gray-400 dark:text-gray-500"
           />
-          <ChevronRightIcon v-else :size="16" class="text-gray-400 dark:text-gray-500" />
+          <Icon v-else name="chevron-right" :size="16" class="text-gray-400 dark:text-gray-500" />
         </button>
 
         <div v-if="settings.isSettingsSectionExpanded('data')" class="space-y-2">
@@ -1058,12 +1061,13 @@ onUnmounted(() => {
               恢复默认
             </button>
           </div>
-          <ChevronDownIcon
-            v-if="settings.isSettingsSectionExpanded('shortcuts')"
+          <Icon
+v-if="settings.isSettingsSectionExpanded('shortcuts')"
+            name="chevron-down"
             :size="16"
             class="text-gray-400 dark:text-gray-500 ml-2"
           />
-          <ChevronRightIcon v-else :size="16" class="text-gray-400 dark:text-gray-500 ml-2" />
+          <Icon v-else name="chevron-right" :size="16" class="text-gray-400 dark:text-gray-500 ml-2" />
         </button>
 
         <div v-if="settings.isSettingsSectionExpanded('shortcuts')" class="space-y-2">
@@ -1140,12 +1144,13 @@ onUnmounted(() => {
           @click="settings.toggleSettingsSection('background')"
         >
           <h3 class="text-gray-900 dark:text-white text-sm font-semibold">背景图片</h3>
-          <ChevronDownIcon
-            v-if="settings.isSettingsSectionExpanded('background')"
+          <Icon
+v-if="settings.isSettingsSectionExpanded('background')"
+            name="chevron-down"
             :size="16"
             class="text-gray-400 dark:text-gray-500"
           />
-          <ChevronRightIcon v-else :size="16" class="text-gray-400 dark:text-gray-500" />
+          <Icon v-else name="chevron-right" :size="16" class="text-gray-400 dark:text-gray-500" />
         </button>
 
         <div v-if="settings.isSettingsSectionExpanded('background')" class="space-y-4">

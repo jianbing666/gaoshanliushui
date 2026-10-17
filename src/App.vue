@@ -3,7 +3,7 @@ import { useAudioStore } from '@/stores/audioStore'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { useUIStore } from '@/stores/uiStore'
 import { useSettingsStore } from '@/stores/settingsStore'
-import { useHistoryStore } from '@/stores/historyStore'
+
 import {
   ref,
   onMounted,
@@ -15,27 +15,11 @@ import {
   watch,
 } from 'vue'
 import { listen, type UnlistenFn } from '@tauri-apps/api/event'
-import { getCurrentWindow } from '@tauri-apps/api/window'
 import Sidebar from '@/components/Sidebar.vue'
 import Player from '@/components/Player.vue'
 import ControlBar from '@/components/ControlBar.vue'
-import SongContextMenu from '@/components/SongContextMenu.vue'
-import PlaylistContextMenu from '@/components/PlaylistContextMenu.vue'
 import TitleBar from '@/components/TitleBar.vue'
-import HistoryDrawer from '@/components/HistoryDrawer.vue'
-import Maximize2Icon from '@/components/icons/Maximize2Icon.vue'
-import PlayIcon from '@/components/icons/PlayIcon.vue'
-import PauseIcon from '@/components/icons/PauseIcon.vue'
-import SkipBackIcon from '@/components/icons/SkipBackIcon.vue'
-import SkipForwardIcon from '@/components/icons/SkipForwardIcon.vue'
-import RepeatIcon from '@/components/icons/RepeatIcon.vue'
-import RepeatOneIcon from '@/components/icons/RepeatOneIcon.vue'
-import ShuffleIcon from '@/components/icons/ShuffleIcon.vue'
-import ArrowRightIcon from '@/components/icons/ArrowRightIcon.vue'
-import MusicIcon from '@/components/icons/MusicIcon.vue'
-import { formatTime } from '@/utils/formatTime'
-import { useMediaControls } from '@/composables/useMediaControls'
-import { syncShortcutsToBackend } from '@/utils/syncShortcuts'
+
 
 // ========== 阶段 3.6: 异步组件（首屏 JS 减 20-30KB）============
 // 同步: 首屏必现
@@ -58,23 +42,28 @@ const InputContextMenu = markRaw(
 const EditSongMetadata = markRaw(
   defineAsyncComponent(() => import('@/components/EditSongMetadata.vue'))
 )
+// P2: 右键菜单与历史抽屉按需加载(约 10KB + 4KB 从主入口移出; 都只在用户主动打开时出现)
+const SongContextMenu = markRaw(
+  defineAsyncComponent(() => import('@/components/SongContextMenu.vue'))
+)
+const PlaylistContextMenu = markRaw(
+  defineAsyncComponent(() => import('@/components/PlaylistContextMenu.vue'))
+)
+const HistoryDrawer = markRaw(defineAsyncComponent(() => import('@/components/HistoryDrawer.vue')))
+// P2: 迷你模式界面按需加载(约 5KB 布局代码移出主入口)
+const MiniPlayer = markRaw(defineAsyncComponent(() => import('@/components/MiniPlayer.vue')))
 
 const audio = useAudioStore()
 const library = useLibraryStore()
 const ui = useUIStore()
 const settings = useSettingsStore()
-const history = useHistoryStore()
-const appWindow = getCurrentWindow()
+
 const autoLoadError = ref<string | null>(null)
 
-// 极致性能 + 多入口统一: 托盘菜单/全局快捷键/媒体键/迷你模式控制
-//   全部走 useMediaControls 统一在 App 级别注册, 避免迷你模式 ControlBar
-//   卸载后事件丢失 (导致托盘按钮和媒体键失效)
-useMediaControls()
+// 托盘菜单/全局快捷键/媒体键监听已统一由 main.ts 的 setupGlobalMediaListeners() 注册
+// (P2: 改为动态 import, 不再从主入口静态引入 useMediaControls)
 
-const miniWindowWidth = ref(640)
-const miniWindowHeight = ref(120)
-const isCompactMiniMode = computed(() => miniWindowWidth.value < 480)
+
 
 /** 右侧面板正在播放离开动画（用于把列宽留到 leave 结束，避免内容提前展开与面板重叠） */
 const rightPanelLeaving = ref(false)
@@ -107,6 +96,16 @@ let unlistenMigrate: UnlistenFn | null = null
 let unlistenScanComplete: UnlistenFn | null = null
 let hiddenTimer: ReturnType<typeof setTimeout> | null = null
 
+/**
+ * 播放历史 store 延迟加载(P2)
+ * historyStore 约 11KB(压缩后 ~3KB), 启动与首屏不需要它;
+ * 只有"加载历史 / 刷新统计 / 内存回收"这类动作才真正要它。
+ */
+async function loadHistoryStore() {
+  const module = await import('@/stores/historyStore')
+  return module.useHistoryStore()
+}
+
 // 切换迷你模式
 function toggleMiniMode() {
   ui.setMiniMode(!ui.isMiniMode)
@@ -116,19 +115,10 @@ function toggleMiniMode() {
 function doCompactMemory() {
   try {
     library.compactMemory()
-    history.releaseFullHistory()
+    void loadHistoryStore().then((store) => store.releaseFullHistory())
   } catch (e) {
     console.warn('[Memory] 内存回收失败:', e)
   }
-}
-
-// 迷你模式窗口控制
-function minimizeWindow() {
-  appWindow.minimize().catch(() => {})
-}
-
-function closeWindow() {
-  appWindow.close().catch(() => {})
 }
 
 // 处理窗口显示事件（从托盘恢复时）
@@ -137,13 +127,10 @@ function handleWindowShow() {
   audio.resumeAudioContext()
 }
 
-// 迷你模式窗口大小变化监听
+// 窗口尺寸监听(仅用于保持 ResizeObserver 生命周期; 迷你布局自身在 MiniPlayer 内跟踪)
 let resizeObserver: ResizeObserver | null = null
 function handleMiniResize() {
-  if (ui.isMiniMode) {
-    miniWindowWidth.value = window.innerWidth
-    miniWindowHeight.value = window.innerHeight
-  }
+  // 迷你模式的紧凑判定已移到 MiniPlayer.vue, 这里保留空实现以维持观察器注册
 }
 
 // 进入迷你模式时触发内存回收
@@ -178,13 +165,15 @@ onMounted(async () => {
   //   旧实现放在 requestIdleCallback 中, 启动后立刻播放的歌曲
   //   会因 dbLoaded=false 只写 localStorage, 产生落库竞态。
   //   loadFromDb 内部为异步 IPC, 此处不 await, 不阻塞后续 UI 初始化。
-  void history.loadFromDb().catch((e) => console.warn('[App] 加载历史记录失败:', e))
+  void loadHistoryStore()
+    .then((store) => store.loadFromDb())
+    .catch((e) => console.warn('[App] 加载历史记录失败:', e))
 
   // 数据目录迁移完成后, 后端已重连到新库, 前端内存中的展示历史/统计需重新拉取,
   // 否则统计页停留在旧库口径 (弹窗关闭后本监听仍在 App 级生效)
   listen('data:migrate-progress', (event: any) => {
     if (event.payload?.stage === 'completed') {
-      void history.reloadFromDb()
+      void loadHistoryStore().then((store) => store.reloadFromDb())
     }
   })
     .then((un) => {
@@ -197,7 +186,7 @@ onMounted(async () => {
   //   前端内存里的历史是启动时加载的那一份, 不重拉就会一直停在"封面已被清空"的状态,
   //   表现为历史抽屉里部分条目明明曲库里封面正常、这里却是空白。
   listen('scan:enrich-complete', () => {
-    void history.reloadFromDb()
+    void loadHistoryStore().then((store) => store.reloadFromDb())
   })
     .then((un) => {
       unlistenScanComplete = un
@@ -222,6 +211,7 @@ onMounted(async () => {
       //    原因: 后端 ShortcutStore 启动时用默认值, 如果用户在之前会话中修改过快捷键
       //    且未保存, 就会使用默认值. 同步步骤确保后端使用用户实际配置的快捷键.
       try {
+        const { syncShortcutsToBackend } = await import('@/utils/syncShortcuts')
         await syncShortcutsToBackend()
       } catch (e) {
         console.warn('[App] 同步快捷键失败:', e)
@@ -297,12 +287,6 @@ function handlePageResume() {
   void audio.reconcilePlaybackState()
 }
 
-// 阶段 3.7: 封面加载失败静默隐藏
-function onCoverError(e: Event) {
-  const img = e.target as HTMLImageElement
-  img.style.display = 'none'
-}
-
 onUnmounted(() => {
   document.removeEventListener('visibilitychange', handleVisibilityChange)
   document.removeEventListener('resume', handlePageResume as EventListener)
@@ -312,7 +296,7 @@ onUnmounted(() => {
   unlistenScanComplete?.()
   resizeObserver?.disconnect()
   // 全局清理播放历史心跳定时器, 释放其对 AudioEngine / 历史项的闭包引用
-  history.disposeHistory()
+  void loadHistoryStore().then((store) => store.disposeHistory())
 })
 </script>
 
@@ -429,8 +413,8 @@ onUnmounted(() => {
           @after-leave="rightPanelLeaving = false"
         >
           <component
-            v-if="activeRightComponent"
             :is="activeRightComponent"
+            v-if="activeRightComponent"
             :key="ui.activeRightPanel || 'none'"
             class="absolute inset-y-0 right-0"
           />
@@ -438,230 +422,9 @@ onUnmounted(() => {
       </div>
     </div>
 
-    <!-- 迷你模式 -->
-    <div
-      v-if="ui.isMiniMode"
-      class="flex flex-col w-full min-h-screen bg-white/90 dark:bg-gray-900/90 backdrop-blur"
-    >
-      <!-- 自定义标题栏：36px -->
-      <div
-        style="height: 36px"
-        class="shrink-0 flex items-center px-3 border-b border-gray-200/50 dark:border-gray-700/50"
-      >
-        <!-- 左侧：应用名（可拖拽） -->
-        <div class="flex-1 flex items-center h-full" data-tauri-drag-region>
-          <span class="text-sm text-gray-700 dark:text-gray-300 font-medium">高山流水</span>
-        </div>
-        <!-- 右侧：窗口控制按钮 -->
-        <div class="flex items-center gap-0.5">
-          <!-- 最小化 -->
-          <button
-            class="w-8 h-7 flex items-center justify-center rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 transition-colors"
-            title="最小化"
-            @click="minimizeWindow"
-          >
-            <svg
-              class="w-3.5 h-3.5"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-            >
-              <path d="M5 12h14"></path>
-            </svg>
-          </button>
-          <!-- 退出迷你模式 -->
-          <button
-            class="w-8 h-7 flex items-center justify-center rounded-md text-gray-500 dark:text-gray-400 hover:bg-gray-200/60 dark:hover:bg-gray-700/60 transition-colors"
-            title="退出迷你模式"
-            @click="toggleMiniMode"
-          >
-            <Maximize2Icon :size="14" />
-          </button>
-          <!-- 关闭 -->
-          <button
-            class="w-8 h-7 flex items-center justify-center rounded-md text-gray-500 dark:text-gray-400 hover:bg-red-500 hover:text-white transition-colors"
-            title="关闭"
-            @click="closeWindow"
-          >
-            <svg
-              class="w-3.5 h-3.5"
-              viewBox="0 0 24 24"
-              fill="none"
-              stroke="currentColor"
-              stroke-width="2"
-              stroke-linecap="round"
-            >
-              <path d="M18 6 6 18"></path>
-              <path d="m6 6 12 12"></path>
-            </svg>
-          </button>
-        </div>
-      </div>
+    <!-- 迷你模式(P2: 独立异步 chunk, 只在切换迷你模式时加载) -->
+    <MiniPlayer v-if="ui.isMiniMode" />
 
-      <!-- 音乐控制区域：自适应高度 -->
-      <div class="flex-1 flex flex-col min-h-0 overflow-hidden">
-        <!-- 上半部分：左侧封面信息 + 中间控制按钮 + 右侧音量（横向布局） -->
-        <div class="flex-1 flex items-center px-4 gap-4 min-h-0">
-          <!-- 左侧：封面 + 歌曲信息 -->
-          <div
-            class="flex items-center gap-3 shrink-0 min-w-0"
-            :style="isCompactMiniMode ? 'max-width: 180px;' : ''"
-          >
-            <!-- 封面 -->
-            <div class="w-12 h-12 rounded-lg bg-gray-200 dark:bg-gray-700 shrink-0 overflow-hidden">
-              <img
-                v-if="library.currentSong?.cover_path"
-                :src="library.getCoverUrl(library.currentSong.cover_path)"
-                :alt="library.currentSong?.title"
-                class="w-full h-full object-cover"
-                @error="onCoverError"
-              />
-              <div
-                v-else
-                class="w-full h-full flex items-center justify-center text-gray-400 dark:text-gray-500"
-              >
-                <MusicIcon :size="18" />
-              </div>
-            </div>
-            <!-- 歌曲信息 -->
-            <div class="min-w-0 w-28">
-              <p class="text-gray-900 dark:text-white text-sm font-medium truncate">
-                {{ library.currentSong?.title || '未选择歌曲' }}
-              </p>
-              <p class="text-gray-500 dark:text-gray-400 text-xs truncate">
-                {{ library.currentSong?.artist || '未知艺术家' }}
-              </p>
-            </div>
-          </div>
-
-          <!-- 中间：播放控制按钮 -->
-          <div class="flex items-center gap-1 shrink-0">
-            <!-- 循环模式 -->
-            <button
-              class="w-7 h-7 flex items-center justify-center rounded-md text-gray-500 dark:text-gray-400 hover:text-gray-900 dark:hover:text-white hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
-              :class="{ 'text-blue-500 dark:text-blue-400': audio.loopMode !== 'none' }"
-              :title="
-                audio.loopMode === 'list'
-                  ? '列表循环'
-                  : audio.loopMode === 'single'
-                    ? '单曲循环'
-                    : audio.loopMode === 'shuffle'
-                      ? '随机播放'
-                      : '顺序播放'
-              "
-              @click="audio.toggleLoopMode"
-            >
-              <ShuffleIcon v-if="audio.loopMode === 'shuffle'" :size="14" />
-              <RepeatOneIcon v-else-if="audio.loopMode === 'single'" :size="14" />
-              <RepeatIcon v-else-if="audio.loopMode === 'list'" :size="14" />
-              <ArrowRightIcon v-else :size="14" />
-            </button>
-
-            <!-- 上一首 -->
-            <button
-              class="w-7 h-7 flex items-center justify-center rounded-md text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
-              :class="{ 'opacity-30 cursor-not-allowed': !audio.hasPrev }"
-              :disabled="!audio.hasPrev"
-              @click="audio.prev"
-            >
-              <SkipBackIcon :size="16" />
-            </button>
-
-            <!-- 播放/暂停 -->
-            <button
-              class="w-9 h-9 bg-gray-900 dark:bg-white rounded-full flex items-center justify-center hover:bg-gray-700 dark:hover:bg-gray-200 transition-colors shadow-md"
-              @click="audio.togglePlay"
-            >
-              <PauseIcon v-if="audio.isPlaying" :size="16" class="text-white dark:text-gray-900" />
-              <PlayIcon v-else :size="16" class="text-white dark:text-gray-900 ml-0.5" />
-            </button>
-
-            <!-- 下一首 -->
-            <button
-              class="w-7 h-7 flex items-center justify-center rounded-md text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 transition-colors"
-              :class="{ 'opacity-30 cursor-not-allowed': !audio.hasNext }"
-              :disabled="!audio.hasNext"
-              @click="audio.next"
-            >
-              <SkipForwardIcon :size="16" />
-            </button>
-          </div>
-
-          <!-- 右侧：音量控制（弹性宽度） -->
-          <div class="flex items-center gap-2 shrink-0 w-40">
-            <svg
-              class="w-4 h-4 text-gray-900 dark:text-gray-100 shrink-0"
-              viewBox="0 0 24 24"
-              fill="currentColor"
-            >
-              <template v-if="audio.volume === 0">
-                <path
-                  d="M16.5 12c0-1.77-1.02-3.29-2.5-4.03v2.21l2.45 2.45c.03-.2.05-.41.05-.63zm2.5 0c0 .94-.2 1.82-.54 2.64l1.51 1.51C20.63 14.91 21 13.5 21 12c0-4.28-2.99-7.86-7-8.77v2.06c2.89.86 5 3.54 5 6.71zM4.27 3L3 4.27 7.73 9H3v6h4l5 5v-6.73l4.25 4.25c-.67.58-1.42 1.07-2.25 1.43v2.06c1.38-.31 2.63-.95 3.69-1.81L19.73 21 21 19.73l-9-9L4.27 3zM12 4L9.91 6.09 12 8.18V4z"
-                />
-              </template>
-              <template v-else-if="audio.volume < 0.5">
-                <path
-                  d="M18.5 12c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM5 9v6h4l5 5V4L9 9H5z"
-                />
-              </template>
-              <template v-else>
-                <path
-                  d="M3 9v6h4l5 5V4L7 9H3zm13.5 3c0-1.77-1.02-3.29-2.5-4.03v8.05c1.48-.73 2.5-2.25 2.5-4.02zM14 3.23v2.06c2.89.86 5 3.54 5 6.71s-2.11 5.85-5 6.71v2.06c4.01-.91 7-4.49 7-8.77s-2.99-7.86-7-8.77z"
-                />
-              </template>
-            </svg>
-            <input
-              type="range"
-              class="flex-1 min-w-0"
-              :min="0"
-              :max="1"
-              step="0.01"
-              :value="audio.volume"
-              @input="
-                (e) => {
-                  audio.volume = parseFloat((e.target as HTMLInputElement).value)
-                }
-              "
-            />
-
-            <!-- 新增：显示具体的音量值 -->
-            <span class="text-xs text-gray-500 dark:text-gray-400 w-8 text-right shrink-0">
-              {{ (audio.volume * 100).toFixed(0) }}
-            </span>
-          </div>
-        </div>
-
-        <!-- 下半部分：进度条（带时间显示），跨整个宽度 -->
-        <div class="flex items-center px-4 gap-2 shrink-0" :style="'height: 30px;'">
-          <span
-            class="text-gray-500 dark:text-gray-400 text-xs w-9 text-right shrink-0 tabular-nums"
-            >{{ formatTime(audio.currentTime) }}</span
-          >
-          <input
-            type="range"
-            class="flex-1 min-w-0"
-            :min="0"
-            :max="audio.duration || 0"
-            :value="audio.currentTime"
-            step="0.1"
-            @input="
-              (e) => {
-                const time = parseFloat((e.target as HTMLInputElement).value)
-                audio.seekTo(time)
-                audio.currentTime = time
-              }
-            "
-          />
-          <span class="text-gray-500 dark:text-gray-400 text-xs w-9 shrink-0 tabular-nums">{{
-            formatTime(audio.duration)
-          }}</span>
-        </div>
-      </div>
-    </div>
-
-    <!-- 全局右键菜单（单例） -->
     <SongContextMenu v-if="!ui.isMiniMode" />
     <PlaylistContextMenu v-if="!ui.isMiniMode" />
 

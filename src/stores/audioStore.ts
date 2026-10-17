@@ -5,12 +5,12 @@ import { listen } from '@tauri-apps/api/event'
 import type { LoopMode } from '@/types/song'
 import type { Song } from '@/types/song'
 import { audioEngine } from '@/audio/AudioEngine'
-import { html5AudioPlayer } from '@/audio/HTML5AudioPlayer'
+
 import { loadSettings, saveSettings } from '@/utils/storage'
 import { computeSmartWeights, pickWeightedIndex } from '@/utils/smartShuffle'
 import type { SongPlaySignals } from '@/utils/smartShuffle'
 import { useLibraryStore } from './libraryStore'
-import { useHistoryStore } from './historyStore'
+import type { useHistoryStore } from './historyStore'
 import { useSettingsStore } from './settingsStore'
 import { mediaControls, PlaybackStatus } from 'tauri-plugin-media-api'
 
@@ -51,7 +51,35 @@ const DEFAULT_VOLUME = 0.5
 
 export const useAudioStore = defineStore('audio', () => {
   const library = useLibraryStore()
-  const history = useHistoryStore()
+
+  // ========== HTML5 音频层(P2: 延迟加载) ==========
+  // 这一层只用于元数据 / MediaSession / 让系统把媒体键路由到 WebView, 不参与发声,
+  // 因此没必要挤在主入口首屏关键路径上; 首次用到时再加载(模块级缓存, 只算一次)。
+  type Html5Player = import('@/audio/HTML5AudioPlayer').HTML5AudioPlayer
+  let html5PlayerPromise: Promise<Html5Player> | null = null
+  function html5(): Promise<Html5Player> {
+    if (!html5PlayerPromise) {
+      html5PlayerPromise = import('@/audio/HTML5AudioPlayer').then((module) => module.html5AudioPlayer)
+    }
+    return html5PlayerPromise
+  }
+
+  // ========== 播放历史 store(P2: 延迟加载) ==========
+  // historyStore 约 11KB(压缩后 ~3KB), 启动与首屏都不需要它:
+  //   - 记录类调用(开始/结束记录)在真正播放时才会发生
+  //   - 统计类读取(智能随机的播放信号)读不到时按 0 处理, 与"没听过"等价
+  // 模块初始化时就把动态 import 发出去, 与应用启动并行, 通常在任何用户交互前已就绪。
+  type HistoryStore = ReturnType<typeof useHistoryStore>
+  let historyStore: HistoryStore | null = null
+  const historyReady: Promise<HistoryStore> = import('./historyStore').then((module) => {
+    historyStore = module.useHistoryStore()
+    return historyStore
+  })
+
+  /** 已就绪则同步拿到, 未就绪返回 null(用于同步读统计, 不做等待) */
+  function historyNow(): HistoryStore | null {
+    return historyStore
+  }
   const settings = useSettingsStore()
 
   // ========== 播放状态 ==========
@@ -158,10 +186,13 @@ export const useAudioStore = defineStore('audio', () => {
     let playCount = 0
     let completedCount = 0
     let lastPlayedAt = 0
-    for (const key of keys) {
-      playCount = Math.max(playCount, history.songPlayCount[key] || 0)
-      completedCount = Math.max(completedCount, history.songCompletedCount[key] || 0)
-      lastPlayedAt = Math.max(lastPlayedAt, history.songLastPlayedAt[key] || 0)
+    const history = historyNow()
+    if (history) {
+      for (const key of keys) {
+        playCount = Math.max(playCount, history.songPlayCount[key] || 0)
+        completedCount = Math.max(completedCount, history.songCompletedCount[key] || 0)
+        lastPlayedAt = Math.max(lastPlayedAt, history.songLastPlayedAt[key] || 0)
+      }
     }
     return { playCount, completedCount, lastPlayedAt }
   }
@@ -182,7 +213,7 @@ export const useAudioStore = defineStore('audio', () => {
     if (library.currentIndex !== startIndex) return
     isPlaying.value = false
     isSwitchingSong.value = false
-    history.endHistoryRecord(audioEngine)
+    void historyReady.then((store) => store.endHistoryRecord(audioEngine))
   }
 
   // ========== 预解码下一首(P0 优化: 把 decode 挪出切歌关键路径) ==========
@@ -465,7 +496,7 @@ export const useAudioStore = defineStore('audio', () => {
     // 2026-07-14: 同步 html5 audio 元素到 playing 状态,
     //   让 OS 把 MediaKey 路由到 WebView (蓝牙耳机/键盘多媒体键)
     //   muted+volume=0 绝对静音, 实际播放由 Web Audio 处理
-    void html5AudioPlayer.play()
+    void html5().then((player) => player.play())
     void audioEngine.resumePlayback()
     startTimeUpdate()
   }
@@ -476,7 +507,7 @@ export const useAudioStore = defineStore('audio', () => {
     audioEngine.pausePlayback()
     stopTimeUpdate()
     // 暂停: 累加本次播放时长到历史
-    history.endHistoryRecord(audioEngine)
+    void historyReady.then((store) => store.endHistoryRecord(audioEngine))
   }
 
   function togglePlay() {
@@ -493,7 +524,7 @@ export const useAudioStore = defineStore('audio', () => {
     await audioEngine.forceWake()
     isPlaying.value = true
     // 2026-07-14: 同步 html5 audio 元素 playing, 让 MediaKey 路由到 WebView
-    void html5AudioPlayer.play()
+    void html5().then((player) => player.play())
     await audioEngine.resumePlayback()
     startTimeUpdate()
   }
@@ -504,7 +535,7 @@ export const useAudioStore = defineStore('audio', () => {
     audioEngine.pausePlayback()
     stopTimeUpdate()
     // 与 pause() 保持一致: 暂停即结束本次历史记录 (否则暂停时长会被计入播放时长)
-    history.endHistoryRecord(audioEngine)
+    void historyReady.then((store) => store.endHistoryRecord(audioEngine))
   }
 
   async function forceTogglePlay() {
@@ -530,14 +561,15 @@ export const useAudioStore = defineStore('audio', () => {
   function handleNaturalEnded() {
     stopTimeUpdate()
     // 自然播放结束: 累加一次历史时长
-    history.endHistoryRecord(audioEngine)
+    void historyReady.then((store) => store.endHistoryRecord(audioEngine))
 
     // 单曲循环: 复用 AudioBuffer, 跳过 fetch + decodeAudioData
     if (loopMode.value === 'single' && audioEngine.state.hasContext) {
       void audioEngine.playFromOffset(0, () => {
-        // 单曲循环重启: 重新开始一条历史记录
-        if (currentSong.value) {
-          history.startHistoryRecord(currentSong.value, audioEngine)
+        // 单曲循环重启: 重新开始一条历史记录(先把当前曲目固定下来再异步记录)
+        const loopSong = currentSong.value
+        if (loopSong) {
+          void historyReady.then((store) => store.startHistoryRecord(loopSong, audioEngine))
         }
       })
       return
@@ -638,7 +670,7 @@ export const useAudioStore = defineStore('audio', () => {
         currentTime.value = 0
         // 切歌即结束上一首的记录 (幂等): 保证任何"停旧播新"路径都不会遗留心跳定时器
         // 与旧记录引用; 即使新歌加载失败, 播放时长也已正确结算
-        history.endHistoryRecord(audioEngine)
+        void historyReady.then((store) => store.endHistoryRecord(audioEngine))
 
         // 第 2 步: 初始化 AudioContext + 加载 Web Audio buffer (主链路, 优先)
         audioEngine.init(volume.value)
@@ -655,22 +687,23 @@ export const useAudioStore = defineStore('audio', () => {
 
         // 第 3 步: 并行加载 HTML5 Audio (仅用于元数据/MediaSession, 不发声)
         //    放在 Web Audio 之后, 不阻塞主播放链路
-        html5AudioPlayer.setVolume(0)
-        html5AudioPlayer
-          .load(song.file_path)
-          .then(() => {
+        void (async () => {
+          const player = await html5()
+          player.setVolume(0)
+          try {
+            await player.load(song.file_path)
             // 加载完成时可能已切到别的歌, 校验后再写 MediaSession
             if (myGen !== loadGeneration || currentSong.value?.id !== song.id) return
-            html5AudioPlayer.setVolume(0)
-            html5AudioPlayer.setMediaSession(
+            player.setVolume(0)
+            player.setMediaSession(
               song.title,
               song.artist,
               song.cover_path ? library.getCoverUrl(song.cover_path) : undefined
             )
-          })
-          .catch((e) => {
+          } catch (e) {
             console.warn('[audioStore] HTML5 Audio 加载失败 (不影响播放):', e)
-          })
+          }
+        })()
 
         // 第 4 步: 根据当前播放状态决定是否自动播放
         //   (加载期间用户按了播放也能被捕捉到, 不再依赖加载前快照)
@@ -679,9 +712,10 @@ export const useAudioStore = defineStore('audio', () => {
           // 先设 isPlaying = true (此时 isSwitchingSong 仍为 true, isPlaying watcher 会跳过, 不会重复播放)
           isPlaying.value = true
           await audioEngine.playFromOffset(0, () => {
-            // 播放开始时触发 history 记录
-            if (currentSong.value) {
-              history.startHistoryRecord(currentSong.value, audioEngine)
+            // 播放开始时触发 history 记录(延迟加载: 拿到的 song 先固定下来)
+            const startedSong = currentSong.value
+            if (startedSong) {
+              void historyReady.then((store) => store.startHistoryRecord(startedSong, audioEngine))
             }
             // 性能记录: 实际出声时刻 (供 perfRecorder 计算切歌延迟)
             window.dispatchEvent(
@@ -725,13 +759,16 @@ export const useAudioStore = defineStore('audio', () => {
       if (playing) {
         await audioEngine.resumePlayback()
         startTimeUpdate()
-        void html5AudioPlayer.play()
+        void html5().then((player) => player.play())
         // 恢复播放后同样预解码下一首(暂停期间缓存的下一首可能已被淘汰)
         schedulePrefetch()
         // 暂停时历史记录已结束, 恢复播放需要新开一条记录
         // (切歌自动播放路径由 playFromOffset 的 onStart 回调负责, 不走这里)
-        if (currentSong.value) {
-          history.startHistoryRecordIfAbsent(currentSong.value, audioEngine)
+        const resumedSong = currentSong.value
+        if (resumedSong) {
+          void historyReady.then((store) =>
+            store.startHistoryRecordIfAbsent(resumedSong, audioEngine)
+          )
         }
       } else {
         audioEngine.pausePlayback()
@@ -745,7 +782,7 @@ export const useAudioStore = defineStore('audio', () => {
     () => volume.value,
     (vol) => {
       audioEngine.setVolume(vol)
-      html5AudioPlayer.setVolume(0)
+      void html5().then((player) => player.setVolume(0))
     }
   )
 
@@ -953,19 +990,22 @@ export const useAudioStore = defineStore('audio', () => {
   })
 
   // ========== 初始化 HTML5 Audio store 访问器 ==========
-  html5AudioPlayer.bindStoreAccessors({
-    setIsSwitchingSong: (v: boolean) => {
-      isSwitchingSong.value = v
-    },
-  })
+  // 这里放在 then 里: 模块本身是延迟加载的, 注册回调晚几毫秒不影响任何播放行为
+  void html5().then((player) => {
+    player.bindStoreAccessors({
+      setIsSwitchingSong: (v: boolean) => {
+        isSwitchingSong.value = v
+      },
+    })
 
-  // 接收时长变化(从 HTML5 Audio 元数据)
-  html5AudioPlayer.onDurationChange((dur) => {
-    duration.value = dur
-  })
+    // 接收时长变化(从 HTML5 Audio 元数据)
+    player.onDurationChange((dur) => {
+      duration.value = dur
+    })
 
-  // 确保 HTML5 Audio 始终静音
-  html5AudioPlayer.setVolume(0)
+    // 确保 HTML5 Audio 始终静音
+    player.setVolume(0)
+  })
 
   return {
     // 状态

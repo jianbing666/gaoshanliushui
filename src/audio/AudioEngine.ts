@@ -30,9 +30,31 @@
  *   - 引擎通过 setOnEnded 注入的回调通知 audioStore 播完
  */
 
-import { equalizer } from './Equalizer'
-import { loudnessNormalizer } from './LoudnessNormalizer'
 import type { LoudnessMode } from './LoudnessNormalizer'
+
+// ========== 均衡器 / 响度均衡链路(P2: 延迟加载) ==========
+// 两个模块合计约 5.7KB(压缩后 ~1.7KB), 但只有用户真的用均衡器或响度均衡时才需要。
+// 改为按需加载: context 建链时发起加载, 到达后自动把滤波器链接回当前 source;
+// 未加载期间音频走 source → analyser → gain 的直连路径, 不影响出声。
+type AudioExtras = {
+  equalizer: import('./Equalizer').Equalizer
+  loudnessNormalizer: import('./LoudnessNormalizer').LoudnessNormalizer
+}
+
+let audioExtras: AudioExtras | null = null
+let audioExtrasPromise: Promise<AudioExtras> | null = null
+
+function loadAudioExtras(): Promise<AudioExtras> {
+  if (!audioExtrasPromise) {
+    audioExtrasPromise = Promise.all([import('./Equalizer'), import('./LoudnessNormalizer')]).then(
+      ([eq, loud]) => {
+        audioExtras = { equalizer: eq.equalizer, loudnessNormalizer: loud.loudnessNormalizer }
+        return audioExtras
+      }
+    )
+  }
+  return audioExtrasPromise
+}
 import type { SwitchTimingsInput } from '../utils/switchSegments'
 import { AudioBufferCache } from './AudioBufferCache'
 
@@ -130,12 +152,16 @@ export class AudioEngine {
       this.analyserNode.connect(this.gainNode)
       this.gainNode.connect(this.audioContext.destination)
 
-      equalizer.init(this.audioContext, this.analyserNode)
-
-      // 建链完成: 若开关此前已打开（context 未建时只存了标记），立即接入响度链路
-      if (this.loudnessEnabled) {
-        loudnessNormalizer.start(this.analyserNode, this.gainNode)
-      }
+      // EQ / 响度链路按需加载: 到达后接回当前链路(此时可能已在播放)
+      void loadAudioExtras().then((extras) => {
+        if (!this.audioContext || !this.analyserNode || !this.gainNode) return
+        extras.equalizer.init(this.audioContext, this.analyserNode)
+        if (this.audioSourceNode) extras.equalizer.reconnectSource(this.audioSourceNode)
+        // 若开关此前已打开（context 未建时只存了标记），立即接入响度链路
+        if (this.loudnessEnabled) {
+          extras.loudnessNormalizer.start(this.analyserNode, this.gainNode)
+        }
+      })
     }
   }
 
@@ -320,7 +346,7 @@ export class AudioEngine {
 
     const newSource = this.audioContext.createBufferSource()
     newSource.buffer = audioBuffer
-    equalizer.reconnectSource(newSource)
+    audioExtras?.equalizer.reconnectSource(newSource)
 
     newSource.onended = () => {
       if (!this.isPaused) {
@@ -352,7 +378,7 @@ export class AudioEngine {
       }
       this.isMutedForSwitch = false
       // 复位响度测量: 切歌/seek 后不沿用上一段内容的补偿增益（未启用时为 no-op）
-      loudnessNormalizer.reset()
+      audioExtras?.loudnessNormalizer.reset()
     } catch (error) {
       console.error('[Audio] AudioBufferSourceNode 启动失败:', error)
       this.audioSourceNode = null
@@ -494,13 +520,18 @@ export class AudioEngine {
    */
   setLoudnessEnabled(value: boolean): void {
     this.loudnessEnabled = value
-    if (this.audioContext && this.analyserNode && this.gainNode) {
-      if (value) {
-        loudnessNormalizer.start(this.analyserNode, this.gainNode)
-      } else {
-        loudnessNormalizer.stop(this.analyserNode, this.gainNode)
-      }
+    if (!this.audioContext || !this.analyserNode || !this.gainNode) return
+
+    if (audioExtras) {
+      if (value) audioExtras.loudnessNormalizer.start(this.analyserNode, this.gainNode)
+      else audioExtras.loudnessNormalizer.stop(this.analyserNode, this.gainNode)
+      return
     }
+    // 模块尚未加载完: 等它到达后按当时的开关状态接入
+    void loadAudioExtras().then((extras) => {
+      if (!this.loudnessEnabled || !this.analyserNode || !this.gainNode) return
+      extras.loudnessNormalizer.start(this.analyserNode, this.gainNode)
+    })
   }
 
   /**
@@ -508,7 +539,11 @@ export class AudioEngine {
    * 直接转发给 normalizer：未启用时仅记录，start() 建链时按该模式测量；启用中立即切换
    */
   setLoudnessMode(mode: LoudnessMode): void {
-    loudnessNormalizer.setMode(mode)
+    if (audioExtras) {
+      audioExtras.loudnessNormalizer.setMode(mode)
+      return
+    }
+    void loadAudioExtras().then((extras) => extras.loudnessNormalizer.setMode(mode))
   }
 
   /**
@@ -569,9 +604,9 @@ export class AudioEngine {
   disconnectAnalyser(): void {
     if (this.audioSourceNode && this.analyserNode && this.gainNode && this.audioContext) {
       try {
-        equalizer.disconnect()
+        audioExtras?.equalizer.disconnect()
         if (this.loudnessEnabled) {
-          loudnessNormalizer.stop(this.analyserNode, this.gainNode)
+          audioExtras?.loudnessNormalizer.stop(this.analyserNode, this.gainNode)
         }
         this.audioSourceNode.connect(this.gainNode)
       } catch {
@@ -588,9 +623,9 @@ export class AudioEngine {
     if (this.audioSourceNode && this.analyserNode && this.gainNode && this.audioContext) {
       try {
         this.audioSourceNode.disconnect()
-        equalizer.reconnectSource(this.audioSourceNode)
+        audioExtras?.equalizer.reconnectSource(this.audioSourceNode)
         if (this.loudnessEnabled) {
-          loudnessNormalizer.start(this.analyserNode, this.gainNode)
+          audioExtras?.loudnessNormalizer.start(this.analyserNode, this.gainNode)
         }
       } catch {
         // 忽略重连失败

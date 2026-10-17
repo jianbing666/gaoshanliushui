@@ -2,10 +2,9 @@
 import { useUIStore } from '@/stores/uiStore'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { ref, onMounted, onUnmounted, nextTick, watch } from 'vue'
-import DownloadIcon from '@/components/icons/DownloadIcon.vue'
-import TrashIcon from '@/components/icons/TrashIcon.vue'
 import { invoke } from '@tauri-apps/api/core'
 import { save } from '@tauri-apps/plugin-dialog'
+import Icon from '@/components/icons/Icon.vue'
 
 const ui = useUIStore()
 const library = useLibraryStore()
@@ -143,7 +142,7 @@ onUnmounted(() => {
         class="w-full px-3 py-2 rounded-lg text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 flex items-center gap-2 transition-colors"
         @click="exportPlaylist"
       >
-        <DownloadIcon :size="14" class="text-blue-500" />
+        <Icon name="download" :size="14" class="text-blue-500" />
         <span>导出歌单</span>
       </button>
 
@@ -154,7 +153,7 @@ onUnmounted(() => {
           class="w-full px-3 py-2 rounded-lg text-left text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2 transition-colors"
           @click="deletePlaylist"
         >
-          <TrashIcon :size="14" />
+          <Icon name="trash" :size="14" />
           <span>删除歌单</span>
         </button>
       </template>

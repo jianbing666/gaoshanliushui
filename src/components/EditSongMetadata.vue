@@ -3,9 +3,7 @@ import { ref, watch, nextTick, onMounted, onUnmounted } from 'vue'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { invoke } from '@tauri-apps/api/core'
 import type { Song } from '@/types/song'
-import XIcon from '@/components/icons/XIcon.vue'
-import PencilIcon from '@/components/icons/PencilIcon.vue'
-import RotateCcwIcon from '@/components/icons/RotateCcwIcon.vue'
+import Icon from '@/components/icons/Icon.vue'
 
 const library = useLibraryStore()
 
@@ -160,14 +158,14 @@ onUnmounted(() => {
         class="flex items-center justify-between px-3 py-2 border-b border-gray-100 dark:border-gray-700/50"
       >
         <div class="flex items-center gap-2">
-          <PencilIcon :size="14" class="text-blue-500" />
+          <Icon name="pencil" :size="14" class="text-blue-500" />
           <span class="text-sm font-medium text-gray-900 dark:text-white">编辑元数据</span>
         </div>
         <button
           class="p-1 rounded-md hover:bg-gray-100 dark:hover:bg-gray-700/50 text-gray-400 hover:text-gray-600 dark:hover:text-gray-300 transition-colors"
           @click="closePopup"
         >
-          <XIcon :size="14" />
+          <Icon name="x" :size="14" />
         </button>
       </div>
 
@@ -210,7 +208,7 @@ onUnmounted(() => {
           class="flex items-center gap-1 px-2 py-1 text-xs text-gray-500 dark:text-gray-400 hover:text-gray-700 dark:hover:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/50 rounded-md transition-colors"
           @click="resetToOriginal"
         >
-          <RotateCcwIcon :size="12" />
+          <Icon name="rotate-ccw" :size="12" />
           <span>重置</span>
         </button>
         <div class="flex gap-2">

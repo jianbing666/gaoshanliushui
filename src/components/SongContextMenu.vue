@@ -2,13 +2,8 @@
 import { useUIStore } from '@/stores/uiStore'
 import { useLibraryStore } from '@/stores/libraryStore'
 import { ref, onMounted, onUnmounted, nextTick, watch, computed } from 'vue'
-import ChevronRightIcon from '@/components/icons/ChevronRightIcon.vue'
-import ChevronLeftIcon from '@/components/icons/ChevronLeftIcon.vue'
-import PlusIcon from '@/components/icons/PlusIcon.vue'
-import TrashIcon from '@/components/icons/TrashIcon.vue'
-import FolderIcon from '@/components/icons/FolderIcon.vue'
-import HeartIcon from '@/components/icons/HeartIcon.vue'
 import { invoke } from '@tauri-apps/api/core'
+import Icon from '@/components/icons/Icon.vue'
 
 const ui = useUIStore()
 const library = useLibraryStore()
@@ -206,10 +201,10 @@ onUnmounted(() => {
         @click="openAddPanel"
       >
         <div class="flex items-center gap-2">
-          <PlusIcon :size="14" class="text-blue-500" />
+          <Icon name="plus" :size="14" class="text-blue-500" />
           <span>添加到歌单</span>
         </div>
-        <ChevronRightIcon :size="14" class="text-gray-400" />
+        <Icon name="chevron-right" :size="14" class="text-gray-400" />
       </button>
 
       <button
@@ -230,10 +225,10 @@ onUnmounted(() => {
           @click="openMovePanel"
         >
           <div class="flex items-center gap-2">
-            <FolderIcon :size="14" class="text-amber-500" />
+            <Icon name="folder" :size="14" class="text-amber-500" />
             <span>转移至其他歌单</span>
           </div>
-          <ChevronRightIcon :size="14" class="text-gray-400" />
+          <Icon name="chevron-right" :size="14" class="text-gray-400" />
         </button>
 
         <div class="h-px bg-gray-200/60 dark:bg-gray-700/60 my-1"></div>
@@ -242,7 +237,7 @@ onUnmounted(() => {
           class="w-full px-3 py-2 rounded-lg text-left text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2 transition-colors"
           @click="removeFromCurrentPlaylist"
         >
-          <TrashIcon :size="14" />
+          <Icon name="trash" :size="14" />
           <span>从当前歌单移除</span>
         </button>
       </template>
@@ -253,7 +248,7 @@ onUnmounted(() => {
         class="w-full px-3 py-2 rounded-lg text-left text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 flex items-center gap-2 transition-colors"
         @click="deleteSong"
       >
-        <TrashIcon :size="14" />
+        <Icon name="trash" :size="14" />
         <span>删除歌曲</span>
       </button>
     </div>
@@ -270,7 +265,7 @@ onUnmounted(() => {
         class="w-full px-3 py-2 rounded-lg text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 flex items-center gap-2 transition-colors mb-1"
         @click="backToMain"
       >
-        <ChevronLeftIcon :size="14" class="text-gray-400" />
+        <Icon name="chevron-left" :size="14" class="text-gray-400" />
         <span class="font-medium">返回</span>
       </button>
 
@@ -290,7 +285,8 @@ onUnmounted(() => {
             @click="addToPlaylist(pl.id)"
           >
             <div class="flex items-center gap-2 min-w-0">
-              <FolderIcon
+              <Icon
+name="folder"
                 :size="14"
                 :class="
                   playlistMembership[pl.id] ? 'text-blue-500 shrink-0' : 'text-amber-500 shrink-0'
@@ -313,7 +309,7 @@ onUnmounted(() => {
         class="w-full px-3 py-2 rounded-lg text-left text-sm text-blue-600 dark:text-blue-400 hover:bg-blue-50 dark:hover:bg-blue-900/20 flex items-center gap-2 transition-colors"
         @click="createAndAddToPlaylist"
       >
-        <PlusIcon :size="14" />
+        <Icon name="plus" :size="14" />
         <span>新建歌单...</span>
       </button>
     </div>
@@ -330,7 +326,7 @@ onUnmounted(() => {
         class="w-full px-3 py-2 rounded-lg text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 flex items-center gap-2 transition-colors mb-1"
         @click="backToMain"
       >
-        <ChevronLeftIcon :size="14" class="text-gray-400" />
+        <Icon name="chevron-left" :size="14" class="text-gray-400" />
         <span class="font-medium">返回</span>
       </button>
 
@@ -350,7 +346,7 @@ onUnmounted(() => {
             class="w-full px-3 py-2 rounded-lg text-left text-sm text-gray-700 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-700/60 flex items-center gap-2 transition-colors"
             @click="moveToPlaylist(pl.id)"
           >
-            <FolderIcon :size="14" class="text-amber-500 shrink-0" />
+            <Icon name="folder" :size="14" class="text-amber-500 shrink-0" />
             <span class="truncate">{{ pl.name }}</span>
           </button>
         </template>

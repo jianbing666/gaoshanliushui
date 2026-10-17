@@ -2,7 +2,7 @@
 import { ref, onMounted } from 'vue'
 import { useUIStore } from '@/stores/uiStore'
 import { equalizer } from '@/audio/Equalizer'
-import ChevronRightIcon from '@/components/icons/ChevronRightIcon.vue'
+import Icon from '@/components/icons/Icon.vue'
 
 const ui = useUIStore()
 
@@ -65,7 +65,7 @@ onMounted(() => {
         title="关闭"
         @click="ui.toggleRightPanel('equalizer')"
       >
-        <ChevronRightIcon :size="18" />
+        <Icon name="chevron-right" :size="18" />
       </button>
     </div>
 
