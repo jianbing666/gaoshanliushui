@@ -783,6 +783,25 @@ export const useAudioStore = defineStore('audio', () => {
 
   void initNativeMediaControls()
 
+  // ========== 输出设备断开自动暂停 ==========
+  // 背景: Web Audio 的输出跟随系统默认设备, 断开蓝牙耳机时 Windows 会切回扬声器,
+  //   但 AudioContext 不会自动停止 → "断开蓝牙后依旧在后台偷跑播歌".
+  // Rust 侧 (audio_device.rs) 通过 IMMNotificationClient 监听默认输出设备被移除,
+  //   emit `audio://output-device-removed`; 这里收到后自动暂停.
+  async function initAudioDeviceMonitor() {
+    try {
+      await listen('audio://output-device-removed', () => {
+        if (!isPlaying.value) return
+        console.info('[audioStore] 输出设备已断开, 自动暂停播放')
+        void forcePause()
+      })
+    } catch (e) {
+      console.warn('[audioStore] 注册输出设备监听失败:', e)
+    }
+  }
+
+  void initAudioDeviceMonitor()
+
   watch(
     currentTrackKey,
     () => {

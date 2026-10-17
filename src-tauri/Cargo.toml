@@ -40,6 +40,17 @@ rusqlite = { version = "0.32", features = ["bundled"] }
 tauri-plugin-media = "0.1.1"
 tauri-plugin-clipboard-manager = "2.3.2"
 
+# ========== Windows 音频端点监听 (v1.3.1: 断开蓝牙/输出设备自动暂停) ==========
+# 通过 IMMNotificationClient 订阅系统音频端点通知; 仅 Windows 编译.
+[target.'cfg(windows)'.dependencies]
+windows = { version = "0.61", features = [
+    "Win32_Foundation",
+    "Win32_Media_Audio",
+    "Win32_System_Com",
+] }
+# 注意: #[implement] 宏生成的代码引用 ::windows_core, 必须声明为直接依赖
+windows-core = "0.61"
+
 [features]
 default = ["custom-protocol"]
 custom-protocol = ["tauri/custom-protocol"]

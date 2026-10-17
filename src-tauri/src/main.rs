@@ -1,6 +1,8 @@
 // Prevents additional console window on Windows in release, DO NOT REMOVE!!
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
+#[cfg(target_os = "windows")]
+mod audio_device;
 mod commands;
 mod models;
 
@@ -123,6 +125,11 @@ fn main() {
                 };
                 let _ = app_handle.emit(event_name, ());
             });
+
+            // 监听系统音频输出端点变化: 蓝牙耳机/耳机断开时通知前端自动暂停
+            // (修复"断开蓝牙后依旧在后台偷跑播歌")
+            #[cfg(target_os = "windows")]
+            audio_device::start(app.handle().clone());
 
             Ok(())
         })
