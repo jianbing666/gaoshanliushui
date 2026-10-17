@@ -393,6 +393,9 @@ fn parse_audio_file_phase1(file_path: &Path, use_filename_only: bool) -> Result<
             .map(|f| f.properties().duration().as_secs())
             .unwrap_or(0);
         let sibling_cover = find_sibling_cover_image(file_path);
+        // 缩略图只在真的生成过时才填: 历史实现把同级全尺寸封面写进这一列,
+        // 列表拿 3000px JPEG 当 40px 缩略图, 快速滚动时内存冲到 GB 级 (P1)
+        let thumb = existing_thumbnail(&id);
         return Ok(Song {
             id,
             file_path: file_path_str,
@@ -400,8 +403,8 @@ fn parse_audio_file_phase1(file_path: &Path, use_filename_only: bool) -> Result<
             artist,
             album: String::new(),
             duration,
-            cover_path: sibling_cover.clone(),
-            cover_thumb_path: sibling_cover,
+            cover_path: sibling_cover,
+            cover_thumb_path: thumb,
             content_hash,
             favorite: false,
             favorited_at: 0,
@@ -479,6 +482,7 @@ fn parse_audio_file_phase1(file_path: &Path, use_filename_only: bool) -> Result<
 
     // 阶段1不提取封面，但检查同级图片（轻量级，仅判断文件是否存在）
     let sibling_cover = find_sibling_cover_image(file_path);
+    let thumb = existing_thumbnail(&id);
 
     Ok(Song {
         id,
@@ -487,8 +491,8 @@ fn parse_audio_file_phase1(file_path: &Path, use_filename_only: bool) -> Result<
         artist,
         album,
         duration,
-        cover_path: sibling_cover.clone(),
-        cover_thumb_path: sibling_cover,
+        cover_path: sibling_cover,
+        cover_thumb_path: thumb,
         content_hash,
         favorite: false,
         favorited_at: 0,
@@ -528,7 +532,11 @@ fn enrich_covers_async(
         // 文件名模式下只检查同级图片（阶段1已做），跳过内嵌封面提取
         let (cover_path, cover_thumb_path) = if use_filename_only {
             let sibling = find_sibling_cover_image(file_path);
-            (sibling.clone(), sibling)
+            let thumb = sibling
+                .as_ref()
+                .and_then(|path| make_thumbnail_from_file(Path::new(path), &id))
+                .or_else(|| existing_thumbnail(&id));
+            (sibling, thumb)
         } else {
             // 提取内嵌封面 + 缩略图
             let (cover_path, cover_thumb_path) = match extract_cover_art(file_path, &id) {
@@ -539,10 +547,12 @@ fn enrich_covers_async(
                 }
                 (None, t) => (None, t),
             };
-            // 同级图片兜底
+            // 同级图片兜底: 同样生成缩略图, 不要拿全尺寸封面冒充
             if cover_path.is_none() {
                 if let Some(sibling) = find_sibling_cover_image(file_path) {
-                    (Some(sibling.clone()), Some(sibling))
+                    let thumb = make_thumbnail_from_file(Path::new(&sibling), &id)
+                        .or_else(|| existing_thumbnail(&id));
+                    (Some(sibling), thumb)
                 } else {
                     (cover_path, cover_thumb_path)
                 }
@@ -681,7 +691,18 @@ fn extract_cover_art(file_path: &Path, song_id: &str) -> (Option<String>, Option
     (cover_str, thumb_str)
 }
 
-/// 生成 128px 宽 jpeg 缩略图
+/// 已存在的缩略图路径(只检查, 不生成)
+fn existing_thumbnail(song_id: &str) -> Option<String> {
+    let thumb_dir = data_dir::get_thumbnails_dir().ok()?;
+    let thumb_path = thumb_dir.join(format!("{}.jpg", song_id));
+    if thumb_path.exists() {
+        thumb_path.to_str().map(String::from)
+    } else {
+        None
+    }
+}
+
+/// 生成 128px 宽 jpeg 缩略图(内嵌封面用)
 fn generate_thumbnail(data: &[u8], song_id: &str) -> Option<String> {
     use image::ImageReader;
     use std::io::Cursor;
@@ -690,7 +711,32 @@ fn generate_thumbnail(data: &[u8], song_id: &str) -> Option<String> {
         .with_guessed_format()
         .ok()?;
     let img = reader.decode().ok()?;
+    encode_thumbnail(&img, song_id)
+}
 
+/// 按封面文件路径生成缩略图(P1 优化)
+///
+/// 与 [generate_thumbnail] 的差别: 源图本身已经很小时直接返回源图路径,
+/// 而不是返回 None 让调用方"拿全尺寸封面当缩略图"。
+/// 列表里的 40px 头像位根本不需要 3000px 的原图, 那正是滚动内存尖峰的根源。
+fn make_thumbnail_from_file(cover_path: &Path, song_id: &str) -> Option<String> {
+    use image::ImageReader;
+
+    let file = std::fs::File::open(cover_path).ok()?;
+    let reader = ImageReader::new(std::io::BufReader::new(file))
+        .with_guessed_format()
+        .ok()?;
+    let img = reader.decode().ok()?;
+
+    if img.width() <= THUMB_WIDTH {
+        return cover_path.to_str().map(String::from);
+    }
+
+    encode_thumbnail(&img, song_id)
+}
+
+/// 缩放 + 编码 + 落盘, 返回缩略图路径
+fn encode_thumbnail(img: &image::DynamicImage, song_id: &str) -> Option<String> {
     if img.width() <= THUMB_WIDTH {
         return None;
     }
@@ -701,10 +747,7 @@ fn generate_thumbnail(data: &[u8], song_id: &str) -> Option<String> {
         image::imageops::FilterType::Triangle,
     );
 
-    let thumb_dir = match data_dir::get_thumbnails_dir() {
-        Ok(dir) => dir,
-        Err(_) => return None,
-    };
+    let thumb_dir = data_dir::get_thumbnails_dir().ok()?;
     if !thumb_dir.exists() {
         let _ = std::fs::create_dir_all(&thumb_dir);
     }
@@ -715,17 +758,14 @@ fn generate_thumbnail(data: &[u8], song_id: &str) -> Option<String> {
     {
         let mut encoder =
             image::codecs::jpeg::JpegEncoder::new_with_quality(&mut buf, THUMB_QUALITY);
-        if encoder
+        encoder
             .encode(
                 rgb.as_raw(),
                 rgb.width(),
                 rgb.height(),
                 image::ExtendedColorType::Rgb8,
             )
-            .is_err()
-        {
-            return None;
-        }
+            .ok()?;
     }
 
     std::fs::write(&thumb_path, &buf).ok()?;
@@ -759,6 +799,78 @@ pub fn clear_cover_cache() {
             }
         }
     }
+}
+
+/// 为存量曲库补齐缩略图(P1 优化)
+///
+/// 历史版本把"同级封面图"原路径直接写进 cover_thumb_path, 列表只能拿全尺寸 JPEG 当缩略图:
+/// 一张 3456x2160 的图解码后约 30MB, 快速滚动时整应用内存冲到 2.6GB。
+/// 这里在后台线程逐首补生成 128px 缩略图, 并复用扫描阶段的进度事件让前端增量刷新。
+///
+/// 返回需要处理的歌曲数(0 表示曲库已全部就绪);实际生成在后台线程里进行。
+#[tauri::command]
+pub fn backfill_thumbnails(app: AppHandle) -> Result<u32, String> {
+    let rows: Vec<(String, String, String)> = db::with_conn(|conn| {
+        let mut stmt = conn
+            .prepare(
+                "SELECT song_hash, cover_path, song_path FROM songs
+                 WHERE cover_path != ''
+                   AND (cover_thumb_path = '' OR cover_thumb_path = cover_path)",
+            )
+            .map_err(|e| e.to_string())?;
+        let iter = stmt
+            .query_map([], |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            })
+            .map_err(|e| e.to_string())?;
+        let mut out = Vec::new();
+        for item in iter.flatten() {
+            out.push(item);
+        }
+        Ok(out)
+    })?;
+
+    let total = rows.len() as u32;
+    if total == 0 {
+        return Ok(0);
+    }
+
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        let now = db::now_ms();
+        for (idx, (song_hash, cover, song_path)) in rows.iter().enumerate() {
+            let thumb = make_thumbnail_from_file(Path::new(cover), song_hash);
+            if let Some(ref thumb_path) = thumb {
+                let _ = db::with_conn(|conn| {
+                    conn.execute(
+                        "UPDATE songs SET cover_thumb_path = ?1, updated_at = ?2 WHERE song_hash = ?3",
+                        rusqlite::params![thumb_path, now, song_hash],
+                    )
+                    .map_err(|e| e.to_string())?;
+                    Ok(())
+                });
+            }
+            // 前端按 Song.id(= 路径哈希)匹配, 与扫描阶段的进度事件保持一致
+            let _ = handle.emit(
+                "scan:enrich-progress",
+                serde_json::json!({
+                    "id": generate_id(song_path),
+                    "file_path": song_path,
+                    "cover_path": cover,
+                    "cover_thumb_path": thumb,
+                    "index": idx,
+                    "total": total,
+                }),
+            );
+        }
+        let _ = handle.emit("scan:enrich-complete", serde_json::json!({ "total": total }));
+    });
+
+    Ok(total)
 }
 
 /// 基于字符串生成唯一 ID

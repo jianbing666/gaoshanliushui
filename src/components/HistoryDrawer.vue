@@ -109,7 +109,12 @@ function onCoverError(e: Event) {
                 class="w-10 h-10 rounded bg-gray-200/70 dark:bg-gray-700/70 shrink-0 overflow-hidden"
               >
                 <img
-                  v-if="(song as PlayHistoryItem).cover_path"
+                  v-if="
+                    library.hasCoverThumb(
+                      (song as PlayHistoryItem).cover_path,
+                      (song as PlayHistoryItem).cover_thumb_path
+                    )
+                  "
                   :src="
                     library.getCoverThumbUrl(
                       (song as PlayHistoryItem).cover_path,

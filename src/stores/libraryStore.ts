@@ -175,19 +175,35 @@ export const useLibraryStore = defineStore('library', () => {
     return url
   }
 
+  /**
+   * 列表用的小尺寸封面 URL(P1 优化)
+   *
+   * 关键变化: 缩略图缺失时**不再回退全尺寸封面**。
+   * 历史版本把同级封面原图路径写进 cover_thumb_path, 于是 40px 的头像位去加载
+   * 3456x2160 的 JPEG —— 解码后单张约 30MB, 快速滚动时内存峰值冲到 2.6GB。
+   * 现在没有真缩略图就返回空串, 由调用方显示 ♪ 占位; 缩略图由后端异步补齐。
+   */
   function getCoverThumbUrl(
     coverPath: string | null,
     thumbPath: string | null | undefined
   ): string {
-    if (thumbPath) {
-      let url = coverUrlCache.get(thumbPath)
-      if (url === undefined) {
-        url = convertFileSrc(thumbPath)
-        coverUrlCache.set(thumbPath, url)
-      }
-      return url
+    if (!thumbPath) return ''
+    // 与封面同一路径说明它不是缩略图(老数据 / 源图本来就小), 不要把原图当缩略图用
+    if (coverPath && thumbPath === coverPath) return ''
+    let url = coverUrlCache.get(thumbPath)
+    if (url === undefined) {
+      url = convertFileSrc(thumbPath)
+      coverUrlCache.set(thumbPath, url)
     }
-    return getCoverUrl(coverPath)
+    return url
+  }
+
+  /** 是否有可用的缩略图(与 getCoverThumbUrl 同口径, 供模板里做 v-if) */
+  function hasCoverThumb(
+    coverPath: string | null,
+    thumbPath: string | null | undefined
+  ): boolean {
+    return !!getCoverThumbUrl(coverPath, thumbPath)
   }
 
   // ========== 内存回收 ==========
@@ -520,6 +536,75 @@ export const useLibraryStore = defineStore('library', () => {
     invalidatePlaylistCache()
   }
 
+  // ========== 封面 / 缩略图补全事件 ==========
+  //  扫描阶段的阶段 2 与 P1 的"存量缩略图补齐"共用同一套事件:
+  //  后端逐首 emit enrich-progress, 前端按歌曲 id 增量更新 playlist, 收到 complete 解绑。
+  async function attachEnrichListeners(): Promise<() => void> {
+    let disposed = false
+    let dispose = () => {}
+
+    const unlistenProgress = await listen('scan:enrich-progress', (event) => {
+      const payload = event.payload as {
+        id: string
+        file_path: string
+        cover_path: string | null
+        cover_thumb_path: string | null
+        index: number
+        total: number
+      }
+
+      const songIndex = playlist.value.findIndex((s) => s.id === payload.id)
+      if (songIndex === -1) return
+      const updated = [...playlist.value]
+      updated[songIndex] = {
+        ...updated[songIndex],
+        cover_path: payload.cover_path ?? updated[songIndex].cover_path,
+        cover_thumb_path: payload.cover_thumb_path ?? updated[songIndex].cover_thumb_path,
+      }
+      playlist.value = updated
+      syncDefaultPlaylist(updated)
+    })
+
+    const unlistenComplete = await listen('scan:enrich-complete', () => {
+      dispose()
+      // 补全结束后重拉一次歌单: 即使漏了某条进度事件, 封面状态也不会滞后
+      void loadActivePlaylistSongs()
+    })
+
+    dispose = () => {
+      if (disposed) return
+      disposed = true
+      unlistenProgress()
+      unlistenComplete()
+    }
+
+    return dispose
+  }
+
+  /**
+   * 补齐存量曲库的封面缩略图(P1 优化)
+   *
+   * 历史版本把同级封面原图直接写进 cover_thumb_path, 列表便拿全尺寸 JPEG 当缩略图,
+   * 快速滚动时整应用内存冲到 2.6GB。启动后调用一次, 后端在后台逐首生成 128px 缩略图,
+   * 并通过 scan:enrich-progress 把新路径推给前端。
+   *
+   * @returns 需要处理的歌曲数(0 表示已全部就绪)
+   */
+  async function backfillThumbnails(): Promise<number> {
+    let dispose: (() => void) | null = null
+    try {
+      dispose = await attachEnrichListeners()
+      const total = await invoke<number>('backfill_thumbnails')
+      // 没有需要处理的歌曲时不会再有 complete 事件, 直接解绑避免监听泄漏
+      if (total === 0) dispose()
+      return total
+    } catch (e) {
+      console.warn('[libraryStore] 补齐封面缩略图失败:', e)
+      dispose?.()
+      return 0
+    }
+  }
+
   // ========== 文件夹扫描 ==========
   // v1.1 性能优化 (2026-07-15): 两阶段扫描
   //   - 阶段 1 (快速返回): 文件名/ID3基础信息 + duration + content_hash
@@ -573,33 +658,7 @@ export const useLibraryStore = defineStore('library', () => {
       }
 
       // ========== 阶段 2: 监听后台封面补全事件 ==========
-      const unlistenProgress = await listen('scan:enrich-progress', (event) => {
-        const payload = event.payload as {
-          id: string
-          file_path: string
-          cover_path: string | null
-          cover_thumb_path: string | null
-          index: number
-          total: number
-        }
-
-        const songIndex = playlist.value.findIndex((s) => s.id === payload.id)
-        if (songIndex !== -1) {
-          const updated = [...playlist.value]
-          updated[songIndex] = {
-            ...updated[songIndex],
-            cover_path: payload.cover_path ?? updated[songIndex].cover_path,
-            cover_thumb_path: payload.cover_thumb_path ?? updated[songIndex].cover_thumb_path,
-          }
-          playlist.value = updated
-          syncDefaultPlaylist(updated)
-        }
-      })
-
-      const unlistenComplete = await listen('scan:enrich-complete', () => {
-        unlistenProgress()
-        unlistenComplete()
-      })
+      await attachEnrichListeners()
 
       return songs
     } catch (error) {
@@ -799,6 +858,7 @@ export const useLibraryStore = defineStore('library', () => {
     getAudioUrl,
     getCoverUrl,
     getCoverThumbUrl,
+    hasCoverThumb,
     // 歌单方法
     loadPlaylistsFromDb,
     loadPlaylistSongs,
@@ -815,6 +875,8 @@ export const useLibraryStore = defineStore('library', () => {
     syncDefaultPlaylist,
     // 扫描
     scanMusicFolder,
+    // P1: 存量缩略图补齐
+    backfillThumbnails,
     autoLoadMusicLibrary,
     setMetadataSource,
     refreshMetadata,

@@ -40,6 +40,12 @@ function onCoverError(e: Event) {
   const img = e.target as HTMLImageElement
   img.style.display = 'none'
 }
+
+// P1: 只有拿到真正的缩略图才渲染 <img>. 没有缩略图时显示 ♪ 占位,
+//     绝不拿全尺寸封面(解码后单张可达 30MB)顶替 40px 的位置.
+const coverThumbUrl = computed(() =>
+  library.getCoverThumbUrl(props.song.cover_path, props.song.cover_thumb_path)
+)
 </script>
 
 <template>
@@ -77,8 +83,8 @@ function onCoverError(e: Event) {
       :class="compact ? 'w-7 h-7' : 'w-10 h-10'"
     >
       <img
-        v-if="song.cover_path"
-        :src="library.getCoverThumbUrl(song.cover_path, song.cover_thumb_path)"
+        v-if="coverThumbUrl"
+        :src="coverThumbUrl"
         :alt="song.title"
         class="w-full h-full object-cover"
         loading="lazy"

@@ -234,6 +234,10 @@ onMounted(async () => {
         ui.toggleSettingsPanel()
       }
 
+      // 2.5 P1: 补齐存量缩略图 (后端后台线程生成, 通过 scan:enrich-* 事件增量回推)
+      //   列表只认真缩略图, 缺缩略图时先显示 ♪ 占位, 绝不再拿全尺寸封面顶替。
+      void library.backfillThumbnails()
+
       // 3. 注册 Tauri 窗口显示事件 (IPC 通道建立, ~50ms)
       try {
         unlistenWindowShow = await listen('tauri://window-show', handleWindowShow)

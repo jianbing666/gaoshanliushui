@@ -147,6 +147,8 @@ fn main() {
         .invoke_handler(tauri::generate_handler![
             scan_folder::scan_music_folder,
             scan_folder::clear_cover_cache,
+            // P1: 存量曲库补齐 128px 缩略图(避免列表拿全尺寸封面解码)
+            scan_folder::backfill_thumbnails,
             toggle_mini_mode::toggle_mini_mode,
             toggle_mini_mode::set_window_size,
             toggle_mini_mode::get_window_size,

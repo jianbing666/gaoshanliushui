@@ -148,7 +148,12 @@ function onCoverError(e: Event) {
                 class="w-12 h-12 rounded bg-gray-200/70 dark:bg-gray-700/70 shrink-0 overflow-hidden"
               >
                 <img
-                  v-if="history.mostLoopedSong.song.cover_path"
+                  v-if="
+                    library.hasCoverThumb(
+                      history.mostLoopedSong.song.cover_path,
+                      history.mostLoopedSong.song.cover_thumb_path
+                    )
+                  "
                   :src="
                     library.getCoverThumbUrl(
                       history.mostLoopedSong.song.cover_path,
@@ -191,7 +196,12 @@ function onCoverError(e: Event) {
                 class="w-12 h-12 rounded bg-gray-200/70 dark:bg-gray-700/70 shrink-0 overflow-hidden"
               >
                 <img
-                  v-if="history.longestPlayedSong.song.cover_path"
+                  v-if="
+                    library.hasCoverThumb(
+                      history.longestPlayedSong.song.cover_path,
+                      history.longestPlayedSong.song.cover_thumb_path
+                    )
+                  "
                   :src="
                     library.getCoverThumbUrl(
                       history.longestPlayedSong.song.cover_path,
