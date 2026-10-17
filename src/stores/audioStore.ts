@@ -522,6 +522,9 @@ export const useAudioStore = defineStore('audio', () => {
       if (!song) return
       const myGen = ++loadGeneration
 
+      // 性能记录: 切歌加载起点 (供 perfRecorder 计算切歌延迟)
+      window.dispatchEvent(new CustomEvent('perf:load-start', { detail: { songId: song.id } }))
+
       try {
         // 第 1 步: 立即停止旧播放 + 静音 (AudioEngine 三层静音防护)
         audioEngine.stopPlayback()
@@ -574,6 +577,10 @@ export const useAudioStore = defineStore('audio', () => {
             if (currentSong.value) {
               history.startHistoryRecord(currentSong.value, audioEngine)
             }
+            // 性能记录: 实际出声时刻 (供 perfRecorder 计算切歌延迟)
+            window.dispatchEvent(
+              new CustomEvent('perf:playback-started', { detail: { songId: song.id } })
+            )
           })
           // 最后才解除切歌锁
           isSwitchingSong.value = false
