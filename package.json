@@ -13,7 +13,10 @@
     "test:watch": "vitest",
     "lint": "eslint .",
     "format": "prettier --write .",
-    "format:check": "prettier --check ."
+    "format:check": "prettier --check .",
+    "perf:snapshot": "node scripts/perf-snapshot.mjs",
+    "perf:gate": "node scripts/perf-gate.mjs",
+    "perf:runtime": "node scripts/perf-runtime.mjs"
   },
   "dependencies": {
     "@tauri-apps/plugin-clipboard-manager": "^2.3.2",

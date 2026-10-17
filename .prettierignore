@@ -5,6 +5,9 @@ dist/
 # Rust 侧由 rustfmt 负责, 不交给 prettier
 src-tauri/
 
+# PowerShell 脚本没有 prettier 解析器
+*.ps1
+
 # 锁文件与文档不做格式化, 避免无意义的大 diff
 package-lock.json
 *.md

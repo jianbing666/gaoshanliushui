@@ -309,3 +309,39 @@ fn parse_loudnorm_json(stderr: &[u8]) -> Option<LoudnormMeasurement> {
         target_offset: field("target_offset")?,
     })
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const SAMPLE_STDERR: &str = "[Parsed_loudnorm_0 @ 000001] \n{\n\t\"input_i\" : \"-23.05\",\n\t\"input_tp\" : \"-5.20\",\n\t\"input_lra\" : \"7.10\",\n\t\"input_thresh\" : \"-33.27\",\n\t\"output_i\" : \"-14.02\",\n\t\"target_offset\" : \"0.13\"\n}\n";
+
+    #[test]
+    fn test_parse_loudnorm_json_reads_trailing_json() {
+        let measurement =
+            parse_loudnorm_json(SAMPLE_STDERR.as_bytes()).expect("应解析出 loudnorm 测量值");
+        assert!((measurement.input_i - (-23.05)).abs() < 1e-9);
+        assert!((measurement.input_tp - (-5.20)).abs() < 1e-9);
+        assert!((measurement.input_lra - 7.10).abs() < 1e-9);
+        assert!((measurement.input_thresh - (-33.27)).abs() < 1e-9);
+        assert!((measurement.target_offset - 0.13).abs() < 1e-9);
+    }
+
+    #[test]
+    fn test_parse_loudnorm_json_returns_none_on_invalid_input() {
+        assert!(parse_loudnorm_json(b"").is_none(), "空输入应返回 None");
+        assert!(
+            parse_loudnorm_json(b"[loudnorm] no json here").is_none(),
+            "没有 JSON 对象应返回 None"
+        );
+        assert!(
+            parse_loudnorm_json(br#"{"input_i":"-23.0"}"#).is_none(),
+            "字段缺失时应返回 None"
+        );
+        assert!(
+            parse_loudnorm_json(br#"{"input_i":"not-a-number","input_tp":"0","input_lra":"0","input_thresh":"0","target_offset":"0"}"#)
+                .is_none(),
+            "数值字段不可解析时应返回 None"
+        );
+    }
+}

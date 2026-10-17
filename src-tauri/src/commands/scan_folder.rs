@@ -867,7 +867,10 @@ pub fn backfill_thumbnails(app: AppHandle) -> Result<u32, String> {
                 }),
             );
         }
-        let _ = handle.emit("scan:enrich-complete", serde_json::json!({ "total": total }));
+        let _ = handle.emit(
+            "scan:enrich-complete",
+            serde_json::json!({ "total": total }),
+        );
     });
 
     Ok(total)

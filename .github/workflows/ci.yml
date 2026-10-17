@@ -35,6 +35,23 @@ jobs:
       - name: 构建前端产物
         run: npx vite build
 
+      # 体积回归门禁: 预算见 scripts/perf-budgets.json
+      # 主入口 Gzip / JS 合计 Gzip / dist 合计 Gzip 任一超标都会让 CI 失败
+      - name: 体积预算门禁
+        run: npm run perf:gate
+
+      # 快照用于留档与趋势对比(不参与门禁), 作为 CI artifact 上传
+      - name: 性能数据快照
+        run: npm run perf:snapshot
+
+      - name: 上传性能快照
+        uses: actions/upload-artifact@v4
+        with:
+          name: perf-snapshot
+          path: |
+            markdown/性能/性能数据快照.json
+            markdown/性能/性能数据快照.md
+
   # Rust 侧: 格式 / Clippy / 单测
   #
   # 跑在 Windows 上: 项目依赖 src-tauri/binaries 下的 ffmpeg sidecar,

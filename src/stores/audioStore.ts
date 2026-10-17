@@ -9,6 +9,7 @@ import { audioEngine } from '@/audio/AudioEngine'
 import { loadSettings, saveSettings } from '@/utils/storage'
 import { computeSmartWeights, pickWeightedIndex } from '@/utils/smartShuffle'
 import type { SongPlaySignals } from '@/utils/smartShuffle'
+import { pickUpcomingSong, resolveShuffleNext } from '@/utils/playQueue'
 import { useLibraryStore } from './libraryStore'
 import type { useHistoryStore } from './historyStore'
 import { useSettingsStore } from './settingsStore'
@@ -235,15 +236,9 @@ export const useAudioStore = defineStore('audio', () => {
    */
   let prefetchedNext: { songId: string; globalIndex: number } | null = null
 
-  /** 推断"下一首"会播哪一首(顺序/列表循环可预测,其余返回 null) */
+  /** 推断"下一首"会播哪一首(纯逻辑见 @/utils/playQueue, 便于单测) */
   function upcomingSong(): Song | null {
-    const songs = activeSongs.value
-    if (songs.length < 2) return null
-    if (loopMode.value === 'shuffle' || loopMode.value === 'single') return null
-    const idx = currentActiveIndex.value
-    if (idx < 0) return null
-    if (idx + 1 < songs.length) return songs[idx + 1]
-    return loopMode.value === 'list' ? songs[0] : null
+    return pickUpcomingSong(activeSongs.value, currentActiveIndex.value, loopMode.value)
   }
 
   function cancelPrefetch() {
@@ -261,11 +256,12 @@ export const useAudioStore = defineStore('audio', () => {
   function takeShuffleNext(): number {
     const pending = prefetchedNext
     prefetchedNext = null
-    if (!pending) return getRandomIndex()
-    const songs = activeSongs.value
-    const stillExists = songs.some((song) => song.id === pending.songId)
-    if (stillExists && pending.songId !== currentSong.value?.id) return pending.globalIndex
-    return getRandomIndex()
+    return resolveShuffleNext(
+      pending,
+      activeSongs.value,
+      currentSong.value?.id ?? null,
+      getRandomIndex()
+    )
   }
 
   /**

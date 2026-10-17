@@ -1,0 +1,8 @@
+{
+  "_comment": "性能体积预算 (P3). 由 scripts/perf-gate.mjs 校验; 数值单位见键名. 调整预算时请在 markdown/性能/后续优化方向-P0-P3.md 记录原因.",
+  "mainEntryGzipKB": 32,
+  "jsTotalGzipKB": 165,
+  "distTotalGzipKB": 175,
+  "binaryMB": 9,
+  "installerMB": 31
+}

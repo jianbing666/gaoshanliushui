@@ -560,3 +560,170 @@ pub fn sync_default_playlist(conn: &mut rusqlite::Connection) -> Result<(), Stri
 
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::commands::migrate;
+
+    fn test_conn() -> rusqlite::Connection {
+        let conn = rusqlite::Connection::open_in_memory().expect("打开内存库失败");
+        conn.pragma_update(None, "foreign_keys", "ON").ok();
+        migrate::init_schema(&conn).expect("初始化 songs schema 失败");
+        init_schema(&conn).expect("初始化 playlist schema 失败");
+        conn
+    }
+
+    fn insert_song(conn: &rusqlite::Connection, hash: &str, title: &str) {
+        conn.execute(
+            "INSERT INTO songs (song_hash, song_path, title, artist, created_at, updated_at)
+             VALUES (?1, ?2, ?3, '测试歌手', 0, 0)",
+            params![hash, format!("/music/{}.mp3", hash), title],
+        )
+        .expect("插入测试歌曲失败");
+    }
+
+    fn sample_song(hash: &str, title: &str, artist: &str, duration: i64) -> PlaylistSong {
+        PlaylistSong {
+            song_hash: hash.to_string(),
+            song_path: format!("/music/{}.mp3", hash),
+            title: title.to_string(),
+            artist: artist.to_string(),
+            duration,
+            cover_path: String::new(),
+            position: 1,
+            added_at: 0,
+        }
+    }
+
+    #[test]
+    fn test_path_to_id_is_stable_and_hex() {
+        let first = path_to_id("/music/周杰伦 - 晴天.mp3");
+        let second = path_to_id("/music/周杰伦 - 晴天.mp3");
+        assert_eq!(first, second, "同一路径必须得到同一个 ID");
+        assert!(
+            first.chars().all(|c| c.is_ascii_hexdigit()),
+            "ID 必须是十六进制字符串: {}",
+            first
+        );
+        assert!(first.len() <= 16, "u64 哈希最多 16 位: {}", first);
+        assert_ne!(
+            first,
+            path_to_id("/music/另一首.mp3"),
+            "不同路径不应生成相同 ID"
+        );
+    }
+
+    #[test]
+    fn test_generate_m3u_uses_duration_and_artist_title() {
+        let songs = vec![
+            sample_song("hash-1", "晴天", "周杰伦", 261),
+            sample_song("hash-2", "纯音乐", "", 120),
+        ];
+        let content = generate_m3u(&songs);
+        assert!(content.starts_with("#EXTM3U\n"), "首行必须是 #EXTM3U");
+        assert!(
+            content.contains("#EXTINF:261,周杰伦 - 晴天\n/music/hash-1.mp3\n"),
+            "带歌手的行格式不对: {}",
+            content
+        );
+        assert!(
+            content.contains("#EXTINF:120,纯音乐\n/music/hash-2.mp3\n"),
+            "空歌手时不应出现 ' - ' 前缀: {}",
+            content
+        );
+    }
+
+    #[test]
+    fn test_generate_markdown_contains_track_metadata() {
+        let songs = vec![
+            sample_song("hash-1", "晴天", "周杰伦", 261),
+            sample_song("hash-2", "纯音乐", "无名氏", 59),
+        ];
+        let content = generate_markdown("我的歌单", &songs);
+        assert!(
+            content.contains("# 歌单：我的歌单"),
+            "缺少标题: {}",
+            content
+        );
+        assert!(content.contains("> 共 2 首"), "缺少曲目数: {}", content);
+        assert!(content.contains("## 1. 晴天"), "缺少序号/歌名: {}", content);
+        assert!(content.contains("- 歌手：周杰伦"), "缺少歌手: {}", content);
+        assert!(
+            content.contains("- 时长：4:21"),
+            "时长格式应为 分:秒: {}",
+            content
+        );
+        assert!(content.contains("- 时长：0:59"), "秒数应补零: {}", content);
+        assert!(
+            content.contains("- 路径：/music/hash-1.mp3"),
+            "缺少路径: {}",
+            content
+        );
+    }
+
+    #[test]
+    fn test_playlist_init_schema_is_idempotent() {
+        let conn = test_conn();
+        init_schema(&conn).expect("重复初始化应保持幂等");
+        let playlist_count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM playlists", [], |row| row.get(0))
+            .expect("查询歌单数失败");
+        assert_eq!(playlist_count, 1, "默认歌单只应存在一条");
+        let default_name: String = conn
+            .query_row("SELECT name FROM playlists WHERE id = 1", [], |row| {
+                row.get(0)
+            })
+            .expect("查询默认歌单失败");
+        assert_eq!(default_name, "全部歌曲");
+    }
+
+    #[test]
+    fn test_sync_default_playlist_orders_by_title_and_is_idempotent() {
+        let mut conn = test_conn();
+        insert_song(&conn, "hash-b", "B 歌");
+        insert_song(&conn, "hash-a", "A 歌");
+        insert_song(&conn, "hash-c", "C 歌");
+
+        sync_default_playlist(&mut conn).expect("首次同步默认歌单失败");
+
+        {
+            // 作用域内持有 stmt 的不可变借用, 结束后再做可变借用
+            let mut stmt = conn
+                .prepare(
+                    "SELECT song_hash, position FROM playlist_songs WHERE playlist_id = 1 ORDER BY position",
+                )
+                .expect("准备查询失败");
+            let rows: Vec<(String, i64)> = stmt
+                .query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+                .expect("执行查询失败")
+                .collect::<Result<_, _>>()
+                .expect("读取查询结果失败");
+            assert_eq!(
+                rows.iter()
+                    .map(|(hash, _)| hash.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["hash-a", "hash-b", "hash-c"],
+                "应按歌名升序排列"
+            );
+            assert_eq!(
+                rows.iter()
+                    .map(|(_, position)| *position)
+                    .collect::<Vec<_>>(),
+                vec![1, 2, 3],
+                "position 应从 1 连续递增"
+            );
+        }
+
+        // 二次同步: 先清空再重建, 不应产生重复
+        sync_default_playlist(&mut conn).expect("二次同步默认歌单失败");
+        let count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM playlist_songs WHERE playlist_id = 1",
+                [],
+                |row| row.get(0),
+            )
+            .expect("查询关联数失败");
+        assert_eq!(count, 3, "重复同步不应产生重复关联");
+    }
+}

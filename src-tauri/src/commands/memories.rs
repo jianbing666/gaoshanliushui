@@ -285,3 +285,67 @@ pub async fn export_memory(
 
     Ok(memo_path.to_string_lossy().to_string())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn test_init_schema_is_idempotent() {
+        let conn = rusqlite::Connection::open_in_memory().expect("打开内存库失败");
+        init_schema(&conn).expect("第一次初始化失败");
+        init_schema(&conn).expect("第二次初始化应保持幂等");
+
+        let table_count: i64 = conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'memories'",
+                [],
+                |row| row.get(0),
+            )
+            .expect("查询表失败");
+        assert_eq!(table_count, 1, "memories 表应存在且只有一张");
+    }
+
+    #[test]
+    fn test_song_hash_is_unique_and_defaults_are_kept() {
+        let conn = rusqlite::Connection::open_in_memory().expect("打开内存库失败");
+        init_schema(&conn).expect("初始化 schema 失败");
+
+        conn.execute(
+            "INSERT INTO memories (song_hash, song_path, short_tags, long_text, created_at, updated_at)
+             VALUES ('hash-1', '/music/a.mp3', '[\"深夜\",\"雨\"]', '', 100, 200)",
+            [],
+        )
+        .expect("插入第一条回忆失败");
+
+        let duplicate = conn.execute(
+            "INSERT INTO memories (song_hash, song_path, short_tags, long_text, created_at, updated_at)
+             VALUES ('hash-1', '/music/renamed.mp3', '[]', '', 300, 400)",
+            [],
+        );
+        assert!(duplicate.is_err(), "同一首歌(song_hash)不应写入两条回忆");
+
+        let (tags, long_text, created_at): (String, String, i64) = conn
+            .query_row(
+                "SELECT short_tags, long_text, created_at FROM memories WHERE song_hash = 'hash-1'",
+                [],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .expect("查询回忆失败");
+        assert_eq!(tags, "[\"深夜\",\"雨\"]", "短标签应原样保存");
+        assert_eq!(long_text, "");
+        assert_eq!(created_at, 100, "冲突插入不应覆盖已有行");
+
+        // 另一首歌可以正常插入
+        conn.execute(
+            "INSERT INTO memories (song_hash, song_path, short_tags, long_text, created_at, updated_at)
+             VALUES ('hash-2', '/music/b.mp3', '[]', '', 500, 500)",
+            [],
+        )
+        .expect("插入第二条回忆失败");
+        let count: i64 = conn
+            .query_row("SELECT COUNT(*) FROM memories", [], |row| row.get(0))
+            .expect("查询总数失败");
+        assert_eq!(count, 2);
+    }
+}
