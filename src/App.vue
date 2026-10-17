@@ -20,7 +20,6 @@ import Player from '@/components/Player.vue'
 import ControlBar from '@/components/ControlBar.vue'
 import TitleBar from '@/components/TitleBar.vue'
 
-
 // ========== 阶段 3.6: 异步组件（首屏 JS 减 20-30KB）============
 // 同步: 首屏必现
 // 异步: 仅在用户首次打开对应面板/弹窗时下载独立 chunk
@@ -62,8 +61,6 @@ const autoLoadError = ref<string | null>(null)
 
 // 托盘菜单/全局快捷键/媒体键监听已统一由 main.ts 的 setupGlobalMediaListeners() 注册
 // (P2: 改为动态 import, 不再从主入口静态引入 useMediaControls)
-
-
 
 /** 右侧面板正在播放离开动画（用于把列宽留到 leave 结束，避免内容提前展开与面板重叠） */
 const rightPanelLeaving = ref(false)

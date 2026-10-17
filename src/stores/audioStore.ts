@@ -60,7 +60,9 @@ export const useAudioStore = defineStore('audio', () => {
   let html5PlayerPromise: Promise<Html5Player> | null = null
   function html5(): Promise<Html5Player> {
     if (!html5PlayerPromise) {
-      html5PlayerPromise = import('@/audio/HTML5AudioPlayer').then((module) => module.html5AudioPlayer)
+      html5PlayerPromise = import('@/audio/HTML5AudioPlayer').then(
+        (module) => module.html5AudioPlayer
+      )
     }
     return html5PlayerPromise
   }
@@ -647,104 +649,101 @@ export const useAudioStore = defineStore('audio', () => {
   // 否则"收藏 / 编辑元数据"这类同曲目换对象的更新会被误判成换歌并把进度清零。
   let loadGeneration = 0
 
-  watch(
-    currentTrackKey,
-    async () => {
-      const song = currentSong.value
-      if (!song) return
-      const myGen = ++loadGeneration
+  watch(currentTrackKey, async () => {
+    const song = currentSong.value
+    if (!song) return
+    const myGen = ++loadGeneration
 
-      // 性能记录: 切歌加载起点 (供 perfRecorder 计算切歌延迟)
-      window.dispatchEvent(new CustomEvent('perf:load-start', { detail: { songId: song.id } }))
-      // 换歌时取消排队中的预解码,避免与本次解码抢 CPU
-      cancelPrefetch()
+    // 性能记录: 切歌加载起点 (供 perfRecorder 计算切歌延迟)
+    window.dispatchEvent(new CustomEvent('perf:load-start', { detail: { songId: song.id } }))
+    // 换歌时取消排队中的预解码,避免与本次解码抢 CPU
+    cancelPrefetch()
 
-      try {
-        // 第 1 步: 立即停止旧播放 + 静音 (AudioEngine 三层静音防护)
-        audioEngine.stopPlayback()
-        stopTimeUpdate()
-        currentTime.value = 0
-        // 切歌即结束上一首的记录 (幂等): 保证任何"停旧播新"路径都不会遗留心跳定时器
-        // 与旧记录引用; 即使新歌加载失败, 播放时长也已正确结算
-        void historyReady.then((store) => store.endHistoryRecord(audioEngine))
+    try {
+      // 第 1 步: 立即停止旧播放 + 静音 (AudioEngine 三层静音防护)
+      audioEngine.stopPlayback()
+      stopTimeUpdate()
+      currentTime.value = 0
+      // 切歌即结束上一首的记录 (幂等): 保证任何"停旧播新"路径都不会遗留心跳定时器
+      // 与旧记录引用; 即使新歌加载失败, 播放时长也已正确结算
+      void historyReady.then((store) => store.endHistoryRecord(audioEngine))
 
-        // 第 2 步: 初始化 AudioContext + 加载 Web Audio buffer (主链路, 优先)
-        audioEngine.init(volume.value)
-        const audioUrl = library.getAudioUrl(song.file_path)
-        const audioBuffer = await audioEngine.getAudioBuffer(audioUrl, song.id)
+      // 第 2 步: 初始化 AudioContext + 加载 Web Audio buffer (主链路, 优先)
+      audioEngine.init(volume.value)
+      const audioUrl = library.getAudioUrl(song.file_path)
+      const audioBuffer = await audioEngine.getAudioBuffer(audioUrl, song.id)
 
-        // await 期间用户又切了歌: 本次加载已过期, 放弃播放
-        // (最新一次 watch 调用持有最新令牌, 会完成实际播放)
-        if (myGen !== loadGeneration || currentSong.value?.id !== song.id) return
+      // await 期间用户又切了歌: 本次加载已过期, 放弃播放
+      // (最新一次 watch 调用持有最新令牌, 会完成实际播放)
+      if (myGen !== loadGeneration || currentSong.value?.id !== song.id) return
 
-        if (audioBuffer) {
-          audioEngine.setCurrentUrl(audioUrl)
-        }
+      if (audioBuffer) {
+        audioEngine.setCurrentUrl(audioUrl)
+      }
 
-        // 第 3 步: 并行加载 HTML5 Audio (仅用于元数据/MediaSession, 不发声)
-        //    放在 Web Audio 之后, 不阻塞主播放链路
-        void (async () => {
-          const player = await html5()
+      // 第 3 步: 并行加载 HTML5 Audio (仅用于元数据/MediaSession, 不发声)
+      //    放在 Web Audio 之后, 不阻塞主播放链路
+      void (async () => {
+        const player = await html5()
+        player.setVolume(0)
+        try {
+          await player.load(song.file_path)
+          // 加载完成时可能已切到别的歌, 校验后再写 MediaSession
+          if (myGen !== loadGeneration || currentSong.value?.id !== song.id) return
           player.setVolume(0)
-          try {
-            await player.load(song.file_path)
-            // 加载完成时可能已切到别的歌, 校验后再写 MediaSession
-            if (myGen !== loadGeneration || currentSong.value?.id !== song.id) return
-            player.setVolume(0)
-            player.setMediaSession(
-              song.title,
-              song.artist,
-              song.cover_path ? library.getCoverUrl(song.cover_path) : undefined
-            )
-          } catch (e) {
-            console.warn('[audioStore] HTML5 Audio 加载失败 (不影响播放):', e)
-          }
-        })()
-
-        // 第 4 步: 根据当前播放状态决定是否自动播放
-        //   (加载期间用户按了播放也能被捕捉到, 不再依赖加载前快照)
-        if (audioBuffer && (isPlaying.value || pendingPlay.value)) {
-          pendingPlay.value = false
-          // 先设 isPlaying = true (此时 isSwitchingSong 仍为 true, isPlaying watcher 会跳过, 不会重复播放)
-          isPlaying.value = true
-          await audioEngine.playFromOffset(0, () => {
-            // 播放开始时触发 history 记录(延迟加载: 拿到的 song 先固定下来)
-            const startedSong = currentSong.value
-            if (startedSong) {
-              void historyReady.then((store) => store.startHistoryRecord(startedSong, audioEngine))
-            }
-            // 性能记录: 实际出声时刻 (供 perfRecorder 计算切歌延迟)
-            window.dispatchEvent(
-              new CustomEvent('perf:playback-started', { detail: { songId: song.id } })
-            )
-          })
-          // 性能记录: 切歌分段明细(fetch/decode/start),仅定位用,不参与任何播放决策
-          const timings = audioEngine.getLastTimings()
-          if (timings) {
-            window.dispatchEvent(
-              new CustomEvent('perf:switch-trace', { detail: { songId: song.id, timings } })
-            )
-          }
-          // 播放已开始:把下一首预解码好,下次切歌就走 LRU 命中
-          schedulePrefetch()
-          // 最后才解除切歌锁
-          isSwitchingSong.value = false
-          startTimeUpdate()
-        } else {
-          // 不自动播放: 只更新 UI 状态, 保持暂停在 0:00
-          isSwitchingSong.value = false
-          pendingPlay.value = false
+          player.setMediaSession(
+            song.title,
+            song.artist,
+            song.cover_path ? library.getCoverUrl(song.cover_path) : undefined
+          )
+        } catch (e) {
+          console.warn('[audioStore] HTML5 Audio 加载失败 (不影响播放):', e)
         }
-      } catch (e) {
-        // 只有最新一次加载失败才重置状态, 过期调用的错误静默丢弃
-        if (myGen !== loadGeneration) return
-        console.error('[audioStore] 加载歌曲失败:', e)
+      })()
+
+      // 第 4 步: 根据当前播放状态决定是否自动播放
+      //   (加载期间用户按了播放也能被捕捉到, 不再依赖加载前快照)
+      if (audioBuffer && (isPlaying.value || pendingPlay.value)) {
+        pendingPlay.value = false
+        // 先设 isPlaying = true (此时 isSwitchingSong 仍为 true, isPlaying watcher 会跳过, 不会重复播放)
+        isPlaying.value = true
+        await audioEngine.playFromOffset(0, () => {
+          // 播放开始时触发 history 记录(延迟加载: 拿到的 song 先固定下来)
+          const startedSong = currentSong.value
+          if (startedSong) {
+            void historyReady.then((store) => store.startHistoryRecord(startedSong, audioEngine))
+          }
+          // 性能记录: 实际出声时刻 (供 perfRecorder 计算切歌延迟)
+          window.dispatchEvent(
+            new CustomEvent('perf:playback-started', { detail: { songId: song.id } })
+          )
+        })
+        // 性能记录: 切歌分段明细(fetch/decode/start),仅定位用,不参与任何播放决策
+        const timings = audioEngine.getLastTimings()
+        if (timings) {
+          window.dispatchEvent(
+            new CustomEvent('perf:switch-trace', { detail: { songId: song.id, timings } })
+          )
+        }
+        // 播放已开始:把下一首预解码好,下次切歌就走 LRU 命中
+        schedulePrefetch()
+        // 最后才解除切歌锁
+        isSwitchingSong.value = false
+        startTimeUpdate()
+      } else {
+        // 不自动播放: 只更新 UI 状态, 保持暂停在 0:00
         isSwitchingSong.value = false
         pendingPlay.value = false
-        isPlaying.value = false
       }
+    } catch (e) {
+      // 只有最新一次加载失败才重置状态, 过期调用的错误静默丢弃
+      if (myGen !== loadGeneration) return
+      console.error('[audioStore] 加载歌曲失败:', e)
+      isSwitchingSong.value = false
+      pendingPlay.value = false
+      isPlaying.value = false
     }
-  )
+  })
 
   // ========== isPlaying 变化(切歌过程中跳过, 防止重复触发) ==========
   watch(
@@ -959,12 +958,9 @@ export const useAudioStore = defineStore('audio', () => {
 
   void initAudioDeviceMonitor()
 
-  watch(
-    currentTrackKey,
-    () => {
-      void updateNativeMediaMetadata()
-    }
-  )
+  watch(currentTrackKey, () => {
+    void updateNativeMediaMetadata()
+  })
 
   watch(
     () => isPlaying.value,
@@ -1043,9 +1039,9 @@ export const useAudioStore = defineStore('audio', () => {
     resumeAudioContext: () => audioEngine.resumeContext(),
     reconcilePlaybackState,
     clearAudioBufferCache: () => {
-    cancelPrefetch()
-    audioEngine.clearCache()
-  },
+      cancelPrefetch()
+      audioEngine.clearCache()
+    },
     disconnectAnalyser: () => audioEngine.disconnectAnalyser(),
     reconnectAnalyser: () => audioEngine.reconnectAnalyser(),
   }

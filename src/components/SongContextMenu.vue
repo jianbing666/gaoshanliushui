@@ -286,7 +286,7 @@ onUnmounted(() => {
           >
             <div class="flex items-center gap-2 min-w-0">
               <Icon
-name="folder"
+                name="folder"
                 :size="14"
                 :class="
                   playlistMembership[pl.id] ? 'text-blue-500 shrink-0' : 'text-amber-500 shrink-0'

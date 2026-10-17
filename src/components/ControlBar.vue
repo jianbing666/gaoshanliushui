@@ -162,7 +162,12 @@ function toggleMute() {
             class="w-12 h-12 bg-gray-900 dark:bg-white rounded-full flex items-center justify-center hover:bg-gray-700 dark:hover:bg-gray-200 transition-colors shadow-lg"
             @click="player.togglePlay"
           >
-            <Icon v-if="player.isPlaying" name="pause" :size="20" class="text-white dark:text-gray-900" />
+            <Icon
+              v-if="player.isPlaying"
+              name="pause"
+              :size="20"
+              class="text-white dark:text-gray-900"
+            />
             <Icon v-else name="play" :size="20" class="text-white dark:text-gray-900 ml-0.5" />
           </button>
 

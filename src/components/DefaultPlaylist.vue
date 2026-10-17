@@ -25,7 +25,7 @@ function getSongCount(): number {
   >
     <!-- 音乐图标 -->
     <Icon
-name="music"
+      name="music"
       :size="16"
       :class="isActive ? 'text-blue-500 dark:text-blue-400' : 'text-gray-400 dark:text-gray-500'"
     />

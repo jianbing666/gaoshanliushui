@@ -413,7 +413,7 @@ onUnmounted(() => {
         >
           <h3 class="text-gray-900 dark:text-white text-sm font-semibold">外观</h3>
           <Icon
-v-if="settings.isSettingsSectionExpanded('appearance')"
+            v-if="settings.isSettingsSectionExpanded('appearance')"
             name="chevron-down"
             :size="16"
             class="text-gray-400 dark:text-gray-500"
@@ -451,7 +451,7 @@ v-if="settings.isSettingsSectionExpanded('appearance')"
         >
           <h3 class="text-gray-900 dark:text-white text-sm font-semibold">音乐库</h3>
           <Icon
-v-if="settings.isSettingsSectionExpanded('library')"
+            v-if="settings.isSettingsSectionExpanded('library')"
             name="chevron-down"
             :size="16"
             class="text-gray-400 dark:text-gray-500"
@@ -573,7 +573,7 @@ v-if="settings.isSettingsSectionExpanded('library')"
         >
           <h3 class="text-gray-900 dark:text-white text-sm font-semibold">系统</h3>
           <Icon
-v-if="settings.isSettingsSectionExpanded('system')"
+            v-if="settings.isSettingsSectionExpanded('system')"
             name="chevron-down"
             :size="16"
             class="text-gray-400 dark:text-gray-500"
@@ -942,7 +942,7 @@ v-if="settings.isSettingsSectionExpanded('system')"
         >
           <h3 class="text-gray-900 dark:text-white text-sm font-semibold">数据管理</h3>
           <Icon
-v-if="settings.isSettingsSectionExpanded('data')"
+            v-if="settings.isSettingsSectionExpanded('data')"
             name="chevron-down"
             :size="16"
             class="text-gray-400 dark:text-gray-500"
@@ -1062,12 +1062,17 @@ v-if="settings.isSettingsSectionExpanded('data')"
             </button>
           </div>
           <Icon
-v-if="settings.isSettingsSectionExpanded('shortcuts')"
+            v-if="settings.isSettingsSectionExpanded('shortcuts')"
             name="chevron-down"
             :size="16"
             class="text-gray-400 dark:text-gray-500 ml-2"
           />
-          <Icon v-else name="chevron-right" :size="16" class="text-gray-400 dark:text-gray-500 ml-2" />
+          <Icon
+            v-else
+            name="chevron-right"
+            :size="16"
+            class="text-gray-400 dark:text-gray-500 ml-2"
+          />
         </button>
 
         <div v-if="settings.isSettingsSectionExpanded('shortcuts')" class="space-y-2">
@@ -1145,7 +1150,7 @@ v-if="settings.isSettingsSectionExpanded('shortcuts')"
         >
           <h3 class="text-gray-900 dark:text-white text-sm font-semibold">背景图片</h3>
           <Icon
-v-if="settings.isSettingsSectionExpanded('background')"
+            v-if="settings.isSettingsSectionExpanded('background')"
             name="chevron-down"
             :size="16"
             class="text-gray-400 dark:text-gray-500"

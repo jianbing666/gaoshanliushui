@@ -241,6 +241,18 @@ async function waitForAppReady(cdp) {
   fail('30s 内应用未就绪(曲库为空或列表未渲染)')
 }
 
+/**
+ * 记录实际窗口尺寸。
+ *
+ * 内存/帧率都随渲染面积变化, 历史报告只写"默认窗口"无法复核; 这里把 CSS 像素、
+ * devicePixelRatio 与屏幕分辨率一起落盘, 复测有差异时先对齐这一项。
+ */
+async function getWindowInfo(cdp) {
+  return cdp.eval(
+    "(()=>({width:window.innerWidth,height:window.innerHeight,dpr:window.devicePixelRatio,screen:screen.width+'x'+screen.height}))()"
+  )
+}
+
 // ========== 采样器 ==========
 
 async function startSampler(rootPid, file) {
@@ -444,6 +456,7 @@ async function runMemCoreGroup(cdp, appPid) {
     log('内存样本数:', samples.length)
     return {
       generatedAt: new Date().toISOString(),
+      window: await getWindowInfo(cdp),
       caliber: {
         wsMB: '进程树工作集合计 (Win32_PerfFormattedData_PerfProc_Process.WorkingSet)',
         privMB: '进程树私有工作集合计 (WorkingSetPrivate, 任务管理器"内存"列口径)',
@@ -509,6 +522,7 @@ async function runMemScrollGroup(cdp, appPid) {
     log('内存样本数:', samples.length)
     return {
       generatedAt: new Date().toISOString(),
+      window: await getWindowInfo(cdp),
       caliber: '与 core 相同; 本组从启动后的干净状态起算滚动峰值',
       windows: Object.fromEntries(
         Object.entries(windows).map(([name, range]) => [
@@ -597,6 +611,7 @@ async function runLruGroup(cdp) {
 
   return {
     generatedAt: new Date().toISOString(),
+    window: await getWindowInfo(cdp),
     group: 'lru',
     loopMode: 'list',
     cacheLimitEntries: 3,
@@ -646,7 +661,7 @@ async function main() {
     generatedAt: new Date().toISOString(),
     executable: EXE,
     executableMtime: existsSync(EXE) ? statSync(EXE).mtime.toISOString() : null,
-    window: '默认窗口尺寸',
+    window: '各分组记录实际窗口尺寸(见 results.*.window)',
     results,
   }
   writeFileSync(OUT_PATH, JSON.stringify(output, null, 2), 'utf8')

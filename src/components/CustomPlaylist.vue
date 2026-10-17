@@ -37,7 +37,7 @@ function handleContextMenu(e: MouseEvent) {
     @contextmenu="handleContextMenu"
   >
     <Icon
-name="folder"
+      name="folder"
       :size="16"
       :class="isActive ? 'text-gray-600 dark:text-gray-400' : 'text-gray-400 dark:text-gray-500'"
     />

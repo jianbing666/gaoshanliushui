@@ -42,12 +42,8 @@ function probe(label, cmd, args, opts) {
       console.log(`${label.padEnd(40)} ${msg}`)
       resolve()
     }
-    child.on('error', (e) =>
-      done(`ERROR code=${e.code} errno=${e.errno} syscall=${e.syscall}`)
-    )
-    child.on('close', (c) =>
-      done(`OK exit=${c} stdout=${JSON.stringify(out.trim().slice(0, 24))}`)
-    )
+    child.on('error', (e) => done(`ERROR code=${e.code} errno=${e.errno} syscall=${e.syscall}`))
+    child.on('close', (c) => done(`OK exit=${c} stdout=${JSON.stringify(out.trim().slice(0, 24))}`))
     setTimeout(() => done('TIMEOUT'), 15000)
   })
 }

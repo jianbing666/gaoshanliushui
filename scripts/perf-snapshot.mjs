@@ -91,8 +91,10 @@ const rust = {
   binaryBytes: existsSync(binaryPath) ? statSync(binaryPath).size : null,
   binaryMtime: existsSync(binaryPath) ? statSync(binaryPath).mtime.toISOString() : null,
   installerBytes: installerPaths.length > 0 ? statSync(installerPaths[0]).size : null,
-  installerPath: installerPaths.length > 0 ? relative(ROOT, installerPaths[0]).replace(/\\/g, '/') : null,
-  installerMtime: installerPaths.length > 0 ? statSync(installerPaths[0]).mtime.toISOString() : null,
+  installerPath:
+    installerPaths.length > 0 ? relative(ROOT, installerPaths[0]).replace(/\\/g, '/') : null,
+  installerMtime:
+    installerPaths.length > 0 ? statSync(installerPaths[0]).mtime.toISOString() : null,
   allInstallers: installerPaths.map((full) => ({
     name: basename(full),
     bytes: statSync(full).size,
@@ -164,12 +166,16 @@ md.push('')
 if (frontend.exists) {
   md.push('| 指标 | 原始 | Gzip | Brotli |')
   md.push('| --- | ---: | ---: | ---: |')
-  md.push(`| 总计 (${frontend.fileCount} 个文件) | ${kb(frontend.totalBytes)} KB | ${kb(frontend.totalGzipBytes)} KB | ${kb(frontend.totalBrotliBytes)} KB |`)
+  md.push(
+    `| 总计 (${frontend.fileCount} 个文件) | ${kb(frontend.totalBytes)} KB | ${kb(frontend.totalGzipBytes)} KB | ${kb(frontend.totalBrotliBytes)} KB |`
+  )
   md.push('')
   md.push('| 类型 | 文件数 | 原始 | Gzip | Brotli |')
   md.push('| --- | ---: | ---: | ---: | ---: |')
   for (const item of frontend.byExt) {
-    md.push(`| ${item.ext} | ${item.count} | ${kb(item.bytes)} KB | ${kb(item.gzipBytes)} KB | ${kb(item.brotliBytes)} KB |`)
+    md.push(
+      `| ${item.ext} | ${item.count} | ${kb(item.bytes)} KB | ${kb(item.gzipBytes)} KB | ${kb(item.brotliBytes)} KB |`
+    )
   }
   md.push('')
   md.push('| 最大文件 | 原始 | Gzip |')
@@ -185,8 +191,12 @@ md.push('## 二、Rust 产物')
 md.push('')
 md.push('| 产物 | 体积 | 构建时间 |')
 md.push('| --- | ---: | --- |')
-md.push(`| release 二进制 | ${rust.binaryBytes === null ? '-' : mb(rust.binaryBytes) + ' MB'} | ${rust.binaryMtime ?? '-'} |`)
-md.push(`| NSIS 安装包 | ${rust.installerBytes === null ? '-' : mb(rust.installerBytes) + ' MB'} | ${rust.installerMtime ?? '-'} |`)
+md.push(
+  `| release 二进制 | ${rust.binaryBytes === null ? '-' : mb(rust.binaryBytes) + ' MB'} | ${rust.binaryMtime ?? '-'} |`
+)
+md.push(
+  `| NSIS 安装包 | ${rust.installerBytes === null ? '-' : mb(rust.installerBytes) + ' MB'} | ${rust.installerMtime ?? '-'} |`
+)
 md.push('')
 md.push('## 三、依赖与源码规模')
 md.push('')
@@ -210,4 +220,6 @@ console.log('  markdown/性能/性能数据快照.md')
 console.log(
   `前端 dist: ${frontend.fileCount} 文件, 原始 ${kb(frontend.totalBytes)} KB, gzip ${kb(frontend.totalGzipBytes)} KB, brotli ${kb(frontend.totalBrotliBytes)} KB`
 )
-console.log(`Rust 二进制: ${rust.binaryBytes === null ? '-' : mb(rust.binaryBytes) + ' MB'}, NSIS: ${rust.installerBytes === null ? '-' : mb(rust.installerBytes) + ' MB'}`)
+console.log(
+  `Rust 二进制: ${rust.binaryBytes === null ? '-' : mb(rust.binaryBytes) + ' MB'}, NSIS: ${rust.installerBytes === null ? '-' : mb(rust.installerBytes) + ' MB'}`
+)

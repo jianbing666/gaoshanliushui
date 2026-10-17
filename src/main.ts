@@ -8,7 +8,6 @@ import './styles/virtual-scroller.css'
 //   原因: Vue 组件挂载前可能错过事件, 且 webview 冻结后重启时
 //   监听器是 Rust 唤醒 webview 的唯一信号源
 
-
 // 记录 JS 启动基准时刻 (供按需加载的性能记录器计算启动耗时)
 const bootAt = performance.now()
 ;(window as unknown as { __bootAt?: number }).__bootAt = bootAt

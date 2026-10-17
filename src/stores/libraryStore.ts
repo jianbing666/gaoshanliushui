@@ -199,10 +199,7 @@ export const useLibraryStore = defineStore('library', () => {
   }
 
   /** 是否有可用的缩略图(与 getCoverThumbUrl 同口径, 供模板里做 v-if) */
-  function hasCoverThumb(
-    coverPath: string | null,
-    thumbPath: string | null | undefined
-  ): boolean {
+  function hasCoverThumb(coverPath: string | null, thumbPath: string | null | undefined): boolean {
     return !!getCoverThumbUrl(coverPath, thumbPath)
   }
 

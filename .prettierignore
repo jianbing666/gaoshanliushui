@@ -11,3 +11,6 @@ src-tauri/
 # 锁文件与文档不做格式化, 避免无意义的大 diff
 package-lock.json
 *.md
+
+# 性能记录/快照 JSON 由脚本生成, 格式化它们没有意义还可能破坏机器可读的原始数据
+markdown/性能/**/*.json
