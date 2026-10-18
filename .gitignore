@@ -99,9 +99,7 @@ mp4-test/
 *.sw?
 
 # ==================== Documentation ====================
-# 只忽略临时笔记, 正式项目文档必须纳入版本控制
-# 说明: 保留 *.md 的通配忽略, 正式文档统一放在 markdown/ 目录下并自动放行;
-#       根目录只保留 README; 新增的临时 md 默认不入库.
+# 只公开根目录 README; markdown/ 下的内部文档仅在本地维护, 不随仓库发布
 *.md
 !/README.md
-!/markdown/**/*.md
+markdown/
