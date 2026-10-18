@@ -26,6 +26,8 @@ vi.mock('@/audio/AudioEngine', () => {
     init: vi.fn(),
     getAudioBuffer: vi.fn(async () => null),
     getLastTimings: vi.fn(() => null),
+    isStreaming: false,
+    setStreamingMode: vi.fn(),
     prefetch: vi.fn(async () => {}),
     playFromOffset: vi.fn(async () => {}),
     pausePlayback: vi.fn(),

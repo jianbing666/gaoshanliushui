@@ -649,9 +649,13 @@ export const useAudioStore = defineStore('audio', () => {
   // 否则"收藏 / 编辑元数据"这类同曲目换对象的更新会被误判成换歌并把进度清零。
   let loadGeneration = 0
 
-  watch(currentTrackKey, async () => {
-    const song = currentSong.value
-    if (!song) return
+  /**
+   * 加载并播放指定曲目
+   *
+   * 切歌 watch 与"切换播放模式(流式 / 整曲解码)后重载"共用同一套流程,
+   * 保证两条路径的静音、计时、历史记录、预取行为完全一致。
+   */
+  async function loadCurrentSong(song: Song): Promise<void> {
     const myGen = ++loadGeneration
 
     // 性能记录: 切歌加载起点 (供 perfRecorder 计算切歌延迟)
@@ -743,7 +747,40 @@ export const useAudioStore = defineStore('audio', () => {
       pendingPlay.value = false
       isPlaying.value = false
     }
+  }
+
+  watch(currentTrackKey, () => {
+    const song = currentSong.value
+    if (!song) return
+    void loadCurrentSong(song)
   })
+
+  // ========== 播放模式: 流式播放(默认) / 整曲解码(回退) ==========
+  // 流式: 按需读取压缩字节喂 <audio>, 内存里不再常驻整曲 PCM(单曲约 70MB);
+  // 整曲解码: 旧实现, 命中 LRU 时切歌更快, 但每首歌都把 PCM 留在内存里。
+  // 默认开启流式, 设置页可随时关掉回退; 两种模式的活动源不同, 切换后必须整首重载。
+  audioEngine.setStreamingMode(settings.streamingPlayback)
+
+  watch(
+    () => settings.streamingPlayback,
+    (enabled) => {
+      if (audioEngine.isStreaming === enabled) return
+      const wasPlaying = isPlaying.value
+      // 记录切换前的位置: 切换模式要重建播放源, 从 0 开始会让用户"被倒带"
+      const resumeAt = audioEngine.getCurrentTime()
+      audioEngine.setStreamingMode(enabled)
+      const song = currentSong.value
+      if (!song) return
+      isSwitchingSong.value = true
+      pendingPlay.value = wasPlaying
+      isPlaying.value = false
+      void loadCurrentSong(song).then(() => {
+        if (wasPlaying && resumeAt > 0.5 && !isSwitchingSong.value) {
+          audioEngine.seekTo(resumeAt)
+        }
+      })
+    }
+  )
 
   // ========== isPlaying 变化(切歌过程中跳过, 防止重复触发) ==========
   watch(
@@ -1018,6 +1055,8 @@ export const useAudioStore = defineStore('audio', () => {
     // 工具
     getRandomIndex,
     getAnalyserNode: () => audioEngine.getAnalyserNode(),
+    // 仅性能测量/排障使用: 流式播放内部状态快照
+    getStreamingDebug: () => audioEngine.getStreamingDebug(),
     // 切歌/播放
     next,
     prev,

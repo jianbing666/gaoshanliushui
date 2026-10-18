@@ -650,6 +650,32 @@ onUnmounted(() => {
             </div>
           </div>
 
+          <!-- 流式播放 (P4-2): 可关闭以回退整曲解码 -->
+          <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
+            <div class="flex items-center justify-between">
+              <div>
+                <p class="text-gray-900 dark:text-white text-sm font-medium">流式播放（省内存）</p>
+                <p class="text-gray-500 dark:text-gray-400 text-xs">
+                  按需读取音频文件，不再把整首歌解码进内存；关闭后回退为整曲解码
+                </p>
+              </div>
+              <button
+                class="relative w-10 h-5 rounded-full transition-colors shrink-0"
+                :class="
+                  settings.streamingPlayback
+                    ? 'bg-blue-500 dark:bg-blue-600'
+                    : 'bg-gray-300 dark:bg-gray-600'
+                "
+                @click="settings.setStreamingPlayback(!settings.streamingPlayback)"
+              >
+                <div
+                  class="absolute top-0.5 w-4 h-4 bg-white dark:bg-gray-900 rounded-full shadow transition-transform"
+                  :class="settings.streamingPlayback ? 'translate-x-[22px]' : 'translate-x-0.5'"
+                ></div>
+              </button>
+            </div>
+          </div>
+
           <!-- 智能随机: 随机播放按权重抽样 (喜爱 / 常听 / 当日新增 加分, 常没听完 扣分) -->
           <div class="bg-gray-100/60 dark:bg-gray-800/60 rounded-lg p-3">
             <div class="flex items-center justify-between">

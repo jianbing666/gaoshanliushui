@@ -47,13 +47,15 @@ const TASKKILL = 'C:\\Windows\\System32\\taskkill.exe'
 const TASKLIST = 'C:\\Windows\\System32\\tasklist.exe'
 
 function parseArgs(argv) {
-  const out = { group: 'all', port: 9222, intervalMs: 300 }
+  const out = { group: 'all', port: 9222, intervalMs: 300, streaming: null, sessions: 'all' }
   for (let i = 0; i < argv.length; i++) {
     const key = argv[i]
     if (key === '--group') out.group = argv[++i]
     else if (key === '--port') out.port = Number(argv[++i])
     else if (key === '--out') out.out = argv[++i]
     else if (key === '--interval') out.intervalMs = Number(argv[++i])
+    else if (key === '--streaming') out.streaming = argv[++i]
+    else if (key === '--sessions') out.sessions = argv[++i]
   }
   out.out = out.out ?? 'markdown/性能/记录/2026-10-17-整应用口径-01.json'
   return out
@@ -345,6 +347,22 @@ async function recorderStop(cdp) {
   return cdp.eval('window.__perf.stop()')
 }
 
+/**
+ * 指定本次测量的播放模式(流式 / 整曲解码)
+ *
+ * 走 Pinia 里的设置 store(与设置页开关同一条路径), 因此测的就是用户真实会走的代码。
+ * 必须在首次播放前设置: audioStore 的 watch 在"当前没有歌曲"时只改标记不重载。
+ */
+async function setStreaming(cdp, enabled) {
+  const flag = await cdp.eval(
+    "(()=>{const app=document.getElementById('app');const pinia=app.__vue_app__.config.globalProperties.$pinia;const settings=pinia._s.get('settings');settings.setStreamingPlayback(" +
+      enabled +
+      ');return settings.streamingPlayback})()'
+  )
+  log('流式播放开关 =', flag)
+  return flag
+}
+
 async function setLoopMode(cdp, mode) {
   await cdp.eval(
     "(()=>{const app=document.getElementById('app');const pinia=app.__vue_app__.config.globalProperties.$pinia;const st=pinia.state.value;st.audio.loopMode=" +
@@ -371,6 +389,23 @@ async function waitForPlaying(cdp, index, timeoutMs = 8000) {
     await sleep(100)
   }
   return false
+}
+
+/**
+ * 引擎的流式播放调试快照: 确认本次测量真的走了 <audio> 流式, 而不是整曲 PCM。
+ * 老构建没有这个方法时返回 null。
+ */
+async function getStreamingDebug(cdp) {
+  return cdp.eval(
+    "(()=>{const app=document.getElementById('app');const pinia=app.__vue_app__.config.globalProperties.$pinia;const audio=pinia._s.get('audio');return typeof audio.getStreamingDebug==='function'?audio.getStreamingDebug():null})()"
+  )
+}
+
+/** 取 AnalyserNode 时域 RMS: >0 说明 Web Audio 链路真的有信号(不是只有界面状态) */
+async function getAnalyserRms(cdp) {
+  return cdp.eval(
+    "(()=>{const app=document.getElementById('app');const pinia=app.__vue_app__.config.globalProperties.$pinia;const audio=pinia._s.get('audio');const an=audio.getAnalyserNode&&audio.getAnalyserNode();if(!an)return null;const buf=new Float32Array(an.fftSize);an.getFloatTimeDomainData(buf);let sum=0;for(let i=0;i<buf.length;i++)sum+=buf[i]*buf[i];return Math.sqrt(sum/buf.length)})()"
+  )
 }
 
 async function getPlaybackState(cdp) {
@@ -437,6 +472,11 @@ async function runMemCoreGroup(cdp, appPid) {
     if (!(await startPlayback(cdp, 0))) log('警告: 首次播放未在 15s 内进入播放态')
     else log('已进入播放态, 等待 3s 稳定后开始采样')
     await sleep(3000)
+    // 证据: 流式是否真的生效 + 音频链路是否真有信号
+    const streamingDebug = await getStreamingDebug(cdp).catch(() => null)
+    const analyserRms = await getAnalyserRms(cdp).catch(() => null)
+    log('流式状态:', JSON.stringify(streamingDebug))
+    log('播放中 Analyser RMS:', analyserRms)
     from = Date.now()
     await sleep(12000)
     windows.playing = { from, to: Date.now() }
@@ -454,6 +494,9 @@ async function runMemCoreGroup(cdp, appPid) {
     }
     windows.switch = { from, to: Date.now() }
     const switchRecord = await recorderStop(cdp)
+    // 连切后的缓存状态: 解释"切歌峰值增量"到底落在哪(压缩字节 / 媒体缓冲)
+    const streamingDebugAfter = await getStreamingDebug(cdp).catch(() => null)
+    log('连切后流式状态:', JSON.stringify(streamingDebugAfter))
 
     const samples = readSamples(memFile)
     log('内存样本数:', samples.length)
@@ -474,6 +517,9 @@ async function runMemCoreGroup(cdp, appPid) {
         ])
       ),
       samples,
+      streamingDebug,
+      streamingDebugAfter,
+      analyserRms,
       switch: switchRecord
         ? {
             log: switchLog,
@@ -557,6 +603,86 @@ async function runMemScrollGroup(cdp, appPid) {
   } finally {
     stopSampler(sampler)
   }
+}
+
+// ========== 播放行为验证(两种模式都要过) ==========
+
+function storeEval(cdp, body) {
+  return cdp.eval(
+    "(()=>{const app=document.getElementById('app');const pinia=app.__vue_app__.config.globalProperties.$pinia;const audio=pinia._s.get('audio');" +
+      body +
+      '})()'
+  )
+}
+
+async function runPlaybackGroup(cdp) {
+  await setLoopMode(cdp, 'list')
+  const started = await startPlayback(cdp, 0)
+  if (!started) fail('播放组: 首次播放未进入播放态')
+  const evidence = {
+    streaming: await getStreamingDebug(cdp).catch(() => null),
+    rms: await getAnalyserRms(cdp).catch(() => null),
+  }
+  const checks = {}
+
+  // 1) 进度推进
+  const t1 = (await getPlaybackState(cdp)).time
+  await sleep(1500)
+  const t2 = (await getPlaybackState(cdp)).time
+  checks.progress = { from: t1, to: t2, ok: t2 - t1 > 1 }
+
+  // 2) 暂停: 界面状态与播放位置都应停住
+  await storeEval(cdp, 'audio.pause();return true')
+  await sleep(400)
+  const paused1 = await getPlaybackState(cdp)
+  await sleep(1200)
+  const paused2 = await getPlaybackState(cdp)
+  checks.pause = {
+    playing: paused2.playing,
+    drift: Math.round((paused2.time - paused1.time) * 1000) / 1000,
+    ok: !paused2.playing && Math.abs(paused2.time - paused1.time) < 0.15,
+  }
+
+  // 3) 恢复: 从暂停位置继续, 而不是回到 0
+  await storeEval(cdp, 'audio.play();return true')
+  await sleep(1500)
+  const resumed = await getPlaybackState(cdp)
+  checks.resume = {
+    from: paused2.time,
+    to: resumed.time,
+    ok: resumed.playing && resumed.time > paused2.time + 0.5,
+  }
+
+  // 4) seek 到接近结尾, 应自然结束并自动切下一首
+  const duration = resumed.duration || 0
+  if (duration > 5) {
+    await storeEval(cdp, 'audio.seekTo(' + (duration - 3) + ');return true')
+    const deadline = Date.now() + 15000
+    let after = null
+    while (Date.now() < deadline) {
+      after = await getPlaybackState(cdp)
+      if (after.index !== 0 && after.playing) break
+      await sleep(300)
+    }
+    checks.ended = {
+      index: after?.index ?? null,
+      playing: after?.playing ?? null,
+      ok: !!after && after.index !== 0 && after.playing,
+    }
+  } else {
+    checks.ended = { skipped: true, duration }
+  }
+
+  const result = {
+    generatedAt: new Date().toISOString(),
+    window: await getWindowInfo(cdp),
+    group: 'playback',
+    evidence,
+    checks,
+    allOk: Object.values(checks).every((item) => item.ok !== false),
+  }
+  log('播放行为:', JSON.stringify(result.checks))
+  return result
 }
 
 // ========== LRU 场景 ==========
@@ -660,6 +786,11 @@ async function withApp(run) {
   try {
     await waitForAppReady(cdp)
     log('窗口前台化:', foregroundWindow(appPid))
+    if (opts.streaming !== null) {
+      await setStreaming(cdp, opts.streaming !== 'off')
+      // 模式切换本身会重载当前曲目(此处尚未播放), 留一点时间让设置落库
+      await sleep(500)
+    }
     await sleep(1500)
     return await run(cdp, appPid)
   } finally {
@@ -677,9 +808,14 @@ async function main() {
     log('==== 开始 ' + group + ' 组 ====')
     if (group === 'mem') {
       const core = await withApp((cdp, appPid) => runMemCoreGroup(cdp, appPid))
-      log('---- 核心场景完成, 换新实例测滚动 ----')
-      const scroll = await withApp((cdp, appPid) => runMemScrollGroup(cdp, appPid))
+      let scroll = null
+      if (opts.sessions !== 'core') {
+        log('---- 核心场景完成, 换新实例测滚动 ----')
+        scroll = await withApp((cdp, appPid) => runMemScrollGroup(cdp, appPid))
+      }
       results.mem = { core, scroll }
+    } else if (group === 'playback') {
+      results.playback = await withApp((cdp) => runPlaybackGroup(cdp))
     } else if (group === 'lru') {
       results.lru = await withApp((cdp) => runLruGroup(cdp))
     } else {
@@ -694,6 +830,7 @@ async function main() {
     executable: EXE,
     executableMtime: existsSync(EXE) ? statSync(EXE).mtime.toISOString() : null,
     window: '各分组记录实际窗口尺寸(见 results.*.window)',
+    streaming: opts.streaming,
     results,
   }
   writeFileSync(OUT_PATH, JSON.stringify(output, null, 2), 'utf8')
@@ -702,6 +839,7 @@ async function main() {
   // 控制台摘要
   if (results.mem) {
     for (const [sessionName, session] of Object.entries(results.mem)) {
+      if (!session) continue
       log('--- ' + sessionName + ' ---')
       for (const [name, stats] of Object.entries(session.windows)) {
         if (!stats) continue

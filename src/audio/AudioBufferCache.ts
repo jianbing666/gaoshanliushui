@@ -25,11 +25,17 @@ export interface AudioCacheEntry<T> {
   lastUsed: number
 }
 
-export interface AudioCacheOptions {
+export interface AudioCacheOptions<T> {
   /** 最多保留几首;默认 3(当前 + 上一首 + 预解码的下一首) */
   maxEntries?: number
   /** 最多占用多少字节;默认 256MB,防御性上限 */
   maxBytes?: number
+  /**
+   * 条目被淘汰/覆盖/清空时的回调(可选)。
+   * 流式播放用它在淘汰时 revokeObjectURL,避免 blob 泄漏;
+   * buffer 模式不传,行为与旧实现完全一致。
+   */
+  onEvict?: (entry: AudioCacheEntry<T>) => void
 }
 
 export interface AudioCacheStats {
@@ -46,10 +52,12 @@ export class AudioBufferCache<T> {
   private pinnedSongId: string | null = null
   private maxEntries: number
   private maxBytes: number
+  private onEvict?: (entry: AudioCacheEntry<T>) => void
 
-  constructor(options: AudioCacheOptions = {}) {
+  constructor(options: AudioCacheOptions<T> = {}) {
     this.maxEntries = options.maxEntries ?? 3
     this.maxBytes = options.maxBytes ?? 256 * 1024 * 1024
+    this.onEvict = options.onEvict
   }
 
   get size(): number {
@@ -92,6 +100,8 @@ export class AudioBufferCache<T> {
 
   /** 写入/覆盖一首;随后按上限淘汰 */
   set(songId: string, url: string, value: T, bytes: number): void {
+    const previous = this.entries.get(songId)
+    if (previous) this.onEvict?.(previous)
     this.entries.set(songId, {
       songId,
       url,
@@ -104,12 +114,18 @@ export class AudioBufferCache<T> {
 
   delete(songId: string): boolean {
     if (this.pinnedSongId === songId) this.pinnedSongId = null
-    return this.entries.delete(songId)
+    const entry = this.entries.get(songId)
+    if (!entry) return false
+    this.entries.delete(songId)
+    this.onEvict?.(entry)
+    return true
   }
 
   clear(): void {
+    const entries = [...this.entries.values()]
     this.entries.clear()
     this.pinnedSongId = null
+    for (const entry of entries) this.onEvict?.(entry)
   }
 
   /** 钉住当前正在播放的一首(传 null 取消) */
@@ -138,6 +154,7 @@ export class AudioBufferCache<T> {
       // 只剩被钉住的一首时无法继续淘汰,直接退出避免死循环
       if (!victim) return
       this.entries.delete(victim.songId)
+      this.onEvict?.(victim)
     }
   }
 }

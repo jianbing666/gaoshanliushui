@@ -86,4 +86,43 @@ describe('AudioBufferCache', () => {
     expect(cache.bytes).toBe(42)
     expect(cache.stats).toMatchObject({ entries: 2, bytes: 42, maxEntries: 3 })
   })
+
+  // P4-2 流式播放依赖 onEvict 释放 objectURL:
+  // 漏掉任何一条淘汰路径都会造成 blob 泄漏(内存只增不减),所以逐条覆盖。
+  it('onEvict 在淘汰 / 覆盖 / 删除 / 清空时都会被调用', () => {
+    const evicted: string[] = []
+    const cache = new AudioBufferCache<string>({
+      maxEntries: 2,
+      onEvict: (entry) => evicted.push(entry.value),
+    })
+
+    cache.set('a', 'ua', 'a', 10)
+    cache.set('b', 'ub', 'b', 10)
+    cache.set('c', 'uc', 'c', 10) // 淘汰最久未使用的 a
+    expect(evicted).toEqual(['a'])
+
+    cache.set('b', 'ub2', 'b2', 20) // 覆盖 b
+    expect(evicted).toEqual(['a', 'b'])
+
+    cache.delete('c')
+    expect(evicted).toEqual(['a', 'b', 'c'])
+
+    cache.set('d', 'ud', 'd', 10)
+    cache.clear()
+    expect(evicted).toEqual(['a', 'b', 'c', 'b2', 'd'])
+  })
+
+  it('onEvict 抛出异常时不影响缓存状态', () => {
+    const cache = new AudioBufferCache<string>({
+      maxEntries: 1,
+      onEvict: () => {
+        throw new Error('revoke failed')
+      },
+    })
+    cache.set('a', 'ua', 'a', 10)
+    expect(() => cache.set('b', 'ub', 'b', 10)).toThrow()
+    // 抛错发生在删除之后, 所以 a 已被剔除、b 已写入
+    expect(cache.has('a')).toBe(false)
+    expect(cache.has('b')).toBe(true)
+  })
 })

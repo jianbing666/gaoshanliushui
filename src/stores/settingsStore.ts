@@ -207,6 +207,14 @@ export const useSettingsStore = defineStore('settings', () => {
     showSpectrum.value = value
   }
 
+  // ========== 流式播放 ==========
+  // P4-2: 开启时按需读取音频文件, 不再把整首歌解码进内存；关闭后回退为整曲解码
+  const streamingPlayback = ref<boolean>(Boolean(saved.streamingPlayback ?? true))
+
+  function setStreamingPlayback(value: boolean) {
+    streamingPlayback.value = value
+  }
+
   // ========== 智能随机 ==========
   //
   // 开启后, 随机播放按权重抽样 (喜爱 / 频繁播放 / 当天新增加分, 常没听完扣分),
@@ -524,6 +532,7 @@ export const useSettingsStore = defineStore('settings', () => {
       loudnessNormalization,
       loudnessMode,
       smartShuffle,
+      streamingPlayback,
     ],
     ([
       th,
@@ -539,6 +548,7 @@ export const useSettingsStore = defineStore('settings', () => {
       loudnessNorm,
       loudMode,
       smartShuffleVal,
+      streamingPlaybackVal,
     ]) => {
       if (settingsSaveTimer) {
         clearTimeout(settingsSaveTimer)
@@ -558,6 +568,7 @@ export const useSettingsStore = defineStore('settings', () => {
           loudnessNormalization: loudnessNorm,
           loudnessMode: loudMode,
           smartShuffle: smartShuffleVal,
+          streamingPlayback: streamingPlaybackVal,
         })
       }, 300)
     },
@@ -614,6 +625,9 @@ export const useSettingsStore = defineStore('settings', () => {
     resumeSpectrum,
     pauseAllBackgroundAnimations,
     resumeAllBackgroundAnimations,
+    // 流式播放
+    streamingPlayback,
+    setStreamingPlayback,
     // 智能随机
     smartShuffle,
     setSmartShuffle,
