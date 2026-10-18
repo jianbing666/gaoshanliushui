@@ -61,6 +61,19 @@ jobs:
     steps:
       - uses: actions/checkout@v4
 
+      # tauri::generate_context!() 在编译期读取 frontendDist(../dist);
+      # 干净的 checkout 里没有 dist/, 不先构建前端会让 clippy 直接编译失败。
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: 安装前端依赖
+        run: npm ci
+
+      - name: 构建前端产物（Rust 编译需要 dist/）
+        run: npx vite build
+
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
