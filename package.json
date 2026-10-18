@@ -16,7 +16,8 @@
     "format:check": "prettier --check .",
     "perf:snapshot": "node scripts/perf-snapshot.mjs",
     "perf:gate": "node scripts/perf-gate.mjs",
-    "perf:runtime": "node scripts/perf-runtime.mjs"
+    "perf:runtime": "node scripts/perf-runtime.mjs",
+    "ffmpeg:fetch": "node scripts/fetch-ffmpeg.mjs"
   },
   "dependencies": {
     "@tauri-apps/plugin-clipboard-manager": "^2.3.2",

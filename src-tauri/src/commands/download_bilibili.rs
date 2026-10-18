@@ -2,7 +2,8 @@
 // 解析视频分享链接 → 获取视频信息 → 下载音频流(m4a) → ffmpeg转mp3 → 下载封面
 //
 // FFmpeg 调用统一通过 Tauri 2 的 sidecar 机制实现,无需用户手动安装 ffmpeg:
-//   - 二进制位于 src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe
+//   - 二进制位于 src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe(不入库,
+//     构建/开发前由 scripts/fetch-ffmpeg.mjs 下载并校验,见 package.json 的 ffmpeg:fetch)
 //   - 通过 tauri-plugin-shell 的 app.shell().sidecar("ffmpeg") 调用
 //   - 运行时由 Tauri 解析为应用资源目录下的实际路径,自动跨环境(dev/build)适配
 //
@@ -377,10 +378,10 @@ pub async fn download_bilibili_music(
         return Err(format!("输出路径不是文件夹: {}", output_dir));
     }
 
-    // 探测 sidecar 是否可用,缺失即提前报错
+    // 探测 sidecar 是否可用,缺失即提前报错(开发/构建环境可运行 npm run ffmpeg:fetch 获取)
     app.shell().sidecar("ffmpeg").map_err(|_| {
         String::from(
-            "未找到内置 ffmpeg，请确认 src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe 存在",
+            "未找到内置 ffmpeg，请确认 src-tauri/binaries/ffmpeg-x86_64-pc-windows-msvc.exe 存在（可运行 npm run ffmpeg:fetch 下载）",
         )
     })?;
 

@@ -3,8 +3,8 @@
   "version": "1.3.0",
   "identifier": "com.gaoshanliushui.player",
   "build": {
-    "beforeBuildCommand": "npm run build",
-    "beforeDevCommand": "npm run dev",
+    "beforeBuildCommand": "npm run ffmpeg:fetch && npm run build",
+    "beforeDevCommand": "npm run ffmpeg:fetch && npm run dev",
     "frontendDist": "../dist",
     "devUrl": "http://localhost:1420",
     "removeUnusedCommands": true

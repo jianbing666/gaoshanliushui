@@ -35,6 +35,10 @@ src-tauri/target/
 src-tauri/WixTools/
 src-tauri/NSIS/
 
+# ffmpeg sidecar: 约 100MB, 由 scripts/fetch-ffmpeg.mjs 在构建/开发时下载, 不纳入版本控制
+src-tauri/binaries/*.exe
+src-tauri/binaries/.cache/
+
 # ==================== IDE / Editor ====================
 # VS Code
 .vscode/

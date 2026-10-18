@@ -24,7 +24,7 @@
 - **播放历史与统计**：去重展示历史、完整历史、今日/本月/本年/全部统计，可导出 Markdown。
 - **系统集成**：关闭到托盘、托盘隐藏时 WebView2 内存目标降级、开机自启、全局快捷键、MediaSession / Windows SMTC 媒体键、迷你模式、睡眠定时器。
 - **可定制外观**：浅色 / 深色 / 跟随系统、自定义字体、单图 / 轮播背景、毛玻璃效果、无边框窗口。
-- **可选扩展**：B 站音乐下载（内置 ffmpeg sidecar）。
+- **可选扩展**：B 站音乐下载与批量响度归一化（依赖构建时自动下载的 ffmpeg sidecar）。
 - **隐私优先**：不联网也能完整使用；数据从不离开本机。
 
 ![设置页](assets/screenshots/settings.png)
@@ -70,6 +70,7 @@
 - Node.js **22+**、npm
 - Rust **stable**（含 cargo）
 - Windows 10/11（WebView2 Runtime）；其他 Tauri 依赖见 [Tauri 前置条件](https://tauri.app/start/prerequisites/)
+- 首次构建/开发需要联网：脚本会下载 ffmpeg sidecar（约 105MB，固定版本 + sha256 校验），之后复用本地缓存
 
 ### 开发
 
@@ -87,17 +88,26 @@ npm run dev
 ### 构建
 
 ```bash
-# 完整打包：前端构建 + Rust release + NSIS 安装包
+# 完整打包：ffmpeg 准备 + 前端构建 + Rust release + NSIS 安装包
 npm run tauri build
+
+# 只想单独准备/校验 ffmpeg(离线或排障时)
+npm run ffmpeg:fetch
+node scripts/fetch-ffmpeg.mjs --check
 ```
+
+`tauri dev` / `tauri build` 的 `beforeDevCommand` / `beforeBuildCommand` 会自动调用
+`scripts/fetch-ffmpeg.mjs`：文件已存在且 sha256 匹配时只花约 0.2s；缺失时从 gyan.dev（GitHub release 备用）
+下载固定版本 ffmpeg，解压到 `src-tauri/binaries/` 并校验。下载的 zip 缓存在 `src-tauri/binaries/.cache/`，重复构建无需再下载。
 
 产物位置：
 
 - 可执行文件：`src-tauri/target/release/gaoshanliushui.exe`
 - 安装包：`src-tauri/target/release/bundle/nsis/高山流水_<版本>_x64-setup.exe`
 
-> 仓库内已包含 B 站下载所需的 ffmpeg sidecar（`src-tauri/binaries/`），首次 clone 体积约 100MB；
-> 如果不需要下载功能，可在本地删除该文件并把 `src-tauri/tauri.conf.json` 的 `externalBin` 一并去掉。
+> 仓库**不再跟踪** ffmpeg 二进制（约 100MB）；但 ffmpeg 是 B 站下载与响度归一化的运行时依赖，
+> 构建时必须就位（`tauri.conf.json` 的 `externalBin` 会把它打进安装包），因此首次构建会自动下载。
+> 如需完全离线构建，可提前把同版本 zip 放入 `src-tauri/binaries/.cache/`，脚本会复用缓存。
 
 ### 质量与性能命令
 
@@ -132,7 +142,7 @@ CI（`.github/workflows/ci.yml`）在 push / PR 时执行上述前端检查（�
 ├── src-tauri/            Rust 后端
 │   ├── src/commands/     命令（曲库、歌单、历史、回忆、托盘、下载、WebView2 内存…）
 │   ├── src/db.rs         SQLite 初始化与迁移
-│   └── binaries/         ffmpeg sidecar（B 站下载用）
+│   └── binaries/         ffmpeg sidecar（构建时由脚本下载，不入库）
 ├── assets/screenshots/   README 截图
 ├── scripts/              性能测量、体积门禁、快照脚本
 ├── markdown/             项目文档（介绍 / 方案 / 性能 / 汇报 / 调研 / 杂项）
@@ -160,6 +170,10 @@ CI（`.github/workflows/ci.yml`）在 push / PR 时执行上述前端检查（�
 - 遥测：无。没有账号、没有云端、没有第三方统计。
 
 ## 常见问题
+
+**为什么构建时要下载 ffmpeg？能离线吗？**
+ffmpeg 约 100MB，放进 git 会让 clone 和仓库体积都变大，所以改为构建时下载并做 sha256 校验。
+离线构建可以提前把 `ffmpeg-8.1.2-essentials_build.zip` 放进 `src-tauri/binaries/.cache/`，脚本会直接复用。
 
 **支持哪些格式？**
 当前以 MP3 / MP4 为主；扫描与 ID3 解析针对本地文件，其他格式是否可播取决于 WebView2 的解码支持。
