@@ -50,6 +50,9 @@ windows = { version = "0.61", features = [
 ] }
 # 注意: #[implement] 宏生成的代码引用 ::windows_core, 必须声明为直接依赖
 windows-core = "0.61"
+# P4-1: 调用 WebView2 的 MemoryUsageTargetLevel API(隐藏/最小化时降内存)
+# 版本必须与 wry 0.55 使用的一致, 否则 COM 接口类型无法互通
+webview2-com = "0.38"
 
 [features]
 default = ["custom-protocol"]

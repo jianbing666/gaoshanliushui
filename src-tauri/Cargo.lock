@@ -1357,6 +1357,7 @@ dependencies = [
  "tauri-plugin-single-instance",
  "tokio",
  "walkdir",
+ "webview2-com",
  "windows 0.61.3",
  "windows-core 0.61.2",
 ]

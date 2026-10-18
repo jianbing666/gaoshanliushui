@@ -41,6 +41,23 @@ impl Default for AppSettings {
     }
 }
 
+/// P4-1: 后台线程里循环尝试设置 WebView2 内存等级, 直到成功或确认不支持。
+///
+/// 为什么需要循环重试: with_webview 投递到主线程时, 如果正好赶上窗口
+/// hide/show 的过渡期, 拿不到 CoreWebView2 的概率不低(实测约 20~30%)。
+/// 每次尝试内部还带 3 次快速重试; 整体最多约 3 秒, 成功即退出。
+fn spawn_memory_level_change(app: &tauri::AppHandle, low: bool) {
+    let handle = app.clone();
+    std::thread::spawn(move || {
+        for _ in 0..12 {
+            if webview_memory::set_memory_usage_low(&handle, low).is_ok() {
+                return;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(250));
+        }
+    });
+}
+
 fn main() {
     tauri::Builder::default()
         .plugin(tauri_plugin_single_instance::init(|app, _argv, _cwd| {
@@ -50,6 +67,8 @@ fn main() {
                 let _ = window.unminimize();
                 let _ = window.set_focus();
             }
+            // P4-1: 窗口重新可见, 恢复 WebView2 正常内存等级
+            spawn_memory_level_change(app, false);
         }))
         .plugin(tauri_plugin_autostart::init(
             tauri_plugin_autostart::MacosLauncher::LaunchAgent,
@@ -134,14 +153,27 @@ fn main() {
             Ok(())
         })
         .on_window_event(|window, event| {
-            if let tauri::WindowEvent::CloseRequested { api, .. } = event {
-                let app = window.app_handle();
-                let settings = app.state::<AppSettings>();
-                let minimize = settings.minimize_to_tray.lock().unwrap();
-                if *minimize {
-                    api.prevent_close();
-                    let _ = window.hide();
+            let app = window.app_handle();
+            match event {
+                tauri::WindowEvent::CloseRequested { api, .. } => {
+                    let settings = app.state::<AppSettings>();
+                    let minimize = settings.minimize_to_tray.lock().unwrap();
+                    if *minimize {
+                        api.prevent_close();
+                        let _ = window.hide();
+                        // P4-1: 隐藏到托盘后降低 WebView2 内存目标
+                        spawn_memory_level_change(app, true);
+                    }
                 }
+                // 注意: 不在 Resized 里处理"最小化"。
+                //   窗口创建阶段也可能触发 Resized, 曾观测到启动时被误设为 Low;
+                //   而任务栏最小化本身已由 Chromium 的遮挡检测降级, 不需要额外干预。
+                //   这里只在真正的"隐藏到托盘"(CloseRequested)与"重新显示"路径切换等级。
+                // 兜底: 任何方式重新获得焦点都恢复正常等级
+                tauri::WindowEvent::Focused(true) => {
+                    spawn_memory_level_change(app, false);
+                }
+                _ => {}
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -160,6 +192,9 @@ fn main() {
             download_bilibili::read_batch_file,
             // 2026-07-14: WebView2 内存优化 (切歌时主动触发一次 major GC)
             webview_memory::clean_renderer_memory,
+            // P4-1: 查询当前 WebView2 内存等级(诊断/自动化测试用)
+            webview_memory::get_webview_memory_level,
+            webview_memory::get_webview_memory_status,
             // Memory feature - 高山流水 v1.1: 回忆 CRUD + 导出
             memories::get_memory,
             memories::save_memory,

@@ -51,6 +51,8 @@ pub fn init_tray(app: &AppHandle) -> Result<(), String> {
                     let _ = win.show();
                     let _ = win.set_focus();
                 }
+                // P4-1: 重新显示后恢复 WebView2 正常内存等级
+                crate::spawn_memory_level_change(app, false);
             }
             "play-pause" => {
                 if let Some(win) = app.get_webview_window("main") {
