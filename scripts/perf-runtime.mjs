@@ -422,6 +422,9 @@ async function runMemCoreGroup(cdp, appPid) {
   log('内存采样器已启动:', memFile)
   const windows = {}
   try {
+    // 切歌/内存场景统一用顺序播放: 随机模式下"下一首"不可预测, playByIndex 也不会
+    // 消费随机预选, 会导致所有切歌都变成未命中(实测踩过这个坑, 数据全废)。
+    await setLoopMode(cdp, 'list')
     log('等待应用稳定 (后台缩略图补齐/懒加载) 8s …')
     await sleep(8000)
 
@@ -492,6 +495,9 @@ async function runMemScrollGroup(cdp, appPid) {
   log('内存采样器已启动:', memFile)
   const windows = {}
   try {
+    // 切歌/内存场景统一用顺序播放: 随机模式下"下一首"不可预测, playByIndex 也不会
+    // 消费随机预选, 会导致所有切歌都变成未命中(实测踩过这个坑, 数据全废)。
+    await setLoopMode(cdp, 'list')
     log('等待应用稳定 (后台缩略图补齐/懒加载) 8s …')
     await sleep(8000)
     // 滚动前基线: 不播放, 保证滚动峰值从干净状态起算
@@ -621,6 +627,30 @@ async function runLruGroup(cdp) {
 
 // ========== 主流程 ==========
 
+/**
+ * 把主窗口拉到前台。
+ *
+ * 为什么必须做: Windows 的遮挡检测会让 Chromium 在窗口被其他窗口盖住时丢弃
+ * 合成/光栅资源, 内存读数可相差 300~500MB; 后台渲染还会降低解码优先级,
+ * 切歌延迟会从 15ms 量级劣化到几百毫秒。不拉前台测出来的数字没有可比性。
+ */
+function foregroundWindow(appPid) {
+  const result = spawnSync(
+    POWERSHELL,
+    [
+      '-NoProfile',
+      '-ExecutionPolicy',
+      'Bypass',
+      '-File',
+      resolve(ROOT, 'scripts', 'win-foreground.ps1'),
+      '-ProcId',
+      String(appPid),
+    ],
+    { encoding: 'utf8' }
+  )
+  return ((result.stdout ?? '') + (result.stderr ?? '')).trim()
+}
+
 async function withApp(run) {
   ensureSingleInstance()
   const spawnPid = launchApp()
@@ -629,6 +659,8 @@ async function withApp(run) {
   const cdp = await Cdp.connect(opts.port)
   try {
     await waitForAppReady(cdp)
+    log('窗口前台化:', foregroundWindow(appPid))
+    await sleep(1500)
     return await run(cdp, appPid)
   } finally {
     cdp.close()
